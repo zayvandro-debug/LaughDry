@@ -1,0 +1,8 @@
+{
+	"appId": "com.laughdry.app",
+	"appName": "LaughDry Kita",
+	"webDir": "dist",
+	"server": {
+		"androidScheme": "https"
+	}
+}

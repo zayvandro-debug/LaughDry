@@ -1,0 +1,246 @@
+{
+  "entities": {
+    "Tenant": {
+      "title": "Tenant",
+      "description": "Dokumen Profil Tenant (Pemilik Bisnis Laundry)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "businessName": { "type": "string" },
+        "email": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessName", "email"]
+    },
+    "Branch": {
+      "title": "Branch",
+      "description": "Tabel Cabang Laundry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "address": { "type": "string" },
+        "phone": { "type": "string" }
+      },
+      "required": ["id", "name", "address", "phone"]
+    },
+    "Employee": {
+      "title": "Employee",
+      "description": "Tabel Data Akun & Login Karyawan Cabang",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["kasir", "karyawan", "admin"] },
+        "username": { "type": "string" },
+        "password": { "type": "string", "description": "PIN atau Password Login Karyawan" },
+        "isActive": { "type": "boolean" },
+        "branchId": { "type": "string" }
+      },
+      "required": ["id", "name", "role", "username", "password", "isActive", "branchId"]
+    },
+    "Service": {
+      "title": "Service",
+      "description": "Tabel Layanan yang Dapat Dikonfigurasi (Global per Tenant)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string", "enum": ["kiloan", "satuan"] },
+        "price": { "type": "number" },
+        "unit": { "type": "string" },
+        "estimateHours": { "type": "integer" },
+        "isActive": { "type": "boolean" },
+        "promiseName": { "type": "string" },
+        "promiseDurationText": { "type": "string" }
+      },
+      "required": ["id", "name", "category", "price", "unit", "estimateHours", "isActive"]
+    },
+    "Perfume": {
+      "title": "Perfume",
+      "description": "Tabel Pilihan Aroma Parfum (Global per Tenant)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["id", "name", "isActive"]
+    },
+    "SystemSettings": {
+      "title": "SystemSettings",
+      "description": "Tabel Pengaturan Sistem Laundry (Doc Tunggal per Tenant)",
+      "type": "object",
+      "properties": {
+        "logoUrl": { "type": "string" },
+        "pointsMultiplier": { "type": "number" },
+        "pointsValue": { "type": "number" },
+        "bluetoothPrinterAddress": { "type": "string" }
+      },
+      "required": ["logoUrl", "pointsMultiplier", "pointsValue", "bluetoothPrinterAddress"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Tabel Pelanggan CRM (Global per Tenant)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "depositBalance": { "type": "number" },
+        "loyaltyPoints": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "lastActive": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "phone", "depositBalance", "loyaltyPoints", "createdAt"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Tabel Pengeluaran Laundry Cabang",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "amount": { "type": "number" },
+        "date": { "type": "string", "format": "date-time" },
+        "recordedBy": { "type": "string", "description": "employeeId atau userUid" }
+      },
+      "required": ["id", "description", "category", "amount", "date", "recordedBy"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Tabel Transaksi Utama Laundry Cabang",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "invoiceNumber": { "type": "string" },
+        "customerId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "services": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "serviceId": { "type": "string" },
+              "name": { "type": "string" },
+              "qty": { "type": "number" },
+              "price": { "type": "number" },
+              "subtotal": { "type": "number" }
+            },
+            "required": ["serviceId", "name", "qty", "price", "subtotal"]
+          }
+        },
+        "perfumeId": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["Cash", "QRIS", "Transfer", "Deposit"] },
+        "paymentStatus": { "type": "string", "enum": ["Lunas", "Belum Lunas"] },
+        "status": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "estimatedCompletion": { "type": "string", "format": "date-time" },
+        "pointsEarned": { "type": "integer" },
+        "createdBy": { "type": "string", "description": "employeeId pencatat order" }
+      },
+      "required": [
+        "id",
+        "invoiceNumber",
+        "customerId",
+        "customerName",
+        "customerPhone",
+        "services",
+        "totalAmount",
+        "paymentMethod",
+        "paymentStatus",
+        "status",
+        "createdAt",
+        "updatedAt",
+        "estimatedCompletion",
+        "pointsEarned",
+        "createdBy"
+      ]
+    },
+    "AttendanceRecord": {
+      "title": "AttendanceRecord",
+      "description": "Tabel Absensi Karyawan harian per Cabang",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "checkIn": { "type": "string", "format": "date-time" },
+        "checkOut": { "type": "string", "format": "date-time" },
+        "workDuration": { "type": "integer" },
+        "status": { "type": "string", "enum": ["Hadir", "Selesai"] },
+        "notes": { "type": "string" },
+        "latLong": { "type": "string" }
+      },
+      "required": ["id", "checkIn", "status"]
+    },
+    "PushNotification": {
+      "title": "PushNotification",
+      "description": "Notifikasi Push Real-Time untuk Owner",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "body": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "invoiceNumber": { "type": "string" },
+        "amount": { "type": "number" },
+        "cashierName": { "type": "string" },
+        "isRead": { "type": "boolean" }
+      },
+      "required": ["id", "title", "body", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/tenants/{ownerUid}": {
+      "schema": "Tenant",
+      "description": "Koleksi tenant pemilik bisnis laundry"
+    },
+    "/tenants/{ownerUid}/branches/{branchId}": {
+      "schema": "Branch",
+      "description": "Subkoleksi cabang laundry milik tenant"
+    },
+    "/tenants/{ownerUid}/branches/{branchId}/employees/{employeeId}": {
+      "schema": "Employee",
+      "description": "Subkoleksi karyawan yang terdaftar di masing-masing cabang"
+    },
+    "/tenants/{ownerUid}/services/{serviceId}": {
+      "schema": "Service",
+      "description": "Koleksi variasi layanan global per tenant"
+    },
+    "/tenants/{ownerUid}/perfumes/{perfumeId}": {
+      "schema": "Perfume",
+      "description": "Koleksi pilihan aroma parfum global per tenant"
+    },
+    "/tenants/{ownerUid}/settings/general": {
+      "schema": "SystemSettings",
+      "description": "Dokumen tunggal pengaturan sistem laundry per tenant"
+    },
+    "/tenants/{ownerUid}/customers/{customerId}": {
+      "schema": "Customer",
+      "description": "Koleksi CRM pelanggan global per tenant"
+    },
+    "/tenants/{ownerUid}/branches/{branchId}/expenses/{expenseId}": {
+      "schema": "Expense",
+      "description": "Koleksi pengeluaran laundry per cabang"
+    },
+    "/tenants/{ownerUid}/branches/{branchId}/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Koleksi transaksi order laundry per cabang"
+    },
+    "/tenants/{ownerUid}/branches/{branchId}/employees/{employeeId}/attendance/{attendanceId}": {
+      "schema": "AttendanceRecord",
+      "description": "Pencatatan absensi harian per karyawan"
+    },
+    "/tenants/{ownerUid}/notifications/{notificationId}": {
+      "schema": "PushNotification",
+      "description": "Koleksi notifikasi push real-time FCM untuk owner tenant"
+    }
+  }
+}

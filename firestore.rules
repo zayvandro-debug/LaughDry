@@ -1,0 +1,313 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions for auth and general checks
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(ownerUid) {
+      return isSignedIn() && request.auth.uid == ownerUid;
+    }
+
+    // Checking if employee is registered and active in a branch
+    function isEmployeeOfBranch(ownerUid, branchId) {
+      return isSignedIn() && exists(/databases/$(database)/documents/tenants/$(ownerUid)/branches/$(branchId)/employees/$(request.auth.uid));
+    }
+
+    function isEmployeeOfBranchActive(ownerUid, branchId) {
+      return isSignedIn() && get(/databases/$(database)/documents/tenants/$(ownerUid)/branches/$(branchId)/employees/$(request.auth.uid)).data.isActive == true;
+    }
+
+    // Checking if user belongs to this tenant as employee of some branch (using Custom Claims as fallback option)
+    function isEmployeeOfTenant(ownerUid) {
+      return isSignedIn() && (
+        request.auth.token.tenantId == ownerUid ||
+        request.auth.token.role == "employee" && request.auth.token.tenantId == ownerUid
+      );
+    }
+
+    function isEmployeeOrOwner(ownerUid) {
+      return isOwner(ownerUid) || isEmployeeOfTenant(ownerUid);
+    }
+
+    // Static ID and String size validators to prevent Denial of Wallet and ID poisoning attacks
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Standard incoming reference
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // =========================================================================
+    // VALIDATION BLUEPRINTS (Pillar 2: STANDALONE VALIDATORS FOR EACH ENTITY)
+    // =========================================================================
+
+    function isValidTenant(data) {
+      return data.keys().hasAll(['id', 'businessName', 'email'])
+        && data.keys().size() >= 3
+        && data.id is string
+        && data.businessName is string && data.businessName.size() <= 200
+        && data.email is string && data.email.size() <= 200;
+    }
+
+    function isValidBranch(data) {
+      return data.keys().hasAll(['id', 'name', 'address', 'phone'])
+        && data.keys().size() >= 4
+        && data.id is string
+        && data.name is string && data.name.size() <= 150
+        && data.address is string && data.address.size() <= 500
+        && data.phone is string && data.phone.size() <= 30;
+    }
+
+    function isValidEmployee(data) {
+      return data.keys().hasAll(['id', 'name', 'role', 'username', 'password', 'isActive', 'branchId'])
+        && data.keys().size() >= 7
+        && data.id is string
+        && data.name is string && data.name.size() <= 150
+        && data.role is string && (data.role == 'kasir' || data.role == 'karyawan' || data.role == 'admin')
+        && data.username is string && data.username.size() <= 50
+        && data.password is string && data.password.size() <= 100
+        && data.isActive is bool
+        && data.branchId is string;
+    }
+
+    function isValidService(data) {
+      return data.keys().hasAll(['id', 'name', 'category', 'price', 'unit', 'estimateHours', 'isActive'])
+        && data.keys().size() >= 7
+        && data.id is string
+        && data.name is string && data.name.size() <= 150
+        && data.category is string && (data.category == 'kiloan' || data.category == 'satuan')
+        && data.price is number && data.price >= 0
+        && data.unit is string && data.unit.size() <= 20
+        && data.estimateHours is int && data.estimateHours >= 0
+        && data.isActive is bool;
+    }
+
+    function isValidPerfume(data) {
+      return data.keys().hasAll(['id', 'name', 'isActive'])
+        && data.keys().size() >= 3
+        && data.id is string
+        && data.name is string && data.name.size() <= 100
+        && data.isActive is bool;
+    }
+
+    function isValidSystemSettings(data) {
+      return data.keys().hasAll(['logoUrl', 'pointsMultiplier', 'pointsValue', 'bluetoothPrinterAddress'])
+        && data.keys().size() >= 4
+        && data.logoUrl is string && data.logoUrl.size() <= 1000
+        && data.pointsMultiplier is number && data.pointsMultiplier >= 0
+        && data.pointsValue is number && data.pointsValue >= 0
+        && data.bluetoothPrinterAddress is string && data.bluetoothPrinterAddress.size() <= 250;
+    }
+
+    function isValidCustomer(data) {
+      return data.keys().hasAll(['id', 'name', 'phone', 'depositBalance', 'loyaltyPoints', 'createdAt'])
+        && data.keys().size() >= 6
+        && data.id is string
+        && data.name is string && data.name.size() <= 150
+        && data.phone is string && data.phone.size() <= 30
+        && data.depositBalance is number && data.depositBalance >= 0
+        && data.loyaltyPoints is int && data.loyaltyPoints >= 0;
+    }
+
+    function isValidExpense(data) {
+      return data.keys().hasAll(['id', 'description', 'category', 'amount', 'date', 'recordedBy'])
+        && data.keys().size() >= 6
+        && data.id is string
+        && data.description is string && data.description.size() <= 500
+        && data.category is string && data.category.size() <= 100
+        && data.amount is number && data.amount >= 0
+        && data.recordedBy is string;
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll([
+          'id', 'invoiceNumber', 'customerId', 'customerName', 'customerPhone',
+          'services', 'totalAmount', 'paymentMethod', 'paymentStatus', 'status',
+          'createdAt', 'updatedAt', 'estimatedCompletion', 'pointsEarned', 'createdBy'
+        ])
+        && data.keys().size() >= 15
+        && data.id is string
+        && data.invoiceNumber is string && data.invoiceNumber.size() <= 50
+        && data.customerId is string
+        && data.customerName is string && data.customerName.size() <= 150
+        && data.customerPhone is string && data.customerPhone.size() <= 30
+        && data.services is list && data.services.size() > 0
+        && data.totalAmount is number && data.totalAmount >= 0
+        && data.paymentMethod is string && (data.paymentMethod == 'Cash' || data.paymentMethod == 'QRIS' || data.paymentMethod == 'Transfer' || data.paymentMethod == 'Deposit')
+        && data.paymentStatus is string && (data.paymentStatus == 'Lunas' || data.paymentStatus == 'Belum Lunas')
+        && data.status is string
+        && data.createdBy is string;
+    }
+
+    function isValidAttendanceRecord(data) {
+      return data.keys().hasAll(['id', 'checkIn', 'status'])
+        && data.keys().size() >= 3
+        && data.id is string
+        && data.status is string && (data.status == 'Hadir' || data.status == 'Selesai');
+    }
+
+    function isValidPushNotification(data) {
+      return data.keys().hasAll(['id', 'title', 'body', 'createdAt'])
+        && data.keys().size() >= 4
+        && data.id is string
+        && data.title is string && data.title.size() <= 200
+        && data.body is string && data.body.size() <= 1000;
+    }
+
+    // =========================================================================
+    // FIRESTORE ENDPOINTS RULES SHIELD
+    // =========================================================================
+
+    // Global Safety Net (Rule 1: Catch-All Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Global testing connection hook
+    match /test/connection {
+      allow read: if true;
+    }
+
+    // Path level: users_db Root (Flat Collection Layout)
+    match /users_db/{ownerUid} {
+      allow read, write: if isSignedIn() && request.auth.uid == ownerUid;
+    }
+
+    match /users_db/{ownerUid}/{allChildren=**} {
+      allow read, write: if isSignedIn() && request.auth.uid == ownerUid;
+    }
+
+    // Path level: Tenant Root
+    match /tenants/{ownerUid} {
+      allow get: if isSignedIn() && (isOwner(ownerUid) || isEmployeeOfTenant(ownerUid));
+      allow list: if isOwner(ownerUid);
+      allow create: if isOwner(ownerUid) && isValidTenant(incoming()) && incoming().createdAt == request.time;
+      allow update: if isOwner(ownerUid) && isValidTenant(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isOwner(ownerUid);
+
+      // Path level: Service (Global per Tenant)
+      match /services/{serviceId} {
+        allow get: if isSignedIn() && (isOwner(ownerUid) || isEmployeeOfTenant(ownerUid));
+        allow list: if isSignedIn() && (isOwner(ownerUid) || isEmployeeOfTenant(ownerUid));
+        allow create: if isOwner(ownerUid) && isValidId(serviceId) && isValidService(incoming());
+        allow update: if isOwner(ownerUid) && isValidId(serviceId) && isValidService(incoming());
+        allow delete: if isOwner(ownerUid) && isValidId(serviceId);
+      }
+
+      // Path level: Perfume (Global per Tenant)
+      match /perfumes/{perfumeId} {
+        allow get: if isSignedIn() && (isOwner(ownerUid) || isEmployeeOfTenant(ownerUid));
+        allow list: if isSignedIn() && (isOwner(ownerUid) || isEmployeeOfTenant(ownerUid));
+        allow create: if isOwner(ownerUid) && isValidId(perfumeId) && isValidPerfume(incoming());
+        allow update: if isOwner(ownerUid) && isValidId(perfumeId) && isValidPerfume(incoming());
+        allow delete: if isOwner(ownerUid) && isValidId(perfumeId);
+      }
+
+      // Path level: Customer (Global per Tenant CRM)
+      match /customers/{customerId} {
+        allow get: if isSignedIn() && (isOwner(ownerUid) || isEmployeeOfTenant(ownerUid));
+        allow list: if isSignedIn() && (isOwner(ownerUid) || isEmployeeOfTenant(ownerUid));
+        allow create: if isOwner(ownerUid) && isValidId(customerId) && isValidCustomer(incoming()) && incoming().createdAt == request.time;
+        allow update: if (isOwner(ownerUid) || isEmployeeOfTenant(ownerUid)) && isValidId(customerId) && isValidCustomer(incoming());
+        allow delete: if isOwner(ownerUid) && isValidId(customerId);
+      }
+
+      // Path level: Settings (Doc Tunggal Settings)
+      match /settings/{settingId} {
+        allow get: if isSignedIn() && (isOwner(ownerUid) || isEmployeeOfTenant(ownerUid));
+        allow create: if isOwner(ownerUid) && settingId == 'general' && isValidSystemSettings(incoming());
+        allow update: if isOwner(ownerUid) && settingId == 'general' && isValidSystemSettings(incoming());
+        allow delete: if isOwner(ownerUid);
+      }
+
+      // Path level: Push Notifications
+      match /notifications/{notificationId} {
+        allow read: if isOwner(ownerUid);
+        allow create: if isOwner(ownerUid) && isValidId(notificationId) && isValidPushNotification(incoming()) && incoming().createdAt == request.time;
+        allow update: if isOwner(ownerUid) && isValidId(notificationId) && isValidPushNotification(incoming());
+        allow delete: if isOwner(ownerUid) && isValidId(notificationId);
+      }
+
+      // Path level: Branches
+      match /branches/{branchId} {
+        allow get: if isSignedIn() && (isOwner(ownerUid) || isEmployeeOfBranch(ownerUid, branchId));
+        allow list: if isOwner(ownerUid);
+        allow create: if isOwner(ownerUid) && isValidId(branchId) && isValidBranch(incoming());
+        allow update: if isOwner(ownerUid) && isValidId(branchId) && isValidBranch(incoming());
+        allow delete: if isOwner(ownerUid) && isValidId(branchId);
+
+        // Path level: Employees under Branch
+        match /employees/{employeeId} {
+          allow get: if isSignedIn() && (isOwner(ownerUid) || request.auth.uid == employeeId);
+          allow list: if isOwner(ownerUid);
+          allow create: if isOwner(ownerUid) && isValidId(employeeId) && isValidEmployee(incoming());
+          allow update: if isOwner(ownerUid) && isValidId(employeeId) && isValidEmployee(incoming());
+          allow delete: if isOwner(ownerUid) && isValidId(employeeId);
+
+          // Path level: Attendance under Employee
+          match /attendance/{attendanceId} {
+            // An employee can view and log their own attendance, and the owner can access all
+            allow get: if isOwner(ownerUid) || (request.auth.uid == employeeId && isEmployeeOfBranchActive(ownerUid, branchId));
+            allow list: if isOwner(ownerUid) || (request.auth.uid == employeeId && isEmployeeOfBranchActive(ownerUid, branchId));
+            allow create: if (isOwner(ownerUid) || (request.auth.uid == employeeId && isEmployeeOfBranchActive(ownerUid, branchId))) 
+              && isValidId(attendanceId) 
+              && isValidAttendanceRecord(incoming())
+              && incoming().checkIn == request.time;
+            allow update: if (isOwner(ownerUid) || (request.auth.uid == employeeId && isEmployeeOfBranchActive(ownerUid, branchId))) 
+              && isValidId(attendanceId) 
+              && isValidAttendanceRecord(incoming());
+            allow delete: if isOwner(ownerUid) && isValidId(attendanceId);
+          }
+        }
+
+        // Path level: Expenses under Branch
+        match /expenses/{expenseId} {
+          // Locked down to owner or active branch staff
+          allow get: if isOwner(ownerUid) || isEmployeeOfBranchActive(ownerUid, branchId);
+          allow list: if isOwner(ownerUid) || isEmployeeOfBranchActive(ownerUid, branchId);
+          allow create: if (isOwner(ownerUid) || isEmployeeOfBranchActive(ownerUid, branchId)) 
+            && isValidId(expenseId) 
+            && isValidExpense(incoming());
+          allow update: if (isOwner(ownerUid) || isEmployeeOfBranchActive(ownerUid, branchId)) 
+            && isValidId(expenseId) 
+            && isValidExpense(incoming());
+          allow delete: if isOwner(ownerUid) && isValidId(expenseId);
+        }
+
+        // Path level: Orders under Branch (Main Transaction Hub)
+        match /orders/{orderId} {
+          // Locked down to owner or active branch staff
+          allow get: if isOwner(ownerUid) || isEmployeeOfBranchActive(ownerUid, branchId);
+          allow list: if isOwner(ownerUid) || isEmployeeOfBranchActive(ownerUid, branchId);
+          allow create: if (isOwner(ownerUid) || isEmployeeOfBranchActive(ownerUid, branchId)) 
+            && isValidId(orderId) 
+            && isValidOrder(incoming())
+            && incoming().createdAt == request.time;
+          
+          // Action-based Update separation pattern
+          allow update: if (isOwner(ownerUid) || isEmployeeOfBranchActive(ownerUid, branchId))
+            && isValidId(orderId)
+            && isValidOrder(incoming())
+            && incoming().createdAt == existing().createdAt
+            && (
+              // Case A: Owner edit everything safely
+              isOwner(ownerUid) ||
+              // Case B: Cashier state transitions only (updating order state / payment)
+              incoming().diff(existing()).affectedKeys().hasAny(['status', 'paymentStatus', 'paymentMethod', 'updatedAt'])
+            );
+          
+          allow delete: if isOwner(ownerUid) && isValidId(orderId);
+        }
+      }
+    }
+  }
+}

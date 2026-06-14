@@ -1,0 +1,116 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Custom Sleek Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* ========================================== */
+/* DARK MODE OVERRIDES */
+/* ========================================== */
+html.dark, html.dark body {
+  background-color: #0b0f19 !important;
+  color: #e2e8f0 !important;
+}
+
+html.dark #laughdry-application-shell {
+  background-color: #0b0f19 !important;
+}
+
+html.dark .bg-white {
+  background-color: #111827 !important;
+  border-color: #1f2937 !important;
+}
+
+html.dark .border-slate-100,
+html.dark .border-slate-150,
+html.dark .border-slate-200,
+html.dark .border-slate-300,
+html.dark .border-slate-200\/85 {
+  border-color: #1f2937 !important;
+}
+
+html.dark .bg-slate-50,
+html.dark .bg-slate-50\/40,
+html.dark .bg-slate-50\/30,
+html.dark .bg-slate-150,
+html.dark .bg-slate-50\/50,
+html.dark .bg-slate-100 {
+  background-color: #1f2937 !important;
+}
+
+html.dark .text-slate-800,
+html.dark .text-slate-900,
+html.dark .text-slate-850,
+html.dark .text-slate-700,
+html.dark .text-slate-750,
+html.dark .text-slate-755 {
+  color: #f1f5f9 !important;
+}
+
+html.dark .text-slate-400,
+html.dark .text-slate-500,
+html.dark .text-slate-600 {
+  color: #9ca3af !important;
+}
+
+html.dark .text-slate-700 {
+  color: #cbd5e1 !important;
+}
+
+html.dark div:not(.bg-white) > .text-slate-905 {
+  color: #f8fafc !important;
+}
+
+html.dark input:not([type="checkbox"]):not([type="radio"]), 
+html.dark select, 
+html.dark textarea {
+  background-color: #111827 !important;
+  color: #f8fafc !important;
+  border-color: #374151 !important;
+}
+
+html.dark input:focus,
+html.dark select:focus,
+html.dark textarea:focus {
+  border-color: #0284c7 !important;
+}
+
+html.dark .shadow-sm {
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.4), 0 1px 2px -1px rgba(0, 0, 0, 0.4) !important;
+}
+
+html.dark .shadow-md, html.dark .shadow-2xl {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.5) !important;
+}
+
+html.dark .bg-white .border-b {
+  border-color: #1f2937 !important;
+}
+

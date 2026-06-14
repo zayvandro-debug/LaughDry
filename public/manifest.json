@@ -1,0 +1,22 @@
+{
+  "short_name": "LaughDry POS",
+  "name": "LaughDry Cloud POS & Tracker",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3003/3003984.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3003/3003984.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "display": "standalone",
+  "orientation": "portrait"
+}
