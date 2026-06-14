@@ -21,7 +21,8 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { Capacitor } from '@capacitor/core';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
-import { auth } from './lib/firebase';
+import { doc, setDoc } from 'firebase/firestore';
+import { auth, db } from './lib/firebase';
 import FirebaseGate from './components/FirebaseGate';
 import OwnerDashboard from './components/OwnerDashboard';
 import EmployeeConsole from './components/EmployeeConsole';
@@ -73,6 +74,15 @@ export default function App() {
       setFirebaseUser(user);
       if (user) {
         localStorage.setItem('laughdry_firebase_uid', user.uid);
+        // Automatically save email mappings so other devices are linked easily via owner's Gmail
+        if (user.email) {
+          try {
+            const emailClean = user.email.toLowerCase().trim();
+            await setDoc(doc(db, 'email_mappings', emailClean), { uid: user.uid }, { merge: true });
+          } catch (e) {
+            console.warn("Failed mapping write on state change (non-fatal info):", e);
+          }
+        }
         // If login registers a brand new owner name, inject it as owner's display name
         const customName = localStorage.getItem('laughdry_owner_name_registered');
         if (customName) {
@@ -803,7 +813,7 @@ export default function App() {
                   try {
                     await signOut(auth);
                   } catch (err) {
-                    console.error("Authentication signout failed:", err);
+                    console.warn("Authentication signout failed (non-fatal info):", err);
                   }
                   localStorage.removeItem('laughdry_firebase_disabled');
                   localStorage.removeItem('laughdry_firebase_uid');

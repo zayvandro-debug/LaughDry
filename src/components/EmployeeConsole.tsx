@@ -5349,7 +5349,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700">
                     {editingOrderItems.map((it, idx) => (
-                      <tr key={it.id || idx} className="hover:bg-slate-50/50">
+                      <tr key={`edit-item-${idx}`} className="hover:bg-slate-50/50">
                         <td className="p-2.5 font-bold text-slate-900">{it.serviceName}</td>
                         <td className="p-2.5 text-slate-500 font-mono">Rp {it.price.toLocaleString()}</td>
                         <td className="p-2.5 text-center">

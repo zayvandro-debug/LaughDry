@@ -80,6 +80,10 @@ const onSnapshot = (...args: any[]) => {
 };
 
 function getUserIdPath(): string {
+  const sharedDbId = localStorage.getItem('laughdry_shared_database_id');
+  if (sharedDbId && sharedDbId.trim() !== '') {
+    return `users_db/${sharedDbId.trim()}`;
+  }
   const uid = auth.currentUser?.uid || localStorage.getItem('laughdry_firebase_uid') || 'default';
   return `users_db/${uid}`;
 }

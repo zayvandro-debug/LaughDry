@@ -177,6 +177,11 @@ service cloud.firestore {
       allow read: if true;
     }
 
+    // Email mappings for single-database multi-device synchronization
+    match /email_mappings/{email} {
+      allow read, write: if true;
+    }
+
     // Path level: users_db Root (Flat Collection Layout)
     match /users_db/{ownerUid} {
       allow read, write: if isSignedIn() && request.auth.uid == ownerUid;

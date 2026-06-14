@@ -43,6 +43,9 @@ import {
   MoreVertical,
   Menu
 } from 'lucide-react';
+import { auth, db } from '../lib/firebase';
+import { doc, getDoc } from 'firebase/firestore';
+import { Network, Link2, Unlink, Copy } from 'lucide-react';
 import { LaughDryDatabase } from '../data/mockDatabase';
 import { LaundryService } from '../services/laundryService';
 import { Service, Expense, Branch, Order, OrderStatus, AuditLog, WhatsAppTemplate, Customer, SettingsVersion } from '../types';
@@ -240,6 +243,13 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
 
   // Confirm states
   const [deleteConfirmService, setDeleteConfirmService] = useState<Service | null>(null);
+
+  // Shared database dashboard state variables
+  const [dbOwnerEmail, setDbOwnerEmail] = useState<string>(() => localStorage.getItem('laughdry_shared_database_email') || '');
+  const [dbSharedId, setDbSharedId] = useState<string>(() => localStorage.getItem('laughdry_shared_database_id') || '');
+  const [dashboardMappingError, setDashboardMappingError] = useState<string | null>(null);
+  const [dashboardMappingSuccess, setDashboardMappingSuccess] = useState<string | null>(null);
+  const [dashboardMappingLoading, setDashboardMappingLoading] = useState<boolean>(false);
   const [deleteConfirmCashier, setDeleteConfirmCashier] = useState<any | null>(null);
   const [deleteConfirmExpense, setDeleteConfirmExpense] = useState<Expense | null>(null);
 
@@ -3576,6 +3586,163 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
             {/* COLUMN 1: Owner Profile Form & Store settings (5 cols) */}
             <div className="lg:col-span-12 xl:col-span-5 space-y-6">
               
+              {/* SINKRONISASI MULTI-DEVICE & CLOUD DATABASE */}
+              <div className="bg-gradient-to-br from-slate-900 to-indigo-950 rounded-2xl border border-indigo-900/40 p-5 shadow-lg space-y-4 text-white">
+                <div className="flex items-center gap-2 border-b border-indigo-900/55 pb-3">
+                  <div className="p-2 bg-indigo-500/20 rounded-xl text-indigo-400">
+                    <Network className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-extrabold text-sm text-white tracking-tight">Sinkronisasi Multi-Device</h4>
+                    <p className="text-[10px] text-indigo-200">Hubungkan HP karyawan atau monitor TV ke database ini</p>
+                  </div>
+                </div>
+
+                <div className="space-y-3 text-xs leading-relaxed font-sans">
+                  <p className="text-[11px] text-indigo-150">
+                    Sistem mendukung penggunaan tanpa batas perangkat (Owner, Kasir, Kurir, Staf). Semua perubahan data langsung tersinkronisasi secara real-time ke cloud Firebase.
+                  </p>
+
+                  <div className="p-3.5 bg-indigo-950/50 border border-indigo-900/60 rounded-xl space-y-2">
+                    <div className="text-[9px] font-extrabold text-indigo-400 uppercase tracking-wider">Metode Sinkronisasi Utama</div>
+                    <div className="text-[11px] text-slate-200 flex items-center justify-between">
+                      <span>Email Owner Pusat:</span>
+                      <strong className="text-white select-all bg-indigo-900/30 px-2 py-0.5 rounded border border-indigo-900/40">{auth.currentUser?.email || 'Belum terlogin email Cloud'}</strong>
+                    </div>
+                    <div className="text-[11px] text-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mt-1 font-mono">
+                      <span>ID Database Cloud:</span>
+                      <div className="flex items-center gap-1.5 self-start sm:self-auto bg-slate-900 px-2 py-0.5 rounded border border-indigo-950 text-[10px] text-indigo-300 break-all select-all">
+                        <span>{auth.currentUser?.uid || 'default'}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const val = auth.currentUser?.uid || '';
+                            if (val) {
+                              navigator.clipboard.writeText(val);
+                              alert("ID Database berhasil disalin!");
+                            }
+                          }}
+                          className="hover:text-white transition cursor-pointer"
+                          title="Salin ID"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-950/40 border border-indigo-950 p-3 rounded-xl space-y-2.5">
+                    <div className="text-[10.5px] font-bold text-amber-400 flex items-center gap-1">
+                      <span>🔗</span> Status Hubungan Perangkat Ini:
+                    </div>
+
+                    {dbSharedId ? (
+                      <div className="space-y-2 text-[11px]">
+                        <div className="flex items-center gap-1 text-emerald-400 font-extrabold">
+                          <span>●</span> TERSAMBUNG KE STAFF/OWNER LAIN
+                        </div>
+                        <div className="text-slate-350 leading-snug break-all bg-slate-950 p-2 rounded border border-slate-900">
+                          Email Target: <strong className="text-white">{dbOwnerEmail}</strong>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            localStorage.removeItem('laughdry_shared_database_id');
+                            localStorage.removeItem('laughdry_shared_database_email');
+                            setDbSharedId('');
+                            setDbOwnerEmail('');
+                            alert("Koneksi diputus. Harap tunggu, halaman akan dimuat ulang...");
+                            window.location.reload();
+                          }}
+                          className="w-full py-1.5 bg-rose-950/60 hover:bg-rose-900/40 text-rose-400 hover:text-rose-300 transition text-[10.5px] font-extrabold rounded-lg flex items-center justify-center gap-1 border border-rose-900/20 cursor-pointer"
+                        >
+                          <Unlink className="w-3.5 h-3.5" /> Putuskan &amp; Gunakan DB Sendiri
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="space-y-2 text-[11px]">
+                        <div className="flex items-center gap-1 text-indigo-400 font-extrabold">
+                          <span>●</span> BERDIRI SENDIRI (DB DEFAULT)
+                        </div>
+                        <p className="text-[10.5px] text-slate-400 leading-normal">
+                          Perangkat ini bertindak sebagai database pusat. Jika ingin menghubungkan perangkat ini sebagai kasir/layar bantu ke HP owner utama lainnya, silakan masukkan Email owner utama di bawah ini:
+                        </p>
+
+                        <form
+                          onSubmit={async (e) => {
+                            e.preventDefault();
+                            setDashboardMappingError(null);
+                            setDashboardMappingSuccess(null);
+                            setDashboardMappingLoading(true);
+                            const val = dbOwnerEmail.trim().toLowerCase();
+                            if (!val) {
+                              setDashboardMappingError("Email atau ID wajib diisi!");
+                              setDashboardMappingLoading(false);
+                              return;
+                            }
+
+                            if (!val.includes('@')) {
+                              localStorage.setItem('laughdry_shared_database_id', val);
+                              localStorage.setItem('laughdry_shared_database_email', "Kustom ID: " + val);
+                              setDbSharedId(val);
+                              setDashboardMappingSuccess("Berhasil disambungkan! Harap muat ulang halaman.");
+                              setDashboardMappingLoading(false);
+                              setTimeout(() => window.location.reload(), 1500);
+                              return;
+                            }
+
+                            try {
+                              const ref = doc(db, 'email_mappings', val);
+                              const snap = await getDoc(ref);
+                              if (snap.exists() && snap.data()?.uid) {
+                                const targetUid = snap.data().uid;
+                                localStorage.setItem('laughdry_shared_database_id', targetUid);
+                                localStorage.setItem('laughdry_shared_database_email', val);
+                                setDbSharedId(targetUid);
+                                setDashboardMappingSuccess(`Sukses terhubung ke database owner: ${val}! Memuat ulang...`);
+                                setTimeout(() => window.location.reload(), 1500);
+                              } else {
+                                setDashboardMappingError("Email owner pusat belum memiliki database cloud.");
+                              }
+                            } catch (err) {
+                              setDashboardMappingError("Gagal memeriksa cloud database. Hubungkan internet.");
+                            } finally {
+                              setDashboardMappingLoading(false);
+                            }
+                          }}
+                          className="space-y-2 mt-1"
+                        >
+                          <input
+                            type="text"
+                            value={dbOwnerEmail}
+                            onChange={(e) => setDbOwnerEmail(e.target.value)}
+                            placeholder="Email Owner Pusat (contoh@gmail.com)"
+                            className="w-full text-xs font-semibold p-2 bg-slate-900 border border-indigo-900/60 rounded-lg outline-none focus:ring-1 focus:ring-indigo-500 text-white placeholder:text-slate-600"
+                          />
+
+                          {dashboardMappingError && <div className="text-[10px] text-rose-400">⚠️ {dashboardMappingError}</div>}
+                          {dashboardMappingSuccess && <div className="text-[10px] text-emerald-400">✅ {dashboardMappingSuccess}</div>}
+
+                          <button
+                            type="submit"
+                            disabled={dashboardMappingLoading}
+                            className="w-full py-1.5 bg-indigo-600 hover:bg-indigo-550 text-white font-extrabold text-[10px] rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                          >
+                            {dashboardMappingLoading ? (
+                              <span className="w-3 h-3 border border-white/20 border-t-white rounded-full animate-spin"></span>
+                            ) : (
+                              <>
+                                <Link2 className="w-3.5 h-3.5" /> Hubungkan Perangkat Ini
+                              </>
+                            )}
+                          </button>
+                        </form>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               {/* OWNER PROFILE */}
               <div className="bg-white rounded-2xl border border-slate-150 shadow-sm overflow-hidden">
                 <div className="p-4 bg-slate-50 border-b border-slate-150 flex items-center justify-between">
@@ -6146,8 +6313,8 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                             let checkOutStr = '⏳--';
                             try { if (r.checkOut) checkOutStr = new Date(r.checkOut).toLocaleString('id-ID') + ' WIB'; } catch(e) {}
                             
-                             return (
-                              <tr key={r.id || idx} className="hover:bg-slate-50/50 transition border-b border-slate-50">
+                              return (
+                               <tr key={`att-row-${r.id || idx}`} className="hover:bg-slate-50/50 transition border-b border-slate-50">
                                 <td className="p-4 pl-6">
                                   <div className="flex items-center gap-2.5">
                                     {r.photoUrl ? (
