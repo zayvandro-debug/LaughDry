@@ -730,7 +730,10 @@ export class LaughDryDatabase {
   public static getTemplates(): WhatsAppTemplate[] { return this.loadKey('templates', INITIAL_TEMPLATES); }
   public static saveTemplates(data: WhatsAppTemplate[]) { this.saveKey('templates', data); }
 
-  public static getAttendance(): AttendanceRecord[] { return this.loadKey('attendance', INITIAL_ATTENDANCE); }
+  public static getAttendance(): AttendanceRecord[] { 
+    const list = this.loadKey<AttendanceRecord[]>('attendance', INITIAL_ATTENDANCE); 
+    return list.sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime());
+  }
   public static saveAttendance(data: AttendanceRecord[]) { 
     const previous = this.getAttendance();
     this.saveKey('attendance', data); 
@@ -1067,6 +1070,8 @@ export class LaughDryDatabase {
         snapshot.forEach(doc => {
           list.push(doc.data() as AttendanceRecord);
         });
+        // Always sort descending by checkIn date in real-time
+        list.sort((a, b) => new Date(b.checkIn).getTime() - new Date(a.checkIn).getTime());
         const currentLocal = this.loadKey<AttendanceRecord[]>('attendance', []);
         if (JSON.stringify(currentLocal) !== JSON.stringify(list)) {
           this.saveKey('attendance', list);
