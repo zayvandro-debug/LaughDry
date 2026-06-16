@@ -22,6 +22,7 @@ export const ExpenseManagement: React.FC<ExpenseManagementProps> = ({
     category: 'Lainnya' as ExpenseCategory,
     amount: '',
     date: new Date().toISOString().split('T')[0],
+    paymentMethod: 'Cash',
   });
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [deleteConfirmExpense, setDeleteConfirmExpense] = useState<Expense | null>(null);
@@ -49,6 +50,7 @@ export const ExpenseManagement: React.FC<ExpenseManagementProps> = ({
             category: expenseForm.category,
             amount: amountVal,
             date: expenseForm.date ? new Date(expenseForm.date).toISOString() : e.date,
+            paymentMethod: expenseForm.paymentMethod,
           };
         }
         return e;
@@ -62,7 +64,7 @@ export const ExpenseManagement: React.FC<ExpenseManagementProps> = ({
         currentUser.name,
         currentUser.role,
         'EXPENSE_UPDATE',
-        `Mengubah pengeluaran [${editingExpense.category}] "${editingExpense.description}" menjadi "${expenseForm.description}" Rp ${amountVal.toLocaleString()}`
+        `Mengubah pengeluaran [${editingExpense.category}] "${editingExpense.description}" menjadi "${expenseForm.description}" Rp ${amountVal.toLocaleString()} (${expenseForm.paymentMethod})`
       );
 
       setEditingExpense(null);
@@ -71,6 +73,7 @@ export const ExpenseManagement: React.FC<ExpenseManagementProps> = ({
         category: 'Lainnya',
         amount: '',
         date: new Date().toISOString().split('T')[0],
+        paymentMethod: 'Cash',
       });
       onShowToast("Pengeluaran rutin berhasil diperbarui!");
       loadDB();
@@ -85,6 +88,7 @@ export const ExpenseManagement: React.FC<ExpenseManagementProps> = ({
       branchId: currentUser.branchId,
       date: expenseForm.date ? new Date(expenseForm.date).toISOString() : new Date().toISOString(),
       recordedBy: currentUser.name,
+      paymentMethod: expenseForm.paymentMethod,
     };
 
     const currentExpenses = LaughDryDatabase.getExpenses();
@@ -93,11 +97,11 @@ export const ExpenseManagement: React.FC<ExpenseManagementProps> = ({
     setExpenses(updatedExpenses);
 
     LaughDryDatabase.logActivity(
-      currentUser.id,
-      currentUser.name,
-      currentUser.role,
-      'EXPENSE_CREATE',
-      `Mencatat pengeluaran [${expenseForm.category}] ${expenseForm.description} sebesar Rp ${amountVal.toLocaleString()}`
+        currentUser.id,
+        currentUser.name,
+        currentUser.role,
+        'EXPENSE_CREATE',
+        `Mencatat pengeluaran [${expenseForm.category}] ${expenseForm.description} sebesar Rp ${amountVal.toLocaleString()} [${expenseForm.paymentMethod}]`
     );
 
     setExpenseForm({
@@ -105,6 +109,7 @@ export const ExpenseManagement: React.FC<ExpenseManagementProps> = ({
       category: 'Lainnya',
       amount: '',
       date: new Date().toISOString().split('T')[0],
+      paymentMethod: 'Cash',
     });
 
     onShowToast("Pengeluaran rutin berhasil dicatat!");
@@ -118,6 +123,7 @@ export const ExpenseManagement: React.FC<ExpenseManagementProps> = ({
       category: exp.category,
       amount: exp.amount.toString(),
       date: exp.date ? exp.date.split('T')[0] : new Date().toISOString().split('T')[0],
+      paymentMethod: exp.paymentMethod || 'Cash',
     });
   };
 
@@ -128,6 +134,7 @@ export const ExpenseManagement: React.FC<ExpenseManagementProps> = ({
       category: 'Lainnya',
       amount: '',
       date: new Date().toISOString().split('T')[0],
+      paymentMethod: 'Cash',
     });
   };
 
@@ -188,9 +195,21 @@ export const ExpenseManagement: React.FC<ExpenseManagementProps> = ({
                 onChange={(e) => setExpenseForm({ ...expenseForm, category: e.target.value as ExpenseCategory })}
                 className="w-full bg-slate-50 border border-slate-205 p-2.5 rounded-xl font-bold text-slate-700 focus:bg-white focus:outline-none"
               >
-                {['Detergen/Softener', 'Listrik', 'Air', 'Maintenance', 'Perlengkapan', 'Gaji', 'Sewa', 'Transportasi', 'Lainnya'].map(cat => (
+                {['Detergen/Softener', 'Listrik', 'Air', 'Maintenance', 'Perlengkapan', 'Gaji', 'Sewa', 'Transportasi', 'Gas', 'Lainnya'].map(cat => (
                   <option key={cat} value={cat}>{cat}</option>
                 ))}
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-slate-605 font-bold block">Metode Pengeluaran / Kas:</label>
+              <select
+                value={expenseForm.paymentMethod}
+                onChange={(e) => setExpenseForm({ ...expenseForm, paymentMethod: e.target.value })}
+                className="w-full bg-slate-50 border border-slate-205 p-2.5 rounded-xl font-bold text-slate-700 focus:bg-white focus:outline-none"
+              >
+                <option value="Cash">💵 Cash / Tunai</option>
+                <option value="QRIS">📱 QRIS / Non-Tunai</option>
               </select>
             </div>
 
@@ -279,6 +298,13 @@ export const ExpenseManagement: React.FC<ExpenseManagementProps> = ({
                       <span className="font-extrabold text-slate-800 text-[11.5px]">{exp.description}</span>
                       <span className="bg-slate-100 text-slate-655 text-[9px] font-black px-1.5 py-0.25 rounded-md uppercase tracking-tight border border-slate-200">
                         🏷️ {exp.category}
+                      </span>
+                      <span className={`text-[9.5px] font-black px-1.5 py-0.25 rounded-md uppercase tracking-tight border ${
+                        exp.paymentMethod === 'QRIS'
+                          ? 'bg-purple-50 text-purple-700 border-purple-200'
+                          : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      }`}>
+                        {exp.paymentMethod === 'QRIS' ? '📱 QRIS' : '💵 Cash'}
                       </span>
                     </div>
                     <div className="text-[10px] text-slate-400 mt-1 font-semibold flex items-center gap-1.5 flex-wrap">

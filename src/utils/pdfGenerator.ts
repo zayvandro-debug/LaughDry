@@ -1,5 +1,5 @@
 import { jsPDF } from 'jspdf';
-import 'jspdf-autotable';
+import autoTable from 'jspdf-autotable';
 
 interface FinancialReportData {
   startDate: string;
@@ -121,7 +121,7 @@ export const downloadFinancialReportPDF = (data: FinancialReportData, ownerName:
     ['Status Pembayaran Belum Lunas (Piutang)', `${data.paymentStatus['BELUM LUNAS'] || 0} Transaksi`]
   ];
 
-  (doc as any).autoTable({
+  autoTable(doc, {
     startY: 107,
     margin: { left: 15, right: 15 },
     head: [['Parameter Operasional', 'Nilai / Akumulasi Rupiah']],
@@ -130,7 +130,7 @@ export const downloadFinancialReportPDF = (data: FinancialReportData, ownerName:
     headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], fontStyle: 'bold' },
     styles: { fontSize: 9, cellPadding: 3.5 },
     columnStyles: {
-      0: { fontStyle: 'bold', width: 90 },
+      0: { fontStyle: 'bold', cellWidth: 90 },
       1: { halign: 'right', fontStyle: 'bold', textColor: [30, 41, 59] }
     }
   });
@@ -194,7 +194,7 @@ export const downloadDailyTransactionsPDF = (transactions: TransactionItem[], da
   const totalSum = transactions.reduce((sum, t) => sum + t.totalAmount, 0);
 
   // Add the table on page
-  (doc as any).autoTable({
+  autoTable(doc, {
     startY: 45,
     margin: { left: 15, right: 15 },
     head: headers,
@@ -203,13 +203,13 @@ export const downloadDailyTransactionsPDF = (transactions: TransactionItem[], da
     headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], fontStyle: 'bold' },
     styles: { fontSize: 8.5, cellPadding: 3 },
     columnStyles: {
-      0: { fontStyle: 'bold', width: 25 },
-      1: { width: 35 },
-      2: { width: 30 },
+      0: { fontStyle: 'bold', cellWidth: 25 },
+      1: { cellWidth: 35 },
+      2: { cellWidth: 30 },
       3: { fontStyle: 'bold' },
       4: { halign: 'center' },
       5: { fontStyle: 'bold' },
-      6: { width: 45 },
+      6: { cellWidth: 45 },
       7: { halign: 'right', fontStyle: 'bold', textColor: [2, 132, 199] }
     },
     didDrawPage: (data: any) => {

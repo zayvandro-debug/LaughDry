@@ -58,6 +58,28 @@ const getPerfumeEmoji = (name: string): string => {
   return '✨';
 };
 
+const IndonesianMonths = [
+  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+];
+
+function getOrderCompletedMonth(o: Order) {
+  const dateStr = o.completedAt || o.updatedAt || o.createdAt;
+  try {
+    return dateStr.slice(0, 7); // e.g. "2026-06"
+  } catch {
+    return new Date().toISOString().slice(0, 7);
+  }
+}
+
+function formatYearMonth(yearMonthStr: string) {
+  if (!yearMonthStr || yearMonthStr.length < 7) return yearMonthStr;
+  const [year, month] = yearMonthStr.split('-');
+  const monthIdx = parseInt(month, 10) - 1;
+  const monthName = IndonesianMonths[monthIdx] || month;
+  return `${monthName} ${year}`;
+}
+
 interface EmployeeConsoleProps {
   loggedInUser?: any;
   onLogout?: () => void;
@@ -138,7 +160,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   const [statusFilter, setStatusFilter] = useState<string>('all');
   
   // Operational Process Queue granular filters
-  const [processGroupBy, setProcessGroupBy] = useState<'queue' | 'laundry' | 'ironing' | 'packing' | 'ready' | 'completed'>('queue');
+  const [processGroupBy, setProcessGroupBy] = useState<'queue' | 'laundry' | 'ironing' | 'packing' | 'ready'>('queue');
   
   // Modals / Dialog states
   const [activeInvoice, setActiveInvoice] = useState<Order | null>(null);
@@ -294,8 +316,14 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   const [readyOrderToNotify, setReadyOrderToNotify] = useState<Order | null>(null);
 
   // 5 Menu POS Navigation State
-  const [activeMenuTab, setActiveMenuTab] = useState<'input_transaksi' | 'antrean_cucian' | 'manajemen_pelanggan' | 'input_pengeluaran' | 'absensi_harian'>('input_transaksi');
+  const [activeMenuTab, setActiveMenuTab] = useState<'input_transaksi' | 'antrean_cucian' | 'transaksi_selesai' | 'manajemen_pelanggan' | 'input_pengeluaran' | 'absensi_harian'>('input_transaksi');
   const [showKebabMenu, setShowKebabMenu] = useState(false);
+  
+  // New filter & search states for Laundry Queue / Completed Transactions
+  const [queueSearchQuery, setQueueSearchQuery] = useState('');
+  const [queueServiceFilter, setQueueServiceFilter] = useState('all');
+  const [completedSearchQuery, setCompletedSearchQuery] = useState('');
+  const [completedSelectedMonth, setCompletedSelectedMonth] = useState('all');
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [attendanceNotes, setAttendanceNotes] = useState('');
 
@@ -1777,7 +1805,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   };
 
   return (
-    <div className="space-y-6 pb-24 md:pb-6" id="employee-console-root">
+    <div className="space-y-3.5 pb-20 md:pb-6 -mt-3.5 md:-mt-5 font-sans" id="employee-console-root">
       {/* Toast Alert */}
       {toastMessage && (
         <div className="fixed top-5 right-5 z-50 flex items-center gap-2 bg-[#0F172A] border border-slate-800 text-[#38BDF8] px-4 py-3 rounded-xl shadow-2xl animate-bounce">
@@ -1787,10 +1815,10 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       )}
 
       {/* Operator Info strip */}
-      <div className="bg-white p-3 md:p-4 rounded-xl md:rounded-2xl border border-slate-200 shadow-sm flex flex-row items-center justify-between gap-3 overflow-hidden">
-        <div className="flex items-center gap-2 md:gap-3 min-w-0">
-          <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-sky-50 text-sky-700 flex items-center justify-center font-bold shrink-0">
-            <UserCheck className="w-4.5 h-4.5 md:w-5 md:h-5 text-sky-600 animate-pulse" />
+      <div className="bg-white p-2 md:p-2.5 rounded-xl md:rounded-2xl border border-slate-200 shadow-sm flex flex-row items-center justify-between gap-2 overflow-hidden">
+        <div className="flex items-center gap-1.5 md:gap-3 min-w-0">
+          <div className="w-8 h-8 rounded-full bg-sky-50 text-sky-700 flex items-center justify-center font-bold shrink-0">
+            <UserCheck className="w-4 h-4 md:w-4.5 md:h-4.5 text-sky-600 animate-pulse" />
           </div>
           <div className="text-[11px] md:text-xs min-w-0">
             <div className="font-bold text-slate-850 text-xs md:text-sm truncate">Kasir: {currentUser.name}</div>
@@ -1801,60 +1829,59 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
         </div>
 
         {/* Actions for logout and Bluetooth printer */}
-        <div className="flex items-center gap-1.5 md:gap-2 shrink-0 animate-fadeIn">
-          {/* Real-time Printer Connection Status */}
-          <div 
-            onClick={() => {
-              if (isPrinterConnected) {
-                if (window.confirm("Apakah Anda ingin memutuskan koneksi printer Bluetooth?")) {
-                  handleDisconnectDevice();
-                }
-              } else {
-                handleBluetoothConnect();
-              }
-            }}
-            className={`flex items-center gap-1.5 px-2 md:px-3 py-1.5 rounded-xl text-[10px] md:text-xs font-black border transition cursor-pointer select-none active:scale-95 shadow-sm ${isPrinterConnected ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' : 'bg-red-50 border-red-200 text-red-700 hover:bg-red-100'}`}
-            title={isPrinterConnected ? "Printer terhubung. Klik untuk memutuskan koneksi" : "Printer terputus. Klik untuk menyambungkan"}
-            id="printer-connection-status"
-          >
-            <span className="relative flex h-2 w-2">
-              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${isPrinterConnected ? 'bg-emerald-400' : 'bg-red-400'}`}></span>
-              <span className={`relative inline-flex rounded-full h-2 w-2 ${isPrinterConnected ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
-            </span>
-            <span>
-              {isPrinterConnected ? `🖨️ Printer: ${connectedPrinterName || 'Terhubung'}` : '🖨️ Printer: Terputus'}
-            </span>
-          </div>
-
+        <div className="flex items-center gap-1 md:gap-2 shrink-0 animate-fadeIn">
           {onLogout && (
             <button
               onClick={onLogout}
-              className="flex items-center gap-1 p-1.5 px-2 md:px-3 md:py-2 bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 rounded-xl text-[10px] md:text-xs font-bold transition shadow-sm cursor-pointer active:scale-95"
+              className="flex items-center gap-1 p-1 px-2 bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100 rounded-lg text-[9px] md:text-xs font-bold transition shadow-sm cursor-pointer active:scale-95 shrink-0"
               id="btn-cashier-logout"
               title="Logout dari shift kasir"
             >
-              <LogOut className="w-3.5 h-3.5 text-rose-600" />
+              <LogOut className="w-3 h-3 text-rose-600" />
               <span className="hidden md:inline">Keluar</span>
             </button>
           )}
 
-          <button
-            onClick={handleBluetoothConnect}
-            className="flex items-center gap-1 p-1.5 px-2 md:px-3 md:py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-[10px] md:text-xs font-bold transition shadow-sm cursor-pointer active:scale-95"
-            id="btn-bluetooth-connect"
-            title="Mengkoneksikan printer bluetooth HP untuk print struk"
-          >
-            <Bluetooth className="w-3.5 h-3.5 text-blue-100" />
-            <span>Sambung Bluetooth</span>
-          </button>
+          {/* Unified Bluetooth Status & Trigger Button */}
+          <div id="printer-connection-status" className="inline-block shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                if (isPrinterConnected) {
+                  if (window.confirm("Apakah Anda ingin memutuskan koneksi printer Bluetooth?")) {
+                    handleDisconnectDevice();
+                  }
+                } else {
+                  handleBluetoothConnect();
+                }
+              }}
+              className={`flex items-center gap-1 px-2 md:px-2.5 py-1 rounded-xl text-[10px] md:text-xs font-black border transition cursor-pointer select-none active:scale-95 shadow-sm shrink-0 ${
+                isPrinterConnected 
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100' 
+                  : 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100'
+              }`}
+              title={isPrinterConnected ? `Printer: ${connectedPrinterName || 'Terhubung'}. Klik untuk memutuskan` : "Hubungkan Printer Bluetooth"}
+              id="btn-bluetooth-connect"
+            >
+              <span className="relative flex h-2 w-2 shrink-0">
+                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${isPrinterConnected ? 'bg-emerald-400' : 'bg-blue-400'}`}></span>
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${isPrinterConnected ? 'bg-emerald-500' : 'bg-blue-500'}`}></span>
+              </span>
+              <Bluetooth className={`w-3.5 h-3.5 shrink-0 ${isPrinterConnected ? 'text-emerald-600' : 'text-blue-600'}`} />
+              <span className="max-w-[70px] sm:max-w-[120px] md:max-w-none truncate text-[9.5px] md:text-xs">
+                {isPrinterConnected ? `${connectedPrinterName || 'MTP-2'}` : 'Sambung BT'}
+              </span>
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* 5 MENU TAB NAV BAR - Hidden on mobile/android (use natural touch swipe gestures instead) */}
-      <div className="hidden md:grid md:grid-cols-2 lg:grid-cols-5 gap-2.5 bg-slate-100 p-2 rounded-2xl border border-slate-205">
+      {/* 6 MENU TAB NAV BAR - Hidden on mobile/android (use natural touch swipe gestures instead) */}
+      <div className="hidden md:grid md:grid-cols-3 lg:grid-cols-6 gap-2.5 bg-slate-100 p-2 rounded-2xl border border-slate-205">
         {[
           { key: 'input_transaksi', icon: <ShoppingCart className="w-4 h-4" />, label: '📥 Input Transaksi', desc: 'Nota & kasir baru' },
           { key: 'antrean_cucian', icon: <Clock className="w-4 h-4" />, label: '📋 Antrean Cucian', desc: 'Proses kerja & siap ambil', badge: orders.filter(o => o.branchId === currentUser.branchId && o.status !== OrderStatus.SELESAI && o.status !== OrderStatus.DIBATALKAN).length },
+          { key: 'transaksi_selesai', icon: <CheckCircle className="w-4 h-4" />, label: '✅ Transaksi Selesai', desc: 'Riwayat bulanan selesai' },
           { key: 'manajemen_pelanggan', icon: <UserCheck className="w-4 h-4" />, label: '👥 Data Pelanggan', desc: 'Loyalitas, saldo & edit', badge: customers.length },
           { key: 'input_pengeluaran', icon: <DollarSign className="w-4 h-4" />, label: '💸 Pengeluaran Rutin', desc: 'Sewa, listrik & detergen' },
           { key: 'absensi_harian', icon: <FileCheck2 className="w-4 h-4" />, label: '📅 Absensi Harian', desc: 'Check-In/Out & Log' }
@@ -2537,84 +2564,145 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                 <span className="text-[11px] font-extrabold text-slate-707 uppercase tracking-wider flex items-center gap-1.5">
                   ⚙️ Proses Kerja & Siap Diambil
                 </span>
-                <span className="text-[9.5px] text-slate-400 font-mono hidden md:inline">Alur: Antrean ➔ Cuci ➔ Setrika/Lipat ➔ Kemas ➔ Siap ➔ Selesai</span>
+                <span className="text-[9.5px] text-slate-400 font-mono hidden md:inline">Alur: Antrean ➔ Cuci ➔ Setrika/Lipat ➔ Kemas ➔ Siap</span>
+              </div>
+
+              {/* Control Panel: Search & Category/Service Dropdown */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                <div className="relative md:col-span-2">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    placeholder="Cari proses berjalan berdasarkan No. Nota atau Nama Pelanggan..."
+                    value={queueSearchQuery}
+                    onChange={(e) => setQueueSearchQuery(e.target.value)}
+                    className="w-full bg-white border border-slate-205 pl-9 pr-4 py-1.5 rounded-xl text-xs font-semibold focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 shadow-3xs hover:border-slate-300 transition"
+                  />
+                </div>
+                
+                <div className="relative">
+                  <select
+                    value={queueServiceFilter}
+                    onChange={(e) => setQueueServiceFilter(e.target.value)}
+                    className="w-full bg-white border border-slate-205 pl-3 pr-8 py-1.5 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 shadow-3xs hover:border-slate-300 transition appearance-none cursor-pointer"
+                  >
+                    <option value="all">🧺 Semua Layanan</option>
+                    {(() => {
+                      const serviceFilters = Array.from(new Set([
+                        ...services.map(s => s.name),
+                        ...orders.flatMap(o => o.items.map(it => it.serviceName))
+                      ])).filter(Boolean).sort();
+                      
+                      return serviceFilters.map(sf => (
+                        <option key={sf} value={sf}>
+                          🧺 {sf}
+                        </option>
+                      ));
+                    })()}
+                  </select>
+                  <p className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-400">
+                    <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                      <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/>
+                    </svg>
+                  </p>
+                </div>
               </div>
 
               {/* Responsive Tabs Navigation for mobile scrollable, desktop grid - replaces select dropdown with layout transitions */}
-              <div className="flex overflow-x-auto whitespace-nowrap sm:grid sm:grid-cols-6 gap-1 pt-0.5 pb-2 scrollbar-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden snap-x select-none border-b border-slate-150 sm:border-b-0 px-1 sm:px-0 scroll-smooth">
-                {[
-                  { key: 'queue', label: '🕒 Antrean', count: orders.filter(o => o.branchId === currentUser.branchId && o.status === OrderStatus.ANTRI).length },
-                  { key: 'laundry', label: '💦 Laundry', count: orders.filter(o => o.branchId === currentUser.branchId && o.status === OrderStatus.DICUCI).length },
-                  { key: 'ironing', label: '👔 Setrika', count: orders.filter(o => o.branchId === currentUser.branchId && o.status === OrderStatus.DISETRIKA_DILIPAT).length },
-                  { key: 'packing', label: '📦 Packing', count: orders.filter(o => o.branchId === currentUser.branchId && o.status === OrderStatus.DIKEMAS).length },
-                  { key: 'ready', label: '✅ Ready', count: orders.filter(o => o.branchId === currentUser.branchId && o.status === OrderStatus.SIAP_DIAMBIL).length },
-                  { key: 'completed', label: '🏆 Selesai', count: orders.filter(o => o.branchId === currentUser.branchId && o.status === OrderStatus.SELESAI).length },
-                ].map(tab => {
-                  const isSelected = processGroupBy === tab.key;
-                  return (
-                    <button
-                      key={tab.key}
-                      type="button"
-                      onClick={() => setProcessGroupBy(tab.key as any)}
-                      className={`relative text-center flex flex-row sm:flex-col items-center justify-center gap-1 sm:gap-0.5 py-1 sm:py-2 px-2.5 sm:px-1 rounded-lg sm:rounded-xl text-[9px] sm:text-[10px] font-extrabold transition-all duration-250 outline-none flex-shrink-0 min-w-[74px] sm:min-w-0 snap-center cursor-pointer border ${
-                        isSelected
-                          ? 'border-transparent text-white font-black'
-                          : 'bg-white hover:bg-slate-50 border-slate-205 text-slate-500'
-                      }`}
-                    >
-                      {/* Active indicator background slide/fade animation */}
-                      {isSelected && (
-                        <motion.div
-                          layoutId="activeAlurPill"
-                          className="absolute inset-0 bg-slate-900 rounded-lg sm:rounded-xl"
-                          transition={{ type: 'spring', stiffness: 380, damping: 28 }}
-                        />
-                      )}
-                      
-                      {/* Text & label wrapper raised index for relative positioning over layoutId div */}
-                      <span className="relative z-10 truncate max-w-full px-0.5">{tab.label}</span>
-                      <span className={`relative z-10 mt-0 sm:mt-0.5 ml-0.5 sm:ml-0 px-1 py-0.2 sm:px-1.5 sm:py-0.5 text-[8px] rounded font-black ${
-                        isSelected ? 'bg-sky-400 text-slate-950 shadow-xs' : 'bg-slate-150 text-slate-500'
-                      }`}>{tab.count}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Tableless In-progress lists - Animated container */}
-              <div className="max-h-[440px] overflow-y-auto pr-1 pt-1">
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={processGroupBy}
-                    initial={{ opacity: 0, x: 15 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -15 }}
-                    transition={{ duration: 0.2, ease: "easeOut" }}
-                    className="space-y-2 min-h-[50px]"
-                  >
-                    {(() => {
-                      const activeBranchOrders = orders.filter(o => o.branchId === currentUser.branchId);
-                      
-                      const inProcessOrders = activeBranchOrders.filter(o => {
-                        const s = o.status;
-                    if (processGroupBy === 'queue') return s === OrderStatus.ANTRI;
-                    if (processGroupBy === 'laundry') return s === OrderStatus.DICUCI;
-                    if (processGroupBy === 'ironing') return s === OrderStatus.DISETRIKA_DILIPAT;
-                    if (processGroupBy === 'packing') return s === OrderStatus.DIKEMAS;
-                    if (processGroupBy === 'ready') return s === OrderStatus.SIAP_DIAMBIL;
-                    if (processGroupBy === 'completed') return s === OrderStatus.SELESAI;
-                    return false;
+              {(() => {
+                const getOrdersForQueue = () => {
+                  return orders.filter(o => {
+                    if (o.branchId !== currentUser.branchId) return false;
+                    if (queueServiceFilter !== 'all') {
+                      return o.items.some(it => it.serviceName === queueServiceFilter);
+                    }
+                    return true;
                   });
+                };
+                const queueBranchOrders = getOrdersForQueue();
 
-                  if (inProcessOrders.length === 0) {
-                    return (
-                      <div className="p-8 text-center text-xs text-slate-400 font-bold bg-white border border-slate-150 rounded-xl">
-                        Tidak ada antrean dalam filter ini.
-                      </div>
-                    );
-                  }
+                return (
+                  <>
+                    <div className="flex overflow-x-auto whitespace-nowrap sm:grid sm:grid-cols-5 gap-1 pt-0.5 pb-2 scrollbar-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden snap-x select-none border-b border-slate-150 sm:border-b-0 px-1 sm:px-0 scroll-smooth">
+                      {[
+                        { key: 'queue', label: '🕒 Antrean', count: queueBranchOrders.filter(o => o.status === OrderStatus.ANTRI).length },
+                        { key: 'laundry', label: '💦 Laundry', count: queueBranchOrders.filter(o => o.status === OrderStatus.DICUCI).length },
+                        { key: 'ironing', label: '👔 Setrika', count: queueBranchOrders.filter(o => o.status === OrderStatus.DISETRIKA_DILIPAT).length },
+                        { key: 'packing', label: '📦 Packing', count: queueBranchOrders.filter(o => o.status === OrderStatus.DIKEMAS).length },
+                        { key: 'ready', label: '✅ Ready', count: queueBranchOrders.filter(o => o.status === OrderStatus.SIAP_DIAMBIL).length },
+                      ].map(tab => {
+                        const isSelected = processGroupBy === tab.key;
+                        return (
+                          <button
+                            key={tab.key}
+                            type="button"
+                            onClick={() => setProcessGroupBy(tab.key as any)}
+                            className={`relative text-center flex flex-row sm:flex-col items-center justify-center gap-1 sm:gap-0.5 py-1 sm:py-2 px-2.5 sm:px-1 rounded-lg sm:rounded-xl text-[9px] sm:text-[10px] font-extrabold transition-all duration-250 outline-none flex-shrink-0 min-w-[74px] sm:min-w-0 snap-center cursor-pointer border ${
+                              isSelected
+                                ? 'border-transparent text-white font-black'
+                                : 'bg-white hover:bg-slate-50 border-slate-205 text-slate-500'
+                            }`}
+                          >
+                            {/* Active indicator background slide/fade animation */}
+                            {isSelected && (
+                              <motion.div
+                                layoutId="activeAlurPill"
+                                className="absolute inset-0 bg-slate-900 rounded-lg sm:rounded-xl"
+                                transition={{ type: 'spring', stiffness: 380, damping: 28 }}
+                              />
+                            )}
+                            
+                            {/* Text & label wrapper raised index for relative positioning over layoutId div */}
+                            <span className="relative z-10 truncate max-w-full px-0.5">{tab.label}</span>
+                            <span className={`relative z-10 mt-0 sm:mt-0.5 ml-0.5 sm:ml-0 px-1 py-0.2 sm:px-1.5 sm:py-0.5 text-[8px] rounded font-black ${
+                              isSelected ? 'bg-sky-400 text-slate-950 shadow-xs' : 'bg-slate-150 text-slate-500'
+                            }`}>{tab.count}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
 
-                  return inProcessOrders.map(o => {
+                    {/* Tableless In-progress lists - Animated container */}
+                    <div className="max-h-[440px] overflow-y-auto pr-1 pt-1">
+                      <AnimatePresence mode="wait">
+                        <motion.div
+                          key={processGroupBy}
+                          initial={{ opacity: 0, x: 15 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          exit={{ opacity: 0, x: -15 }}
+                          transition={{ duration: 0.2, ease: "easeOut" }}
+                          className="space-y-2 min-h-[50px]"
+                        >
+                          {(() => {
+                            const inProcessOrders = queueBranchOrders.filter(o => {
+                              const s = o.status;
+                              if (processGroupBy === 'queue') return s === OrderStatus.ANTRI;
+                              if (processGroupBy === 'laundry') return s === OrderStatus.DICUCI;
+                              if (processGroupBy === 'ironing') return s === OrderStatus.DISETRIKA_DILIPAT;
+                              if (processGroupBy === 'packing') return s === OrderStatus.DIKEMAS;
+                              if (processGroupBy === 'ready') return s === OrderStatus.SIAP_DIAMBIL;
+                              return false;
+                            });
+
+                            const searchedQueueOrders = inProcessOrders.filter(o => {
+                              if (!queueSearchQuery.trim()) return true;
+                              const query = queueSearchQuery.toLowerCase();
+                              return (
+                                o.invoiceNumber.toLowerCase().includes(query) ||
+                                o.customerName.toLowerCase().includes(query) ||
+                                (o.customerPhone && o.customerPhone.toLowerCase().includes(query))
+                              );
+                            });
+
+                            if (searchedQueueOrders.length === 0) {
+                              return (
+                                <div className="p-8 text-center text-xs text-slate-400 font-bold bg-white border border-slate-150 rounded-xl">
+                                  {queueSearchQuery ? 'Tidak ada antrean yang cocok dengan kata kunci pencarian.' : 'Tidak ada antrean dalam filter ini.'}
+                                </div>
+                              );
+                            }
+
+                      return searchedQueueOrders.map(o => {
                     let nextStepLabel = '';
                     if (o.status === OrderStatus.ANTRI) nextStepLabel = 'Cuci 💦';
                     else if (o.status === OrderStatus.DICUCI) nextStepLabel = 'Setrika/Lipat 👔';
@@ -2928,7 +3016,203 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                   </motion.div>
                 </AnimatePresence>
               </div>
+            </>
+          );
+        })()}
             </div>
+          </div>
+        </motion.div>
+      )}
+
+      {/* ==================== TAB: TRANSAKSI SELESAI ==================== */}
+      {activeMenuTab === 'transaksi_selesai' && (
+        <motion.div
+          key="transaksi_selesai"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -12 }}
+          transition={{ duration: 0.2 }}
+          className="bg-white p-2.5 sm:p-5 rounded-none sm:rounded-2xl border-x-0 sm:border border-slate-150 shadow-none sm:shadow-sm space-y-4 w-full"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3 px-1.5 sm:px-0">
+            <div>
+              <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
+                Daftar Transaksi Selesai (Cabang Utama)
+              </h3>
+              <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Pengarsipan data pesanan yang telah diserahkan ke pelanggan</p>
+            </div>
+            
+            {/* Monthly Dropdown Filter */}
+            <div className="flex items-center gap-1.5 self-start sm:self-center">
+              <span className="text-[11px] font-bold text-slate-500 shrink-0">Pilih Bulan:</span>
+              <select
+                value={completedSelectedMonth}
+                onChange={(e) => setCompletedSelectedMonth(e.target.value)}
+                className="bg-slate-50 border border-slate-205 rounded-xl px-2.5 py-1.5 text-[11px] font-black text-slate-700 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 cursor-pointer shadow-xs"
+              >
+                <option value="all">📅 Semua Bulan</option>
+                {(() => {
+                  const completedOrdersForFilter = orders.filter(o => o.branchId === currentUser.branchId && o.status === OrderStatus.SELESAI);
+                  const monthsSet = new Set<string>();
+                  completedOrdersForFilter.forEach(o => {
+                    monthsSet.add(getOrderCompletedMonth(o));
+                  });
+                  return Array.from(monthsSet).sort((a,b) => b.localeCompare(a)).map(m => (
+                    <option key={m} value={m}>📅 {formatYearMonth(m)}</option>
+                  ));
+                })()}
+              </select>
+            </div>
+          </div>
+
+          {/* Search Bar for Transaksi Selesai */}
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+            <input
+              type="text"
+              placeholder="Cari transaksi selesai berdasarkan No. Nota, Nama Pelanggan, atau No. HP..."
+              value={completedSearchQuery}
+              onChange={(e) => setCompletedSearchQuery(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-205 pl-9 pr-4 py-1.5 rounded-xl text-xs font-semibold focus:bg-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 shadow-3xs"
+            />
+          </div>
+
+          {/* Grouped orders per Month */}
+          <div className="space-y-6 max-h-[550px] overflow-y-auto pr-1">
+            {(() => {
+              const completedOrders = orders.filter(o => o.branchId === currentUser.branchId && o.status === OrderStatus.SELESAI);
+              
+              // Group completed orders by month
+              const groupedCompleted: { [month: string]: Order[] } = {};
+              
+              completedOrders.forEach(o => {
+                // Apply search filter
+                if (completedSearchQuery.trim()) {
+                  const q = completedSearchQuery.toLowerCase();
+                  const matchesSearch = o.invoiceNumber.toLowerCase().includes(q) ||
+                                        o.customerName.toLowerCase().includes(q) ||
+                                        (o.customerPhone && o.customerPhone.toLowerCase().includes(q));
+                  if (!matchesSearch) return;
+                }
+                
+                const m = getOrderCompletedMonth(o);
+                if (completedSelectedMonth !== 'all' && m !== completedSelectedMonth) return;
+                
+                if (!groupedCompleted[m]) {
+                  groupedCompleted[m] = [];
+                }
+                groupedCompleted[m].push(o);
+              });
+
+              const sortedMonths = Object.keys(groupedCompleted).sort((a, b) => b.localeCompare(a));
+
+              if (sortedMonths.length === 0) {
+                return (
+                  <div className="p-8 text-center text-xs text-slate-400 font-bold bg-slate-50 border border-slate-150 rounded-xl">
+                    Tidak ada transaksi selesai yang ditemukan atau cocok dengan kata kunci pencarian.
+                  </div>
+                );
+              }
+
+              return sortedMonths.map(month => {
+                const monthOrders = groupedCompleted[month].sort((a, b) => {
+                  const dateA = a.completedAt || a.updatedAt || a.createdAt;
+                  const dateB = b.completedAt || b.updatedAt || b.createdAt;
+                  return dateB.localeCompare(dateA);
+                });
+
+                return (
+                  <div key={month} className="space-y-2.5">
+                    <div className="flex items-center gap-2 border-b border-slate-110 pb-1.5">
+                      <span className="text-xs font-black text-slate-800 uppercase tracking-wide">
+                        📋 Bulan {formatYearMonth(month)}
+                      </span>
+                      <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-110 font-bold px-1.5 py-0.2 select-none rounded-md">
+                        {monthOrders.length} Selesai
+                      </span>
+                    </div>
+
+                    <div className="space-y-2">
+                      {monthOrders.map(o => {
+                        return (
+                          <div className="bg-white border border-slate-150 rounded-xl shadow-2xs hover:border-emerald-300 transition-all text-slate-755 hover:shadow-xs" key={o.id}>
+                            <div className="p-3 flex justify-between items-center gap-2 flex-wrap sm:flex-nowrap">
+                              <div className="flex items-start gap-2 min-w-[140px]">
+                                <div className="space-y-0.5">
+                                  <span className="font-mono font-black text-slate-900 text-[11px] bg-slate-100 border border-slate-150 px-1.5 py-0.5 rounded-md block w-fit">
+                                    {o.invoiceNumber}
+                                  </span>
+                                  <span className="inline-block px-1.5 py-0.25 rounded text-[8px] font-black text-white bg-emerald-600 uppercase tracking-wider">
+                                    🏆 Selesai
+                                  </span>
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="font-bold text-slate-800 text-[11px] truncate">{o.customerName}</p>
+                                  <p className="text-slate-400 font-mono text-[9px] truncate">{o.customerPhone}</p>
+                                </div>
+                              </div>
+
+                              <div className="flex-1 min-w-0 pr-2">
+                                <p className="text-[10.5px] text-slate-500 font-bold truncate">
+                                  {o.items.map(it => it.serviceName).join(', ')}
+                                </p>
+                                <div className="flex items-center gap-1.5 mt-0.5 text-[10px] flex-wrap">
+                                  <span className="font-black text-emerald-600 tracking-tight">
+                                    Rp {o.totalAmount.toLocaleString('id-ID')}
+                                  </span>
+                                  <span className="text-slate-350">|</span>
+                                  <span className="text-slate-400">Bayar: </span>
+                                  <span className="font-bold text-slate-700 bg-slate-100 px-1 rounded">{o.paymentMethod}</span>
+                                  {o.clothesCount !== undefined && o.clothesCount > 0 && (
+                                    <span className="text-[8px] font-black bg-indigo-50 text-indigo-700 border border-indigo-150 px-1 py-0.25 rounded-md flex items-center gap-0.5">
+                                      👕 {o.clothesCount} Pcs
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[9px] text-slate-500 mt-1 space-y-0.5 bg-slate-50 p-1.5 rounded-lg border border-slate-100 font-sans">
+                                  <div className="flex items-center justify-between gap-1.5">
+                                    <span className="text-slate-400">📥 Masuk:</span>
+                                    <span className="font-semibold text-slate-700">{new Date(o.createdAt).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}</span>
+                                  </div>
+                                  <div className="flex items-center justify-between gap-1.5">
+                                    <span className="text-slate-400">🏆 Selesai Pada:</span>
+                                    <span className="font-black text-emerald-650">{new Date(o.completedAt || o.updatedAt).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() => setShowOrderDetailModal(o)}
+                                  className="p-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 rounded-lg text-xs transition flex items-center justify-center cursor-pointer shadow-2xs"
+                                  title="Detail Order"
+                                >
+                                  ℹ️
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveInvoice(o);
+                                    setShowInvoiceChoiceModal(true);
+                                  }}
+                                  className="p-1.5 bg-white hover:bg-sky-50 border border-slate-200 text-sky-855 rounded-lg text-xs transition flex items-center justify-center cursor-pointer"
+                                  title="Cetak Struk"
+                                >
+                                  📄
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              });
+            })()}
           </div>
         </motion.div>
       )}
@@ -3246,10 +3530,11 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       )}
 
       {/* MOBILE BOTTOM NAVIGATION BAR BAR TAB MENU */}
-      <div className="fixed bottom-0 left-0 right-0 z-45 bg-white/95 backdrop-blur-md border-t border-slate-150 shadow-2xl py-2 px-3 md:hidden flex justify-around items-center select-none" id="mobile-bottom-nav">
+      <div className="fixed bottom-0 left-0 right-0 z-45 bg-white/95 backdrop-blur-md border-t border-slate-150 shadow-2xl py-2 px-1 md:hidden flex justify-around items-center select-none" id="mobile-bottom-nav">
         {[
           { key: 'input_transaksi', icon: <ShoppingCart className="w-5 h-5" />, label: 'Transaksi' },
           { key: 'antrean_cucian', icon: <Clock className="w-5 h-5" />, label: 'Antrean', badge: orders.filter(o => o.branchId === currentUser.branchId && o.status !== OrderStatus.SELESAI && o.status !== OrderStatus.DIBATALKAN).length },
+          { key: 'transaksi_selesai', icon: <CheckCircle className="w-5 h-5" />, label: 'Selesai' },
           { key: 'manajemen_pelanggan', icon: <UserCheck className="w-5 h-5" />, label: 'Pelanggan' },
           { key: 'input_pengeluaran', icon: <DollarSign className="w-5 h-5" />, label: 'Pengeluaran' },
           { key: 'absensi_harian', icon: <FileCheck2 className="w-5 h-5" />, label: 'Presensi' }
@@ -4636,118 +4921,78 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
               )}
             </div>
 
-            {/* Interactive Search Tool */}
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
-              <div className="flex items-center justify-between border-b border-slate-150 pb-2">
-                <span className="text-[10.5px] uppercase font-black tracking-wider text-slate-500">Pindai / Cari Printer</span>
-                {!isScanningBluetooth && (
-                  <button
-                    type="button"
-                    onClick={startBluetoothScan}
-                    className="text-[10.5px] font-bold text-blue-600 hover:text-blue-800 cursor-pointer flex items-center gap-1"
-                  >
-                    🔄 Cari Ulang
-                  </button>
-                )}
-              </div>
-
-              {isScanningBluetooth ? (
-                <div className="py-6 flex flex-col items-center justify-center space-y-3">
-                  <div className="relative flex items-center justify-center">
-                    <span className="animate-ping absolute inline-flex h-10 w-10 rounded-full bg-blue-400 opacity-30"></span>
-                    <span className="relative inline-flex rounded-full h-8 w-8 bg-blue-100 flex items-center justify-center text-blue-600">
-                      <Bluetooth className="w-4 h-4 animate-spin" />
-                    </span>
-                  </div>
-                  <span className="text-[11px] font-semibold text-slate-500 animate-pulse">Sedang memindai perangkat sekitar...</span>
-                </div>
-              ) : scannedDevices.length > 0 ? (
-                <div className="space-y-2">
-                  {scannedDevices.map((dev) => {
-                    const isCurrent = isPrinterConnected && connectedPrinterName === dev.name;
-                    return (
-                      <div key={dev.id} className="bg-white p-2.5 rounded-xl border border-slate-150 flex items-center justify-between hover:border-slate-300 transition-all">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <Printer className={`w-4 h-4 shrink-0 ${isCurrent ? 'text-emerald-500' : 'text-slate-400'}`} />
-                          <div className="min-w-0">
-                            <div className="text-xs font-bold text-slate-800 truncate leading-tight">{dev.name}</div>
-                            <div className="text-[9px] font-mono text-slate-400">{dev.paired ? 'Berpasangan' : 'Perangkat Terdeteksi'}</div>
-                          </div>
-                        </div>
-                        
-                        <div>
-                          {pairingDeviceId === dev.id ? (
-                            <span className="text-[10px] font-bold text-blue-500 flex items-center gap-1">
-                              <span className="w-2.5 h-2.5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></span>
-                              Menyambung...
-                            </span>
-                          ) : isCurrent ? (
-                            <span className="text-[10px] font-extrabold text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-0.5 rounded-lg flex items-center gap-1">
-                              ✓ Aktif
-                            </span>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => handleConnectDevice(dev)}
-                              className="px-2.5 py-1 text-[10px] font-extrabold bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition cursor-pointer"
-                            >
-                              Hubungkan
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="py-4 text-center">
-                  <p className="text-[11px] text-slate-500 mb-2">Klik cari ulang untuk mendeteksi printer Bluetooth secara real-time</p>
-                  <button
-                    type="button"
-                    onClick={startBluetoothScan}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold rounded-xl transition cursor-pointer"
-                  >
-                    Mulai Pindai Printer
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Manual Bluetooth Printer Configuration Card */}
+            {/* Manual Bluetooth Printer Configuration Card - Hubungkan via Alamat MAC */}
             <div className="bg-white border border-slate-200 rounded-3xl p-4 space-y-3.5 shadow-sm">
               <div className="flex items-center gap-1.5">
                 <span className="w-1.5 h-3 bg-indigo-600 rounded-full"></span>
-                <span className="text-[10.5px] uppercase font-black tracking-wider text-slate-700">Atur Printer Bluetooth Secara Manual</span>
+                <span className="text-[10.5px] uppercase font-black tracking-wider text-slate-700">Hubungkan via Alamat MAC Bluetooth</span>
               </div>
               <p className="text-[10px] text-slate-500 leading-snug">
-                Gunakan ini jika printer termal Anda sudah terhubung ke HP via Pengaturan Bluetooth tetapi tidak terdeteksi otomatis oleh peramban/iframe browser.
+                Gunakan ini jika printer termal Anda sudah terhubung ke HP. Masukkan kode alamat MAC printer Anda untuk meregistrasikan koneksi secara langsung.
               </p>
-              <div className="space-y-3">
+              <div className="space-y-2.5">
                 <div className="space-y-1">
-                  <label htmlFor="input-manual-printer-name" className="text-[9px] font-black text-slate-400 uppercase tracking-wide block">Nama / Spesifikasi Printer Anda:</label>
+                  <label htmlFor="input-manual-printer-name" className="text-[9px] font-black text-slate-400 uppercase tracking-wide block">Alamat MAC Bluetooth Printer:</label>
                   <input
                     type="text"
                     id="input-manual-printer-name"
-                    placeholder="Contoh: PT-210, MTP-2, Panda PRJ-58D..."
-                    className="w-full text-xs font-bold text-slate-800 p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-indigo-500 outline-none transition"
+                    placeholder="Contoh: CC:3F:1D:9B:D2:4E atau 00:11:22:33:FF:EE"
+                    className="w-full text-xs font-bold font-mono text-slate-800 p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-indigo-500 outline-none transition"
                   />
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const inputEl = document.getElementById('input-manual-printer-name') as HTMLInputElement;
-                    const val = inputEl?.value?.trim();
-                    if (!val) {
-                      showToast("⚠️ Mohon inputkan Nama Printer Anda!");
-                      return;
-                    }
-                    const customDev = { id: `manual-${Date.now()}`, name: val };
-                    handleConnectDevice(customDev);
-                  }}
-                  className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition cursor-pointer shadow-sm active:scale-[0.98] select-none"
-                >
-                  💾 Simpan & Jadikan Koneksi Aktif
-                </button>
+
+                <div className="grid grid-cols-1 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const inputEl = document.getElementById('input-manual-printer-name') as HTMLInputElement;
+                      const val = inputEl?.value?.trim()?.toUpperCase() || '';
+                      if (!val) {
+                        showToast("⚠️ Mohon inputkan Alamat MAC Printer!");
+                        return;
+                      }
+                      // A standard MAC address usually has hex chars separated by : or -
+                      const macRegex = /^([0-9A-FA-F]{2}[:-]){5}([0-9A-FA-F]{2})$|^([0-9A-FA-F]{12})$/;
+                      if (!macRegex.test(val.replace(/\s/g, ''))) {
+                        if (!window.confirm("Format Alamat MAC biasanya berupa XX:XX:XX:XX:XX:XX. Apakah Anda ingin tetap melanjutkan?")) {
+                          return;
+                        }
+                      }
+                      const customDev = { id: `manual-${Date.now()}`, name: val };
+                      handleConnectDevice(customDev);
+                    }}
+                    className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition cursor-pointer shadow-sm active:scale-[0.98] select-none flex items-center justify-center gap-1.5"
+                  >
+                    💾 Hubungkan Alamat MAC Printer
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (typeof navigator !== 'undefined' && 'bluetooth' in navigator) {
+                        showToast("🔍 Membuka pencarian Bluetooth LE untuk mendeteksi Printer...");
+                        try {
+                          const device = await (navigator as any).bluetooth.requestDevice({
+                            acceptAllDevices: true
+                          });
+                          if (device && device.name) {
+                            const customDev = { id: `manual-${Date.now()}`, name: device.name };
+                            handleConnectDevice(customDev);
+                          }
+                        } catch (err) {
+                          showToast("⚠️ Bluetooth LE dibatalkan atau tidak didukung di perangkat ini.");
+                        }
+                      } else {
+                        showToast("❌ Browser ini tidak mendukung Bluetooth LE (Gunakan Chrome/Edge/HP Android).");
+                      }
+                    }}
+                    className="w-full py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition cursor-pointer border border-blue-200 flex items-center justify-center gap-1.5 active:scale-[0.98] select-none"
+                    id="btn-scan-nearby-devices"
+                  >
+                    <Bluetooth className="w-3.5 h-3.5" />
+                    🔍 Pindai Perangkat Terdekat (Bluetooth LE)
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -5543,11 +5788,20 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                   className="bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-800 font-extrabold p-1 px-2.5 rounded-lg text-[10px] focus:outline-none cursor-pointer"
                 >
                   <option value="">➕ Tambah Jasa Cucian...</option>
-                  {services.map(s => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} - Rp {s.price.toLocaleString()}/{s.unit}
-                    </option>
-                  ))}
+                  <optgroup label="🧺 LAYANAN KILOAN" className="font-bold text-sky-850 bg-sky-50">
+                    {services.filter(s => s.category === 'kiloan').map(s => (
+                      <option key={s.id} value={s.id} className="font-semibold text-slate-800 bg-white">
+                        {s.name} - Rp {s.price.toLocaleString()}/{s.unit}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="🧥 LAYANAN SATUAN" className="font-bold text-indigo-850 bg-indigo-50">
+                    {services.filter(s => s.category !== 'kiloan').map(s => (
+                      <option key={s.id} value={s.id} className="font-semibold text-slate-800 bg-white">
+                        {s.name} - Rp {s.price.toLocaleString()}/{s.unit}
+                      </option>
+                    ))}
+                  </optgroup>
                 </select>
               </div>
 

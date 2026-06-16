@@ -103,6 +103,7 @@ export type ExpenseCategory =
   | 'Detergen/Softener'
   | 'Transportasi'
   | 'Maintenance'
+  | 'Gas'
   | 'Lainnya';
 
 export interface Expense {
@@ -113,6 +114,7 @@ export interface Expense {
   branchId: string;
   date: string; // ISO string
   recordedBy: string; // User ID / name
+  paymentMethod?: 'Cash' | 'QRIS' | string;
 }
 
 export interface DepositMutation {

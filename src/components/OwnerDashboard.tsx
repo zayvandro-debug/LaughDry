@@ -219,6 +219,20 @@ const styleWorksheet = (ws: any) => {
   ws['!cols'] = colWidths;
 };
 
+// Robust date-to-local string converters to prevent timezone offset shifts
+const getOrderLocalDate = (oDate: string | undefined): string => {
+  if (!oDate) return '';
+  if (/^\d{4}-\d{2}-\d{2}/.test(oDate)) {
+    return oDate.substring(0, 10);
+  }
+  const d = new Date(oDate);
+  if (isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
 interface OwnerDashboardProps {
   onLogout?: () => void;
   onSwitchConsole?: (consoleType: any) => void;
@@ -231,6 +245,13 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  
+  const [canRestoreOrders, setCanRestoreOrders] = useState<boolean>(() => {
+    return !!localStorage.getItem('laughdry_backup_orders');
+  });
+  const [canRestoreExpenses, setCanRestoreExpenses] = useState<boolean>(() => {
+    return !!localStorage.getItem('laughdry_backup_expenses');
+  });
   const [branches, setBranches] = useState<Branch[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [templates, setTemplates] = useState<WhatsAppTemplate[]>([]);
@@ -277,6 +298,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     amount: '',
     branchId: 'br-1',
     date: new Date().toISOString().split('T')[0],
+    paymentMethod: 'Cash',
   });
 
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
@@ -303,6 +325,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
   const [showMonthlyRevenueDetail, setShowMonthlyRevenueDetail] = useState<boolean>(false);
   const [showPaymentMethodDetail, setShowPaymentMethodDetail] = useState<boolean>(false);
   const [selectedActiveCashier, setSelectedActiveCashier] = useState<any | null>(null);
+  const [selectedActivityDetailLabel, setSelectedActivityDetailLabel] = useState<string | null>(null);
   
   // Date Picker ranges for popular payment methods (defaults to current month)
   const [paymentStartDate, setPaymentStartDate] = useState<string>(() => {
@@ -627,7 +650,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     triggerToast("Layanan berhasil dinonaktifkan!");
   };
 
-  const startEditExpense = (exp: Expense) => {
+   const startEditExpense = (exp: Expense) => {
     setEditingExpenseId(exp.id);
     setExpenseForm({
       description: exp.description,
@@ -635,6 +658,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
       amount: exp.amount.toString(),
       branchId: exp.branchId || 'br-1',
       date: exp.date ? exp.date.split('T')[0] : new Date().toISOString().split('T')[0],
+      paymentMethod: exp.paymentMethod || 'Cash',
     });
     setShowAddExpense(true);
   };
@@ -672,8 +696,9 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
           amount: amountVal,
           branchId: expenseForm.branchId,
           date: expenseForm.date ? new Date(expenseForm.date).toISOString() : currentExpenses[idx].date,
+          paymentMethod: expenseForm.paymentMethod || 'Cash',
         };
-        LaughDryDatabase.logActivity('usr-1', 'Andi Owner', 'owner', 'EXPENSE_UPDATE', `Mengubah pengeluaran [${expenseForm.description}] sebesar Rp ${amountVal}`);
+        LaughDryDatabase.logActivity('usr-1', 'Andi Owner', 'owner', 'EXPENSE_UPDATE', `Mengubah pengeluaran [${expenseForm.description}] sebesar Rp ${amountVal} (${expenseForm.paymentMethod})`);
       }
       setEditingExpenseId(null);
     } else {
@@ -685,15 +710,16 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
         branchId: expenseForm.branchId,
         date: expenseForm.date ? new Date(expenseForm.date).toISOString() : new Date().toISOString(),
         recordedBy: 'Andi Owner',
+        paymentMethod: expenseForm.paymentMethod || 'Cash',
       };
       currentExpenses.unshift(newExp);
-      LaughDryDatabase.logActivity('usr-1', 'Andi Owner', 'owner', 'EXPENSE_RECORD', `Mencatat pengeluaran [${expenseForm.description}] sebesar Rp ${amountVal}`);
+      LaughDryDatabase.logActivity('usr-1', 'Andi Owner', 'owner', 'EXPENSE_RECORD', `Mencatat pengeluaran [${expenseForm.description}] sebesar Rp ${amountVal} (${expenseForm.paymentMethod})`);
     }
 
     LaughDryDatabase.saveExpenses(currentExpenses);
     setExpenses(currentExpenses);
     setShowAddExpense(false);
-    setExpenseForm({ description: '', category: 'Detergen/Softener', amount: '', branchId: 'br-1', date: new Date().toISOString().split('T')[0] });
+    setExpenseForm({ description: '', category: 'Detergen/Softener', amount: '', branchId: 'br-1', date: new Date().toISOString().split('T')[0], paymentMethod: 'Cash' });
     loadDatabaseState();
     triggerToast("Pengeluaran operasional berhasil disimpan!");
   };
@@ -984,6 +1010,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
       "Diubah_Pada",
       "Estimasi_Selesai",
       "Selesai_Pada",
+      "Tanggal_Pembayaran",
       "Poin_Didapat",
       "Poin_Ditukar",
       "Aroma_Parfum",
@@ -1008,6 +1035,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
       order.updatedAt,
       order.estimatedCompletion,
       order.completedAt,
+      order.paymentDate || "",
       order.pointsEarned,
       order.pointsRedeemed || 0,
       order.perfume,
@@ -1028,6 +1056,188 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     triggerToast(`✅ Berhasil mengekspor ${orders.length} transaksi ke Excel!`);
   };
 
+  const handleDownloadImportTemplate = () => {
+    const headers = [
+      "ID_Transaksi",
+      "No_Nota",
+      "ID_Pelanggan",
+      "Nama_Pelanggan",
+      "No_HP_Pelanggan",
+      "ID_Cabang",
+      "Total_Tagihan",
+      "Metode_Pembayaran",
+      "Status_Pembayaran",
+      "Status_Cucian",
+      "Catatan",
+      "Dibuat_Pada",
+      "Diubah_Pada",
+      "Estimasi_Selesai",
+      "Selesai_Pada",
+      "Tanggal_Pembayaran",
+      "Poin_Didapat",
+      "Poin_Ditukar",
+      "Aroma_Parfum",
+      "ID_Kasir",
+      "Nama_Kasir",
+      "Rincian_Item_JSON"
+    ];
+
+    const sampleRow1 = [
+      "ord-sample-01",
+      "LD-260614-991",
+      "cust-sample-1",
+      "Hendra Wijaya",
+      "081234567890",
+      "br-1",
+      35000,
+      "Cash",
+      "Lunas",
+      "Selesai",
+      "Cuci bersih setrika wangi sekali",
+      new Date().toISOString(),
+      new Date().toISOString(),
+      new Date(Date.now() + 86400000 * 2).toISOString(),
+      new Date().toISOString(),
+      new Date().toISOString(),
+      35,
+      0,
+      "Sakura",
+      "usr-rian",
+      "Rian",
+      JSON.stringify([
+        {
+          id: "item-sample-1",
+          serviceId: "srv-1",
+          serviceName: "Cuci Satuan Kiloan",
+          price: 7000,
+          quantity: 5,
+          subtotal: 35000
+        }
+      ])
+    ];
+
+    const sampleRow2 = [
+      "ord-sample-02",
+      "LD-260614-992",
+      "cust-sample-2",
+      "Siti Maria",
+      "089876543210",
+      "br-1",
+      15000,
+      "QRIS",
+      "Lunas",
+      "Antrean",
+      "Jangan campur pakaian warna putih",
+      new Date().toISOString(),
+      new Date().toISOString(),
+      new Date(Date.now() + 86400000).toISOString(),
+      "",
+      new Date().toISOString(),
+      15,
+      0,
+      "Lavender",
+      "usr-rian",
+      "Rian",
+      ""
+    ];
+
+    const data = [headers, sampleRow1, sampleRow2];
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    styleWorksheet(ws);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Template Impor Transaksi");
+
+    XLSX.writeFile(wb, "template_impor_laundry.xlsx");
+    triggerToast("📥 Template Excel Impor Berhasil Diunduh!");
+  };
+
+  const parseExcelDate = (val: any): string => {
+    if (!val) return new Date().toISOString();
+    
+    // If it's already a JS Date object
+    if (val instanceof Date) {
+      return val.toISOString();
+    }
+
+    // If it's a number (Excel date serial format, e.g., 42000+)
+    if (typeof val === 'number') {
+      const date = new Date((val - 25569) * 86400 * 1000);
+      if (!isNaN(date.getTime())) {
+        return date.toISOString();
+      }
+    }
+
+    const str = String(val).trim();
+    if (!str) return new Date().toISOString();
+
+    // "YYYY-MM-DD" or similar ISO
+    if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+      if (str.length === 10) {
+        return `${str}T12:00:00.000Z`;
+      }
+      return str;
+    }
+
+    // DD/MM/YYYY or DD-MM-YYYY or DD/MM/YY etc.
+    const dmyMatch = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+    if (dmyMatch) {
+      const day = parseInt(dmyMatch[1], 10);
+      const month = parseInt(dmyMatch[2], 10) - 1; // 0-based month
+      let year = parseInt(dmyMatch[3], 10);
+      if (year < 100) {
+        year += 2000;
+      }
+      const hrs = dmyMatch[4] ? parseInt(dmyMatch[4], 10) : 12;
+      const mins = dmyMatch[5] ? parseInt(dmyMatch[5], 10) : 0;
+      const secs = dmyMatch[6] ? parseInt(dmyMatch[6], 10) : 0;
+      const d = new Date(year, month, day, hrs, mins, secs);
+      if (!isNaN(d.getTime())) {
+        return d.toISOString();
+      }
+    }
+
+    // MM/DD/YYYY or similar if fallback
+    try {
+      const d = new Date(str);
+      if (!isNaN(d.getTime())) {
+        return d.toISOString();
+      }
+    } catch {}
+
+    return new Date().toISOString();
+  };
+
+  const mapImportedStatus = (val: string): OrderStatus => {
+    const norm = String(val || "").trim().toLowerCase();
+    if (norm === 'ready' || norm === 'siap' || norm === 'siap ambil' || norm === 'siap diambil' || norm === 'siap_ambil' || norm === 'siap_diambil') {
+      return OrderStatus.SIAP_DIAMBIL;
+    }
+    if (norm === 'antri' || norm === 'antrean' || norm === 'queue') {
+      return OrderStatus.ANTRI;
+    }
+    if (norm === 'dicuci' || norm === 'cuci' || norm === 'laundry') {
+      return OrderStatus.DICUCI;
+    }
+    if (norm === 'disetrika/dilipat' || norm === 'setrika' || norm === 'setrika/lipat' || norm === 'ironing') {
+      return OrderStatus.DISETRIKA_DILIPAT;
+    }
+    if (norm === 'dikemas' || norm === 'kemas' || norm === 'packing') {
+      return OrderStatus.DIKEMAS;
+    }
+    if (norm === 'selesai' || norm === 'completed' || norm === 'done') {
+      return OrderStatus.SELESAI;
+    }
+    if (norm === 'dibatalkan' || norm === 'batal' || norm === 'cancelled') {
+      return OrderStatus.DIBATALKAN;
+    }
+    
+    const values = Object.values(OrderStatus);
+    const matched = values.find(v => v.toLowerCase() === norm);
+    if (matched) return matched;
+    
+    return OrderStatus.SELESAI; // default
+  };
+
   const handleImportExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -1041,7 +1251,8 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
           return;
         }
         
-        const workbook = XLSX.read(data, { type: 'array' });
+        // Pass cellDates: true so excel serial dates are parsed into real JS Dates automatically!
+        const workbook = XLSX.read(data, { type: 'array', cellDates: true });
         const firstSheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheetName];
         
@@ -1068,6 +1279,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
         const updatedIdx = headers.indexOf("Diubah_Pada");
         const estIdx = headers.indexOf("Estimasi_Selesai");
         const complIdx = headers.indexOf("Selesai_Pada");
+        const payDateIdx = headers.indexOf("Tanggal_Pembayaran");
         const ptsEarnIdx = headers.indexOf("Poin_Didapat");
         const ptsRedIdx = headers.indexOf("Poin_Ditukar");
         const perfumeIdx = headers.indexOf("Aroma_Parfum");
@@ -1096,12 +1308,16 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
           const totalAmount = Number(cols[totalIdx]) || 0;
           const paymentMethod = ((payMethodIdx !== -1 && cols[payMethodIdx]) ? String(cols[payMethodIdx]) : "Cash") as any;
           const paymentStatus = ((payStatusIdx !== -1 && cols[payStatusIdx]) ? String(cols[payStatusIdx]) : "Lunas") as any;
-          const status = ((statusIdx !== -1 && cols[statusIdx]) ? String(cols[statusIdx]) : "Selesai") as any;
+          const rawStatus = (statusIdx !== -1 && cols[statusIdx]) ? String(cols[statusIdx]) : "Selesai";
+          const status = mapImportedStatus(rawStatus);
           const notes = (notesIdx !== -1 && cols[notesIdx]) ? String(cols[notesIdx]) : "";
-          const createdAt = (createdIdx !== -1 && cols[createdIdx]) ? String(cols[createdIdx]) : new Date().toISOString();
-          const updatedAt = (updatedIdx !== -1 && cols[updatedIdx]) ? String(cols[updatedIdx]) : new Date().toISOString();
-          const estimatedCompletion = (estIdx !== -1 && cols[estIdx]) ? String(cols[estIdx]) : new Date().toISOString();
-          const completedAt = (complIdx !== -1 && cols[complIdx]) ? String(cols[complIdx]) : undefined;
+          const createdAt = (createdIdx !== -1 && cols[createdIdx]) ? parseExcelDate(cols[createdIdx]) : new Date().toISOString();
+          const updatedAt = (updatedIdx !== -1 && cols[updatedIdx]) ? parseExcelDate(cols[updatedIdx]) : new Date().toISOString();
+          const estimatedCompletion = (estIdx !== -1 && cols[estIdx]) ? parseExcelDate(cols[estIdx]) : new Date().toISOString();
+          const completedAt = (complIdx !== -1 && cols[complIdx]) ? parseExcelDate(cols[complIdx]) : undefined;
+          const paymentDate = (payDateIdx !== -1 && cols[payDateIdx]) 
+            ? parseExcelDate(cols[payDateIdx]) 
+            : (paymentStatus === 'Lunas' ? parseExcelDate(createdAt) : undefined);
           const pointsEarned = ptsEarnIdx !== -1 ? (Number(cols[ptsEarnIdx]) || 0) : 0;
           const pointsRedeemed = ptsRedIdx !== -1 ? (Number(cols[ptsRedIdx]) || 0) : undefined;
           const perfume = (perfumeIdx !== -1 && cols[perfumeIdx]) ? cols[perfumeIdx] as any : undefined;
@@ -1150,6 +1366,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
             updatedAt,
             estimatedCompletion,
             completedAt,
+            paymentDate,
             pointsEarned,
             pointsRedeemed,
             perfume,
@@ -1163,6 +1380,11 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
           triggerToast("⚠️ Tidak ada data valid yang bisa diimpor.");
           return;
         }
+
+        // Backup current database before we modify
+        localStorage.setItem('laughdry_backup_orders', JSON.stringify(orders));
+        localStorage.setItem('laughdry_backup_customers', JSON.stringify(customers));
+        setCanRestoreOrders(true);
 
         const currentOrders = [...orders];
         let importCount = 0;
@@ -1218,6 +1440,246 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     reader.readAsArrayBuffer(file);
   };
 
+  const handleRestoreOrdersBackup = () => {
+    const rawBackupOrders = localStorage.getItem('laughdry_backup_orders');
+    const rawBackupCustomers = localStorage.getItem('laughdry_backup_customers');
+    if (!rawBackupOrders) {
+      triggerToast("⚠️ Tidak ada data backup transaksi sebelumnya untuk dikembalikan.");
+      return;
+    }
+    try {
+      const backupOrders = JSON.parse(rawBackupOrders);
+      const backupCustomers = rawBackupCustomers ? JSON.parse(rawBackupCustomers) : [];
+      
+      LaughDryDatabase.saveOrders(backupOrders);
+      setOrders(backupOrders);
+      
+      if (backupCustomers.length > 0) {
+        LaughDryDatabase.saveCustomers(backupCustomers);
+        setCustomers(backupCustomers);
+      }
+      
+      localStorage.removeItem('laughdry_backup_orders');
+      localStorage.removeItem('laughdry_backup_customers');
+      setCanRestoreOrders(false);
+      
+      LaughDryDatabase.logActivity('usr-1', getOwnerName(), 'owner', 'RESTORE_ORDER_EXCEL', `Mengembalikan database transaksi sebelum impor terakhir`);
+      triggerToast("🎉 Database transaksi laundry berhasil dikembalikan ke kondisi sebelum impor terakhir!");
+    } catch (err: any) {
+      console.error(err);
+      triggerToast(`⚠️ Gagal mengembalikan data backup: ${err.message || err}`);
+    }
+  };
+
+  const handleDownloadExpenseTemplate = () => {
+    const headers = [
+      "Tanggal",
+      "Kategori",
+      "Deskripsi_Pengeluaran",
+      "Jumlah_Biaya",
+      "ID_Cabang",
+      "Disimpan_Oleh",
+      "Metode_Pembayaran"
+    ];
+
+    const sampleRow1 = [
+      new Date().toISOString().split('T')[0],
+      "Detergen/Softener",
+      "Pembelian Detergen Sakura Wangi 5L & Softener Soft",
+      155000,
+      "br-1",
+      getOwnerName(),
+      "Cash"
+    ];
+
+    const sampleRow2 = [
+      new Date().toISOString().split('T')[0],
+      "Listrik",
+      "Pembelian Token Listrik Cabang Utama",
+      250000,
+      "br-1",
+      getOwnerName(),
+      "QRIS"
+    ];
+
+    const sampleRow3 = [
+      new Date().toISOString().split('T')[0],
+      "Gaji",
+      "Gaji Bulanan Staff Rian",
+      2200000,
+      "br-1",
+      getOwnerName(),
+      "Cash"
+    ];
+
+    const sampleRow4 = [
+      new Date().toISOString().split('T')[0],
+      "Gas",
+      "Pembelian Tabung Gas LPG 12kg untuk Pengering",
+      165000,
+      "br-1",
+      getOwnerName(),
+      "Cash"
+    ];
+
+    const data = [headers, sampleRow1, sampleRow2, sampleRow3, sampleRow4];
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    styleWorksheet(ws);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Template Impor OPEX");
+
+    XLSX.writeFile(wb, "template_impor_opex.xlsx");
+    triggerToast("📥 Template Excel OPEX Berhasil Diunduh!");
+  };
+
+  const handleImportExpensesExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = event.target?.result;
+        if (!data) {
+          triggerToast("⚠️ File kosong atau tidak valid!");
+          return;
+        }
+
+        const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+
+        const sheetData = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1 });
+        if (sheetData.length < 2) {
+          triggerToast("⚠️ Format Excel tidak valid (Kurang dari 2 baris)!");
+          return;
+        }
+
+        const headers = sheetData[0].map((h: any) => String(h || "").trim());
+        const dateIdx = headers.findIndex(h => h === "Tanggal" || h === "Waktu");
+        const categoryIdx = headers.findIndex(h => h === "Kategori" || h === "Mata_Anggaran");
+        const descIdx = headers.findIndex(h => h === "Deskripsi_Pengeluaran" || h === "Deskripsi");
+        const amountIdx = headers.findIndex(h => h === "Jumlah_Biaya" || h === "Jumlah" || h === "Nominal");
+        const branchIdx = headers.findIndex(h => h === "ID_Cabang" || h === "Cabang");
+        const recordedIdx = headers.findIndex(h => h === "Disimpan_Oleh" || h === "Recorded_By" || h === "Petugas");
+        const payMethodIdx = headers.findIndex(h => h === "Metode_Pembayaran" || h === "Metode" || h === "Payment_Method" || h === "Payment" || h === "Metode_Pengeluaran" || h === "Keluar_Lewat");
+
+        if (descIdx === -1 || amountIdx === -1 || categoryIdx === -1) {
+          triggerToast("⚠️ Format kolom Excel salah! Pastikan kolom 'Kategori', 'Deskripsi_Pengeluaran', dan 'Jumlah_Biaya' tersedia.");
+          return;
+        }
+
+        const importedExpenses: Expense[] = [];
+
+        for (let k = 1; k < sheetData.length; k++) {
+          const cols = sheetData[k];
+          if (!cols || cols.length === 0) continue;
+          if (!cols[descIdx] && !cols[amountIdx]) continue; // Skip empty rows
+
+          const rawDate = dateIdx !== -1 ? cols[dateIdx] : undefined;
+          const date = rawDate ? parseExcelDate(rawDate) : new Date().toISOString();
+          
+          let categoryStr = categoryIdx !== -1 ? String(cols[categoryIdx] || "Lainnya").trim() : "Lainnya";
+          // Map to known category options or default to 'Lainnya'
+          const validCategories = ["Gaji", "Listrik", "Air", "Sewa", "Perlengkapan", "Detergen/Softener", "Transportasi", "Maintenance", "Gas", "Lainnya"];
+          let category: any = "Lainnya";
+          const matched = validCategories.find(c => c.toLowerCase() === categoryStr.toLowerCase());
+          if (matched) {
+            category = matched;
+          } else {
+            // Check subsets
+            if (categoryStr.toLowerCase().includes("gaji") || categoryStr.toLowerCase().includes("pay")) category = "Gaji";
+            else if (categoryStr.toLowerCase().includes("listrik") || categoryStr.toLowerCase().includes("token")) category = "Listrik";
+            else if (categoryStr.toLowerCase().includes("air") || categoryStr.toLowerCase().includes("pdam")) category = "Air";
+            else if (categoryStr.toLowerCase().includes("sewa") || categoryStr.toLowerCase().includes("kontrak")) category = "Sewa";
+            else if (categoryStr.toLowerCase().includes("detergen") || categoryStr.toLowerCase().includes("sabun") || categoryStr.toLowerCase().includes("softener")) category = "Detergen/Softener";
+            else if (categoryStr.toLowerCase().includes("perlengkapan") || categoryStr.toLowerCase().includes("plastik")) category = "Perlengkapan";
+            else if (categoryStr.toLowerCase().includes("transport") || categoryStr.toLowerCase().includes("bensin") || categoryStr.toLowerCase().includes("ojek")) category = "Transportasi";
+            else if (categoryStr.toLowerCase().includes("mainten") || categoryStr.toLowerCase().includes("perbaikan") || categoryStr.toLowerCase().includes("servis")) category = "Maintenance";
+            else if (categoryStr.toLowerCase().includes("gas") || categoryStr.toLowerCase().includes("lpg") || categoryStr.toLowerCase().includes("tabung")) category = "Gas";
+          }
+
+          const description = String(cols[descIdx] || "Pengeluaran Hasil Impor");
+          const amount = Number(cols[amountIdx]) || 0;
+          const branchId = branchIdx !== -1 && cols[branchIdx] ? String(cols[branchIdx]) : "br-1";
+          const recordedBy = recordedIdx !== -1 && cols[recordedIdx] ? String(cols[recordedIdx]) : "Andi Owner";
+
+          let paymentMethod = 'Cash';
+          if (payMethodIdx !== -1 && cols[payMethodIdx]) {
+            const rawMethod = String(cols[payMethodIdx]).trim().toUpperCase();
+            if (rawMethod.includes("QRIS")) {
+              paymentMethod = "QRIS";
+            } else if (rawMethod.includes("CASH") || rawMethod.includes("TUNAI")) {
+              paymentMethod = "Cash";
+            } else {
+              paymentMethod = String(cols[payMethodIdx]).trim();
+            }
+          }
+
+          importedExpenses.push({
+            id: `exp-imported-${Date.now()}-${k}`,
+            description,
+            category,
+            amount,
+            branchId,
+            date,
+            recordedBy,
+            paymentMethod
+          });
+        }
+
+        if (importedExpenses.length === 0) {
+          triggerToast("⚠️ Tidak ada data pengeluaran valid yang bisa diimpor.");
+          return;
+        }
+
+        // Backup expenses before modifying
+        localStorage.setItem('laughdry_backup_expenses', JSON.stringify(expenses));
+        setCanRestoreExpenses(true);
+
+        const currentExpenses = [...expenses];
+        currentExpenses.unshift(...importedExpenses);
+
+        LaughDryDatabase.saveExpenses(currentExpenses);
+        setExpenses(currentExpenses);
+
+        LaughDryDatabase.logActivity('usr-1', getOwnerName(), 'owner', 'IMPORT_EXP_EXCEL', `Mengimpor ${importedExpenses.length} data pengeluaran dari Excel`);
+        triggerToast(`🎉 Berhasil mengimpor ${importedExpenses.length} data pengeluaran OPEX!`);
+
+        if (e.target) {
+          e.target.value = "";
+        }
+      } catch (err: any) {
+        console.error(err);
+        triggerToast(`⚠️ Gagal mengimpor data pengeluaran Excel: ${err.message || err}`);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleRestoreExpensesBackup = () => {
+    const rawBackupExpenses = localStorage.getItem('laughdry_backup_expenses');
+    if (!rawBackupExpenses) {
+      triggerToast("⚠️ Tidak ada data backup pengeluaran sebelumnya untuk dikembalikan.");
+      return;
+    }
+    try {
+      const backupExpenses = JSON.parse(rawBackupExpenses);
+      
+      LaughDryDatabase.saveExpenses(backupExpenses);
+      setExpenses(backupExpenses);
+      
+      localStorage.removeItem('laughdry_backup_expenses');
+      setCanRestoreExpenses(false);
+      
+      LaughDryDatabase.logActivity('usr-1', getOwnerName(), 'owner', 'RESTORE_EXP_EXCEL', `Mengembalikan database pengeluaran (OPEX) ke kondisi sebelum impor terakhir`);
+      triggerToast("🎉 Database pengeluaran (OPEX) berhasil dikembalikan ke kondisi sebelum impor terakhir!");
+    } catch (err: any) {
+      console.error(err);
+      triggerToast(`⚠️ Gagal mengembalikan data backup pengeluaran: ${err.message || err}`);
+    }
+  };
+
   const handleTemplateChange = (id: string, body: string) => {
     const updated = templates.map(t => t.id === id ? { ...t, body } : t);
     LaughDryDatabase.saveTemplates(updated);
@@ -1262,23 +1724,23 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
   const labaBersih = totalOmzet - totalOPEX;
 
   const todayDateStr = new Date().toISOString().slice(0, 10);
-  const hasOrdersToday = filteredOrders.some(o => o.createdAt.startsWith(todayDateStr));
+  const hasOrdersToday = filteredOrders.some(o => getOrderLocalDate(o.createdAt) === todayDateStr);
   const activeTodayStr = hasOrdersToday ? todayDateStr : '2026-05-30';
 
-  const orderHariIniCount = filteredOrders.filter(o => o.createdAt.startsWith(activeTodayStr)).length;
+  const orderHariIniCount = filteredOrders.filter(o => getOrderLocalDate(o.createdAt) === activeTodayStr).length;
   const omzetHariIni = filteredOrders
-    .filter(o => (o.paymentDate || o.createdAt).startsWith(activeTodayStr) && o.paymentStatus === 'Lunas' && o.status !== OrderStatus.DIBATALKAN)
+    .filter(o => getOrderLocalDate(o.paymentDate || o.createdAt) === activeTodayStr && o.paymentStatus === 'Lunas' && o.status !== OrderStatus.DIBATALKAN)
     .reduce((sum, o) => sum + o.totalAmount, 0);
 
   const piutangHariIni = filteredOrders
-    .filter(o => o.createdAt.startsWith(activeTodayStr) && o.paymentStatus !== 'Lunas' && o.status !== OrderStatus.DIBATALKAN)
+    .filter(o => getOrderLocalDate(o.createdAt) === activeTodayStr && o.paymentStatus !== 'Lunas' && o.status !== OrderStatus.DIBATALKAN)
     .reduce((sum, o) => sum + o.totalAmount, 0);
 
   // Business Intelligence Forecasting (Linear Regression trend)
   // Let's analyze omzet of 28th, 29th, 30th May 2026 to output standard forecast
   const getOmzetByDate = (dateStr: string) => {
     return filteredOrders
-      .filter(o => (o.paymentDate || o.createdAt).startsWith(dateStr) && o.paymentStatus === 'Lunas' && o.status !== OrderStatus.DIBATALKAN)
+      .filter(o => getOrderLocalDate(o.paymentDate || o.createdAt) === dateStr && o.paymentStatus === 'Lunas' && o.status !== OrderStatus.DIBATALKAN)
       .reduce((sum, o) => sum + o.totalAmount, 0);
   };
 
@@ -1364,10 +1826,10 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
   // Real-time Selected Month Transactions List for Detail Popup
   const monthlyTransactions = React.useMemo(() => {
     const start = monthlyReportStartDate;
-    const end = monthlyReportEndDate + "T23:59:59";
+    const end = monthlyReportEndDate;
     return filteredOrders.filter(o => {
       if (o.status === OrderStatus.DIBATALKAN) return false;
-      const paymentTime = o.paymentDate || o.createdAt;
+      const paymentTime = getOrderLocalDate(o.paymentDate || o.createdAt);
       return paymentTime >= start && paymentTime <= end;
     });
   }, [monthlyReportStartDate, monthlyReportEndDate, filteredOrders]);
@@ -1435,12 +1897,12 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
       const dailyRevenue = filteredOrders
         .filter(o => {
           const oDate = o.paymentDate || o.createdAt;
-          return oDate.startsWith(datePrefix) && o.paymentStatus === 'Lunas' && o.status !== OrderStatus.DIBATALKAN;
+          return getOrderLocalDate(oDate) === datePrefix && o.paymentStatus === 'Lunas' && o.status !== OrderStatus.DIBATALKAN;
         })
         .reduce((sum, o) => sum + o.totalAmount, 0);
 
       const dailyTrxCount = filteredOrders
-        .filter(o => o.createdAt.startsWith(datePrefix) && o.status !== OrderStatus.DIBATALKAN)
+        .filter(o => getOrderLocalDate(o.createdAt) === datePrefix && o.status !== OrderStatus.DIBATALKAN)
         .length;
 
       data.push({
@@ -1536,22 +1998,53 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     let packingCount = 0;
     let selesaiCount = 0;
 
+    const newTransactionsList: Order[] = [];
+    const cuciList: Order[] = [];
+    const setrikaList: Order[] = [];
+    const packingList: Order[] = [];
+    const selesaiList: Order[] = [];
+
     // Scan logs
     cashierLogs.forEach(log => {
       const action = log.action || '';
       const details = log.details || '';
 
+      // Try to find the order by matching invoice (e.g. #LD-100234)
+      let foundOrder: Order | undefined;
+      const invoiceMatch = details.match(/#(LD-[0-9a-zA-Z-]+)/i) || details.match(/#(10[0-9a-zA-Z-]+)/i);
+      if (invoiceMatch) {
+        const invNum = invoiceMatch[1];
+        foundOrder = orders.find(o => o.invoiceNumber === invNum || o.invoiceNumber === '#' + invNum || o.invoiceNumber.toLowerCase().includes(invNum.toLowerCase()));
+      }
+
       if (action === 'ORDER_CREATE') {
         newTransactionsCount++;
+        if (foundOrder) {
+          if (!newTransactionsList.some(o => o.id === foundOrder!.id)) {
+            newTransactionsList.push(foundOrder);
+          }
+        }
       } else if (action === 'STATUS_TRANSITION') {
         if (details.includes('ke [Dicuci]')) {
           cuciCount++;
+          if (foundOrder) {
+            if (!cuciList.some(o => o.id === foundOrder!.id)) cuciList.push(foundOrder);
+          }
         } else if (details.includes('ke [Disetrika/Dilipat]') || details.includes('ke [Disetrika]')) {
           setrikaCount++;
+          if (foundOrder) {
+            if (!setrikaList.some(o => o.id === foundOrder!.id)) setrikaList.push(foundOrder);
+          }
         } else if (details.includes('ke [Dikemas]') || details.includes('ke [Siap Diambil]')) {
           packingCount++;
+          if (foundOrder) {
+            if (!packingList.some(o => o.id === foundOrder!.id)) packingList.push(foundOrder);
+          }
         } else if (details.includes('ke [Selesai]')) {
           selesaiCount++;
+          if (foundOrder) {
+            if (!selesaiList.some(o => o.id === foundOrder!.id)) selesaiList.push(foundOrder);
+          }
         }
       }
     });
@@ -1566,6 +2059,9 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
           const hasLog = cashierLogs.some(l => l.action === 'ORDER_CREATE' && l.details.includes(o.invoiceNumber));
           if (!hasLog) {
             newTransactionsCount++;
+            if (!newTransactionsList.some(x => x.id === o.id)) {
+              newTransactionsList.push(o);
+            }
           }
 
           // Deduce status accomplishments that might not have a detailed persistent audit log
@@ -1574,18 +2070,46 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
 
           if (o.status === OrderStatus.DICUCI && !hasStatusLog('dicuci')) {
             cuciCount++;
+            if (!cuciList.some(x => x.id === o.id)) cuciList.push(o);
           } else if (o.status === OrderStatus.DISETRIKA_DILIPAT) {
-            if (!hasStatusLog('dicuci')) cuciCount++;
-            if (!hasStatusLog('setrika')) setrikaCount++;
+            if (!hasStatusLog('dicuci')) {
+              cuciCount++;
+              if (!cuciList.some(x => x.id === o.id)) cuciList.push(o);
+            }
+            if (!hasStatusLog('setrika')) {
+              setrikaCount++;
+              if (!setrikaList.some(x => x.id === o.id)) setrikaList.push(o);
+            }
           } else if (o.status === OrderStatus.DIKEMAS || o.status === OrderStatus.SIAP_DIAMBIL) {
-            if (!hasStatusLog('dicuci')) cuciCount++;
-            if (!hasStatusLog('setrika')) setrikaCount++;
-            if (!hasStatusLog('dikemas') && !hasStatusLog('siap')) packingCount++;
+            if (!hasStatusLog('dicuci')) {
+              cuciCount++;
+              if (!cuciList.some(x => x.id === o.id)) cuciList.push(o);
+            }
+            if (!hasStatusLog('setrika')) {
+              setrikaCount++;
+              if (!setrikaList.some(x => x.id === o.id)) setrikaList.push(o);
+            }
+            if (!hasStatusLog('dikemas') && !hasStatusLog('siap')) {
+              packingCount++;
+              if (!packingList.some(x => x.id === o.id)) packingList.push(o);
+            }
           } else if (o.status === OrderStatus.SELESAI) {
-            if (!hasStatusLog('dicuci')) cuciCount++;
-            if (!hasStatusLog('setrika')) setrikaCount++;
-            if (!hasStatusLog('dikemas') && !hasStatusLog('siap')) packingCount++;
-            if (!hasStatusLog('selesai')) selesaiCount++;
+            if (!hasStatusLog('dicuci')) {
+              cuciCount++;
+              if (!cuciList.some(x => x.id === o.id)) cuciList.push(o);
+            }
+            if (!hasStatusLog('setrika')) {
+              setrikaCount++;
+              if (!setrikaList.some(x => x.id === o.id)) setrikaList.push(o);
+            }
+            if (!hasStatusLog('dikemas') && !hasStatusLog('siap')) {
+              packingCount++;
+              if (!packingList.some(x => x.id === o.id)) packingList.push(o);
+            }
+            if (!hasStatusLog('selesai')) {
+              selesaiCount++;
+              if (!selesaiList.some(x => x.id === o.id)) selesaiList.push(o);
+            }
           }
         }
       }
@@ -1598,18 +2122,20 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
       packingCount,
       selesaiCount,
       totalActivities: newTransactionsCount + cuciCount + setrikaCount + packingCount + selesaiCount,
-      filteredLogs: cashierLogs
+      filteredLogs: cashierLogs,
+      newTransactionsList,
+      cuciList,
+      setrikaList,
+      packingList,
+      selesaiList
     };
   };
 
   // Helper for downloading a styled / formatted "Lunas Only" report summary Excel book
   const handleDownloadLunasSummaryReport = (startDate: string, endDate: string) => {
-    const startLimit = startDate;
-    const endLimit = endDate + 'T23:59:59';
-    
     const lunasOrders = filteredOrders.filter(o => {
-      const oDate = o.paymentDate || o.createdAt;
-      return oDate >= startLimit && oDate <= endLimit && o.paymentStatus === 'Lunas' && o.status !== OrderStatus.DIBATALKAN;
+      const oDate = getOrderLocalDate(o.paymentDate || o.createdAt);
+      return oDate >= startDate && oDate <= endDate && o.paymentStatus === 'Lunas' && o.status !== OrderStatus.DIBATALKAN;
     });
 
     const totalOmzetLunas = lunasOrders.reduce((sum, o) => sum + o.totalAmount, 0);
@@ -1694,12 +2220,9 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
   };
 
   const handleDownloadLunasPDFReport = (startDate: string, endDate: string) => {
-    const startLimit = startDate;
-    const endLimit = endDate + 'T23:59:59';
-    
     const lunasOrders = filteredOrders.filter(o => {
-      const oDate = o.paymentDate || o.createdAt;
-      return oDate >= startLimit && oDate <= endLimit && o.paymentStatus === 'Lunas' && o.status !== OrderStatus.DIBATALKAN;
+      const oDate = getOrderLocalDate(o.paymentDate || o.createdAt);
+      return oDate >= startDate && oDate <= endDate && o.paymentStatus === 'Lunas' && o.status !== OrderStatus.DIBATALKAN;
     });
 
     const totalOmzetLunas = lunasOrders.reduce((sum, o) => sum + o.totalAmount, 0);
@@ -1720,8 +2243,8 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     });
 
     const unpaidOrders = filteredOrders.filter(o => {
-      const oDate = o.createdAt;
-      return oDate >= startLimit && oDate <= endLimit && o.paymentStatus !== 'Lunas' && o.status !== OrderStatus.DIBATALKAN;
+      const oDate = getOrderLocalDate(o.createdAt);
+      return oDate >= startDate && oDate <= endDate && o.paymentStatus !== 'Lunas' && o.status !== OrderStatus.DIBATALKAN;
     });
     paymentStatusCount['BELUM LUNAS'] = unpaidOrders.length;
 
@@ -1919,48 +2442,78 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
           </h2>
         </div>
 
-        {/* Filters and Utilities (Compact Mobile Layout with Icons Only) */}
-        <div className="flex items-center gap-1 shrink-0">
-          {/* Branch Selector */}
-          <div className="flex items-center gap-0.5 bg-slate-50 border border-slate-150 px-1 py-0.5 rounded-lg text-[10px] shrink-0">
-            <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
-            <select
-              value={selectedBranch}
-              onChange={(e) => setSelectedBranch(e.target.value)}
-              className="bg-transparent font-medium text-slate-700 border-none outline-none focus:ring-0 p-0 text-[10px] h-auto cursor-pointer"
-              id="branch-selector"
+        {/* Filters and Utilities (Adaptive Desktop/Mobile Layout) */}
+        <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2 shrink-0">
+          {/* Top row / Left group */}
+          <div className="flex items-center gap-1 flex-wrap justify-end">
+            {/* Branch Selector */}
+            <div className="flex items-center gap-0.5 bg-slate-50 border border-slate-150 px-1.5 py-1 rounded-lg text-[10px] shrink-0">
+              <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+              <select
+                value={selectedBranch}
+                onChange={(e) => setSelectedBranch(e.target.value)}
+                className="bg-transparent font-medium text-slate-700 border-none outline-none focus:ring-0 p-0 text-[10px] h-auto cursor-pointer"
+                id="branch-selector"
+              >
+                <option value="all">Semua</option>
+                {branches.map(b => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              onClick={handleExportExcel}
+              className="flex items-center justify-center w-7 h-7 md:w-8 md:h-8 border border-emerald-250 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg transition shrink-0 cursor-pointer"
+              id="btn-export-excel"
+              title="Ekspor Excel untuk Audit"
             >
-              <option value="all">Semua</option>
-              {branches.map(b => (
-                <option key={b.id} value={b.id}>{b.name}</option>
-              ))}
-            </select>
+              <FileText className="w-3.5 h-3.5" />
+            </button>
+
+            <button
+              onClick={handleDownloadImportTemplate}
+              className="flex items-center justify-center w-7 h-7 md:w-8 md:h-8 border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 rounded-lg transition shrink-0 cursor-pointer"
+              id="btn-download-import-template"
+              title="Unduh Template Excel untuk Impor Database"
+            >
+              <Download className="w-3.5 h-3.5" />
+            </button>
           </div>
 
-          <button
-            onClick={handleExportExcel}
-            className="flex items-center justify-center w-7 h-7 md:w-8 md:h-8 border border-emerald-250 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg transition shrink-0 cursor-pointer"
-            id="btn-export-excel"
-            title="Ekspor Excel untuk Audit"
-          >
-            <FileText className="w-3.5 h-3.5" />
-          </button>
+          {/* Bottom row on mobile, in-line alongside other buttons on desktop */}
+          <div className="flex items-center gap-1 justify-end">
+            <label
+              htmlFor="excel-import-file"
+              className="flex items-center justify-center w-7 h-7 md:w-8 md:h-8 border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg transition cursor-pointer shrink-0"
+              id="label-import-excel"
+              title="Impor Excel"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              <input
+                type="file"
+                id="excel-import-file"
+                accept=".xlsx, .xls"
+                onChange={handleImportExcel}
+                className="hidden"
+              />
+            </label>
 
-          <label
-            htmlFor="excel-import-file"
-            className="flex items-center justify-center w-7 h-7 md:w-8 md:h-8 border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg transition cursor-pointer shrink-0"
-            id="label-import-excel"
-            title="Impor Excel (Restore data)"
-          >
-            <Upload className="w-3.5 h-3.5" />
-            <input
-              type="file"
-              id="excel-import-file"
-              accept=".xlsx, .xls"
-              onChange={handleImportExcel}
-              className="hidden"
-            />
-          </label>
+            {/* Restore Button next to import block */}
+            <button
+              onClick={handleRestoreOrdersBackup}
+              disabled={!canRestoreOrders}
+              className={`flex items-center justify-center w-7 h-7 md:w-8 md:h-8 border rounded-lg transition shrink-0 cursor-pointer ${
+                canRestoreOrders 
+                ? 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100' 
+                : 'border-slate-200 bg-slate-50 text-slate-300 cursor-not-allowed'
+              }`}
+              id="btn-restore-orders"
+              title={canRestoreOrders ? "Kembalikan Database Transaksi (Restore)" : "Tidak ada berkas backup"}
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -2209,14 +2762,14 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                   </div>
                 </div>
 
-                {/* Utilities (Listrik + Air) */}
+                {/* Utilities (Listrik + Air + Gas) */}
                 <div>
                   <div className="flex justify-between font-semibold text-slate-700 mb-1">
                     <span>Utilitas Listrik, Gas & Air</span>
-                    <span>Rp {expenses.filter(e => e.category === 'Listrik' || e.category === 'Air').reduce((s, e) => s + e.amount, 0).toLocaleString()} ({(Math.round((expenses.filter(e => e.category === 'Listrik' || e.category === 'Air').reduce((s, e) => s + e.amount, 0) / (totalOPEX || 1)) * 100)) || 0}%)</span>
+                    <span>Rp {expenses.filter(e => e.category === 'Listrik' || e.category === 'Air' || e.category === 'Gas').reduce((s, e) => s + e.amount, 0).toLocaleString()} ({(Math.round((expenses.filter(e => e.category === 'Listrik' || e.category === 'Air' || e.category === 'Gas').reduce((s, e) => s + e.amount, 0) / (totalOPEX || 1)) * 100)) || 0}%)</span>
                   </div>
                   <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                    <div className="bg-amber-500 h-full rounded-full" style={{ width: `${(expenses.filter(e => e.category === 'Listrik' || e.category === 'Air').reduce((s, e) => s + e.amount, 0) / (totalOPEX || 1)) * 100}%` }}></div>
+                    <div className="bg-amber-500 h-full rounded-full" style={{ width: `${(expenses.filter(e => e.category === 'Listrik' || e.category === 'Air' || e.category === 'Gas').reduce((s, e) => s + e.amount, 0) / (totalOPEX || 1)) * 100}%` }}></div>
                   </div>
                 </div>
 
@@ -3302,6 +3855,58 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
             </div>
           </div>
           <div className="p-4 space-y-6 animate-fadeIn" id="expense-accounting-panel">
+          {/* Excel Import & Restore OPEX Bar - PLACED AT THE VERY TOP */}
+          <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-2xl flex flex-wrap items-center justify-between gap-2.5 text-xs font-sans">
+            <div className="flex items-center gap-1 text-[11px] font-black text-slate-800">
+              <span className="shrink-0">📥 Impor OPEX (Excel)</span>
+            </div>
+            
+            {/* Extremely compact action buttons (perfectly bound for mobile) */}
+            <div className="flex items-center gap-1 flex-wrap">
+              <button
+                type="button"
+                onClick={handleDownloadExpenseTemplate}
+                className="flex items-center gap-1 px-2 py-1.5 bg-white border border-amber-300 text-amber-800 font-extrabold rounded-lg hover:bg-amber-50 active:scale-95 transition cursor-pointer text-[10px] sm:text-[10.5px] h-7 shadow-xs"
+                title="Unduh Contoh/Template Excel Pengeluaran"
+              >
+                <Download className="w-3 h-3 text-amber-600 animate-bounce" />
+                <span>Template</span>
+              </button>
+
+              <label
+                htmlFor="excel-opex-import-file-main"
+                className="flex items-center gap-1 px-2 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold rounded-lg active:scale-95 transition cursor-pointer text-[10px] sm:text-[10.5px] h-7 shadow-xs shrink-0"
+                title="Impor Excel Pengeluaran"
+              >
+                <Upload className="w-3 h-3" />
+                <span>Import</span>
+                <input
+                  type="file"
+                  id="excel-opex-import-file-main"
+                  accept=".xlsx, .xls"
+                  onChange={handleImportExpensesExcel}
+                  className="hidden"
+                />
+              </label>
+
+              {/* Restore Button for OPEX next to import block */}
+              <button
+                onClick={handleRestoreExpensesBackup}
+                disabled={!canRestoreExpenses}
+                className={`flex items-center gap-1 px-2 py-1.5 border rounded-lg transition cursor-pointer text-[10px] sm:text-[10.5px] h-7 shadow-xs active:scale-95 ${
+                  canRestoreExpenses 
+                  ? 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100' 
+                  : 'border-slate-200 bg-slate-50 text-slate-300 cursor-not-allowed'
+                }`}
+                id="btn-restore-expenses"
+                title={canRestoreExpenses ? "Kembalikan Database Pengeluaran (Restore)" : "Tidak ada berkas backup"}
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Restore</span>
+              </button>
+            </div>
+          </div>
+
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-slate-900">Pembukuan Pengeluaran Cabang (Operational Expenditure)</h3>
             <button
@@ -3316,29 +3921,29 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
           </div>
 
           {/* Date Picker Range Filter Bar */}
-          <div className="bg-slate-100/50 p-4 border border-slate-200/60 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs font-sans">
+          <div className="bg-slate-100/50 p-2.5 sm:p-4 border border-slate-200/60 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs font-sans">
             <div className="flex items-center gap-2">
-              <span className="font-bold text-slate-700">Filter Jangka Waktu Pengeluaran:</span>
-              <span className="text-[10px] bg-red-50 text-red-700 px-2 py-0.5 rounded font-black uppercase">Live Range Bound</span>
+              <span className="font-bold text-slate-700 text-[11px] sm:text-xs">Filter Jangka Waktu Pengeluaran:</span>
+              <span className="text-[9px] bg-red-50 text-red-700 px-1.5 py-0.5 rounded font-black uppercase">Live Range Bound</span>
             </div>
             
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5">
-                <span className="text-slate-500">Dari:</span>
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-3">
+              <div className="flex items-center gap-1">
+                <span className="text-slate-500 text-[10.5px]">Dari:</span>
                 <input
                   type="date"
                   value={expenseStartDate}
                   onChange={(e) => setExpenseStartDate(e.target.value)}
-                  className="bg-white border border-slate-205 rounded-xl p-2 text-xs font-semibold focus:outline-none focus:border-red-500"
+                  className="bg-white border border-slate-205 rounded-lg p-1.5 text-[10.5px] font-semibold focus:outline-none focus:border-red-500 w-[112px] sm:w-auto h-7 sm:h-auto"
                 />
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-slate-500">Sampai:</span>
+              <div className="flex items-center gap-1">
+                <span className="text-slate-500 text-[10.5px]">Sampai:</span>
                 <input
                   type="date"
                   value={expenseEndDate}
                   onChange={(e) => setExpenseEndDate(e.target.value)}
-                  className="bg-white border border-slate-205 rounded-xl p-2 text-xs font-semibold focus:outline-none focus:border-red-500"
+                  className="bg-white border border-slate-205 rounded-lg p-1.5 text-[10.5px] font-semibold focus:outline-none focus:border-red-500 w-[112px] sm:w-auto h-7 sm:h-auto"
                 />
               </div>
               {(expenseStartDate !== '2026-05-01' || expenseEndDate !== '2026-05-30') && (
@@ -3348,7 +3953,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                     setExpenseStartDate('2026-05-01');
                     setExpenseEndDate('2026-05-30');
                   }}
-                  className="p-2 px-3 bg-slate-250 hover:bg-slate-300 rounded-xl font-bold transition text-slate-700 hover:text-slate-900"
+                  className="p-1 px-2 bg-slate-250 hover:bg-slate-300 rounded-lg font-bold transition text-slate-700 hover:text-slate-900 text-[10px] h-7 flex items-center justify-center"
                   title="Reset Filter Tanggal"
                 >
                   Reset
@@ -3370,7 +3975,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                     onClick={() => {
                       setShowAddExpense(false);
                       setEditingExpenseId(null);
-                      setExpenseForm({ description: '', category: 'Detergen/Softener', amount: 0, branchId: 'br-1' });
+                      setExpenseForm({ description: '', category: 'Detergen/Softener', amount: '', branchId: 'br-1', date: new Date().toISOString().split('T')[0], paymentMethod: 'Cash' });
                     }}
                     className="text-slate-400 hover:text-slate-650 font-black text-xs cursor-pointer bg-slate-100 hover:bg-slate-200 h-8 w-8 rounded-full flex items-center justify-center transition-colors"
                   >
@@ -3409,7 +4014,21 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                       <option value="Detergen/Softener">Detergen/Softener</option>
                       <option value="Transportasi">Transportasi</option>
                       <option value="Maintenance">Maintenance</option>
+                      <option value="Gas">Gas</option>
                       <option value="Lainnya">Lainnya</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-slate-600 font-semibold block">Metode Pengeluaran / Kas:</label>
+                    <select
+                      value={expenseForm.paymentMethod || 'Cash'}
+                      onChange={(e) => setExpenseForm({ ...expenseForm, paymentMethod: e.target.value })}
+                      className="w-full bg-white border border-slate-200 rounded-lg p-2.5 focus:border-red-650 focus:outline-none"
+                      id="expense-paymentmethod-input"
+                    >
+                      <option value="Cash">💵 Cash / Tunai</option>
+                      <option value="QRIS">📱 QRIS / Non-Tunai</option>
                     </select>
                   </div>
 
@@ -3463,7 +4082,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                     onClick={() => {
                       setShowAddExpense(false);
                       setEditingExpenseId(null);
-                      setExpenseForm({ description: '', category: 'Detergen/Softener', amount: 0, branchId: 'br-1' });
+                      setExpenseForm({ description: '', category: 'Detergen/Softener', amount: '', branchId: 'br-1', date: new Date().toISOString().split('T')[0], paymentMethod: 'Cash' });
                     }}
                     className="px-4 py-2 bg-slate-200 hover:bg-slate-350 text-slate-700 rounded-xl font-bold transition cursor-pointer"
                     id="btn-cancel-expense"
@@ -3485,20 +4104,21 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
           {/* List Expenses Table */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
             <div className="p-4 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
-              <span className="font-bold text-slate-800 text-xs uppercase">Jurnal Jurnal Pengeluaran</span>
+              <span className="font-bold text-slate-800 text-xs uppercase">Jurnal Pengeluaran</span>
               <span className="text-[11px] text-red-600 font-bold bg-red-50 px-2 py-0.5 rounded-full">Total: Rp {totalOPEX.toLocaleString()}</span>
             </div>
             
             <div className="overflow-x-auto">
               <table className="w-full text-left font-sans text-xs">
                 <thead>
-                  <tr className="bg-slate-100 text-slate-600 border-b border-slate-200">
+                  <tr className="bg-slate-100 text-slate-655 border-b border-slate-200">
                     <th className="p-3">Tanggal</th>
-                    <th className="p-3">Deskripsi</th>
                     <th className="p-3">Kategori</th>
-                    <th className="p-3">Cabang</th>
-                    <th className="p-3">Oleh</th>
                     <th className="p-3 text-right">Jumlah (OPEX)</th>
+                    <th className="p-3">Metode</th>
+                    <th className="p-3">Deskripsi</th>
+                    <th className="p-3">Oleh</th>
+                    <th className="p-3">Cabang</th>
                     <th className="p-3 text-center">Aksi</th>
                   </tr>
                 </thead>
@@ -3506,18 +4126,31 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                   {filteredExpenses.slice(0).reverse().map(e => {
                     const branchMock = branches.find(b => b.id === e.branchId);
                     const isEditing = editingExpenseId === e.id;
+                    const d = new Date(e.date);
+                    const formattedDate = isNaN(d.getTime()) 
+                      ? '-' 
+                      : `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
                     return (
                       <tr key={e.id} className={`hover:bg-slate-50/50 ${isEditing ? 'bg-amber-50/70 border-y border-amber-200/50 animate-pulse' : ''}`}>
-                        <td className="p-3 font-mono text-slate-500">{new Date(e.date).toLocaleDateString()}</td>
-                        <td className="p-3 font-semibold">{e.description}</td>
+                        <td className="p-3 font-mono text-slate-500">{formattedDate}</td>
                         <td className="p-3">
                           <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded-lg text-[10px] font-semibold">
                             {e.category}
                           </span>
                         </td>
-                        <td className="p-3 text-slate-500">{branchMock ? branchMock.name : 'Cabang Utama'}</td>
-                        <td className="p-3 text-slate-400">{e.recordedBy || 'Owner'}</td>
                         <td className="p-3 text-right font-black text-rose-600">Rp {e.amount.toLocaleString()}</td>
+                        <td className="p-3">
+                          <span className={`px-2 py-0.5 rounded-lg text-[10.5px] font-bold border ${
+                            e.paymentMethod === 'QRIS'
+                              ? 'bg-purple-100 text-purple-800 border-purple-200'
+                              : 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                          }`}>
+                            {e.paymentMethod === 'QRIS' ? '📱 QRIS' : '💵 Cash'}
+                          </span>
+                        </td>
+                        <td className="p-3 font-semibold">{e.description}</td>
+                        <td className="p-3 text-slate-400">{e.recordedBy || 'Owner'}</td>
+                        <td className="p-3 text-slate-500">{branchMock ? branchMock.name : 'Cabang Utama'}</td>
                         <td className="p-3 text-center">
                           <div className="flex items-center justify-center gap-1.5">
                             <button
@@ -6452,7 +7085,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                 <span>Total Omzet Lunas Terhitung:</span>
                 <strong className="text-emerald-700 font-mono text-sm">
                   Rp {filteredOrders
-                    .filter(o => (o.paymentDate || o.createdAt).startsWith(activeTodayStr) && o.paymentStatus === 'Lunas' && o.status !== OrderStatus.DIBATALKAN)
+                    .filter(o => getOrderLocalDate(o.paymentDate || o.createdAt) === activeTodayStr && o.paymentStatus === 'Lunas' && o.status !== OrderStatus.DIBATALKAN)
                     .reduce((acc, o) => acc + o.totalAmount, 0)
                     .toLocaleString('id-ID')}
                 </strong>
@@ -6460,7 +7093,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
             </div>
 
             <div className="p-6 overflow-y-auto flex-1">
-              {filteredOrders.filter(o => o.createdAt.startsWith(activeTodayStr) && o.paymentStatus === 'Lunas').length === 0 ? (
+              {filteredOrders.filter(o => getOrderLocalDate(o.createdAt) === activeTodayStr && o.paymentStatus === 'Lunas').length === 0 ? (
                 <div className="text-center py-12 text-slate-400 text-xs font-medium">
                   Tidak ada transaksi lunas yang tercatat hari ini.
                 </div>
@@ -6479,7 +7112,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-700">
                       {filteredOrders
-                        .filter(o => o.createdAt.startsWith(activeTodayStr) && o.paymentStatus === 'Lunas')
+                        .filter(o => getOrderLocalDate(o.createdAt) === activeTodayStr && o.paymentStatus === 'Lunas')
                         .map(order => {
                           return (
                             <tr key={order.id} className="hover:bg-slate-50/60 transition duration-150">
@@ -6813,17 +7446,33 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                       {activities.map((act) => {
                         const percent = breakdown.totalActivities > 0 
                           ? Math.round((act.count / breakdown.totalActivities) * 100) 
-                          : 0;
+                           : 0;
+
+                        // Map activity to actual list
+                        let activeList: Order[] = [];
+                        if (act.label === "Membuat Transaksi Baru") activeList = breakdown.newTransactionsList || [];
+                        else if (act.label === "Cuci Pakaian") activeList = breakdown.cuciList || [];
+                        else if (act.label === "Setrika / Lipat") activeList = breakdown.setrikaList || [];
+                        else if (act.label === "Packing / Pengemasan") activeList = breakdown.packingList || [];
+                        else if (act.label === "Menyelesaikan Layanan (Ambil)") activeList = breakdown.selesaiList || [];
+
+                        const isExpanded = selectedActivityDetailLabel === act.label;
 
                         return (
                           <div 
                             key={act.label} 
-                            className={`p-3.5 border ${act.borderClass} ${act.bgClass} rounded-2xl flex flex-col gap-1.5 transition-all duration-200`}
+                            onClick={() => setSelectedActivityDetailLabel(isExpanded ? null : act.label)}
+                            className={`p-3.5 border ${act.borderClass} ${act.bgClass} hover:shadow-sm active:scale-[0.99] cursor-pointer rounded-2xl flex flex-col gap-1.5 transition-all duration-200`}
                           >
-                            <div className="flex items-center justify-between text-xs">
+                            <div 
+                              className="flex items-center justify-between text-xs select-none"
+                            >
                               <span className="font-extrabold flex items-center gap-2 text-slate-800">
                                 <span className="text-sm shrink-0">{act.icon}</span>
-                                {act.label}
+                                <span>{act.label}</span>
+                                <span className="text-[9px] px-1.5 py-0.5 bg-slate-200/80 text-slate-600 rounded-md font-medium">
+                                  {isExpanded ? "▲ Tutup" : "▼ Lihat Rincian"}
+                                </span>
                               </span>
                               <strong className={`${act.textColor} text-sm font-mono`}>
                                 {act.count} <span className="text-[10px] font-semibold text-slate-400">({percent}%)</span>
@@ -6836,6 +7485,49 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                                 style={{ width: `${percent}%` }}
                               />
                             </div>
+
+                            {/* Collapsible details of completed transactions */}
+                            {isExpanded && (
+                              <div 
+                                onClick={(e) => e.stopPropagation()} 
+                                className="mt-3 pt-2.5 border-t border-slate-200/60 space-y-2 animate-fadeIn cursor-default"
+                              >
+                                <div className="text-[9.5px] uppercase font-black text-slate-400 tracking-wider mb-1.5 flex items-center justify-between">
+                                  <span>DAFTAR TRANSAKSI YANG DITANGANI ({activeList.length})</span>
+                                  <span className="text-[8px] font-medium text-slate-400 font-sans italic">*Dideteksi otomatis</span>
+                                </div>
+                                {activeList.length === 0 ? (
+                                  <div className="text-[10px] text-slate-400 italic py-2 text-center bg-white/60 rounded-xl border border-dashed border-slate-200">
+                                    Tidak ditemukan rincian transaksi dalam rentang tanggal ini.
+                                  </div>
+                                ) : (
+                                  <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin">
+                                    {activeList.map((item) => {
+                                      const itemType = (item.items && item.items[0]) ? item.items[0].serviceName : "Layanan Laundry";
+                                      return (
+                                        <div key={item.id} className="bg-white/80 p-2 rounded-xl border border-slate-150 flex items-center justify-between gap-2 shadow-[2xs] text-[10px] hover:bg-white transition-all">
+                                          <div className="min-w-0">
+                                            <div className="flex items-center gap-1.5">
+                                              <span className="font-extrabold text-slate-900 font-mono text-[10.5px]">#{item.invoiceNumber}</span>
+                                              <span className={`text-[8.5px] px-1 py-0.2 rounded-md font-bold uppercase ${
+                                                item.status === 'Selesai' ? 'bg-emerald-50 text-emerald-600 border border-emerald-150' : 'bg-indigo-50 text-indigo-600 border border-indigo-150'
+                                              }`}>{item.status}</span>
+                                            </div>
+                                            <div className="text-[9px] text-slate-500 truncate mt-0.5">
+                                              Pelanggan: <strong className="text-slate-700">{item.customerName}</strong> • {itemType}
+                                            </div>
+                                          </div>
+                                          <div className="text-right shrink-0">
+                                            <strong className="text-slate-800 font-mono">Rp {item.totalAmount.toLocaleString('id-ID')}</strong>
+                                            <div className="text-[8px] font-mono text-slate-400 block">{new Date(item.createdAt).toLocaleDateString('id-ID', {day: 'numeric', month: 'short'})}</div>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -6906,11 +7598,9 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
 
               {/* Real-time Total sum based on dates */}
               {(() => {
-                const startLimit = accumulatedStartDate;
-                const endLimit = accumulatedEndDate + 'T23:59:59';
                 const filtered = filteredOrders.filter(o => {
-                  const oDate = o.paymentDate || o.createdAt;
-                  return oDate >= startLimit && oDate <= endLimit && o.paymentStatus === 'Lunas' && o.status !== OrderStatus.DIBATALKAN;
+                  const oDate = getOrderLocalDate(o.paymentDate || o.createdAt);
+                  return oDate >= accumulatedStartDate && oDate <= accumulatedEndDate && o.paymentStatus === 'Lunas' && o.status !== OrderStatus.DIBATALKAN;
                 });
                 const totalFilteredOmzet = filtered.reduce((acc, o) => acc + o.totalAmount, 0);
 
@@ -6929,11 +7619,9 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
             {/* List Body */}
             <div className="p-6 overflow-y-auto flex-1">
               {(() => {
-                const startLimit = accumulatedStartDate;
-                const endLimit = accumulatedEndDate + 'T23:59:59';
                 const filtered = filteredOrders.filter(o => {
-                  const oDate = o.paymentDate || o.createdAt;
-                  return oDate >= startLimit && oDate <= endLimit && o.paymentStatus === 'Lunas' && o.status !== OrderStatus.DIBATALKAN;
+                  const oDate = getOrderLocalDate(o.paymentDate || o.createdAt);
+                  return oDate >= accumulatedStartDate && oDate <= accumulatedEndDate && o.paymentStatus === 'Lunas' && o.status !== OrderStatus.DIBATALKAN;
                 });
 
                 if (filtered.length === 0) {

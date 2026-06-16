@@ -559,7 +559,7 @@ export default function App() {
       </div>
 
       {/* Main Container Viewport */}
-      <main className="flex-1 w-full max-w-7xl mx-auto px-4 md:px-8 py-6">
+      <main className="flex-1 w-full max-w-7xl mx-auto px-4 md:px-8 pt-2 pb-6">
 
         {/* Dynamic viewport renderer switch */}
         <AnimatePresence mode="wait">
@@ -702,54 +702,62 @@ export default function App() {
               {loggedInCashier ? (
                 <EmployeeConsole loggedInUser={loggedInCashier} onLogout={handleCashierLogout} />
               ) : (
-                <div className="max-w-md mx-auto my-8 bg-white p-8 rounded-3xl border border-slate-200/85 shadow-xl space-y-6 animate-scaleIn font-sans">
-                  <div className="text-center space-y-2">
-                    <div className="w-12 h-12 mx-auto bg-sky-50 rounded-2xl flex items-center justify-center">
-                      <Smartphone className="w-6 h-6 text-sky-600" />
+                <div className="max-w-[340px] md:max-w-md mx-auto my-3 md:my-6 bg-white p-5 md:p-7 rounded-2xl md:rounded-3xl border border-slate-200/85 shadow-lg space-y-4 animate-scaleIn font-sans">
+                  <div className="text-center space-y-1">
+                    <div className="w-9 h-9 mx-auto bg-sky-50 rounded-xl flex items-center justify-center">
+                      <Smartphone className="w-5 h-5 text-sky-600" />
                     </div>
-                    <h3 className="font-extrabold text-[#0D1B2A] text-xl">Login Kasir</h3>
-                    <span className="text-xs text-sky-600 bg-sky-50 px-2.5 py-0.5 rounded border border-sky-100 block max-w-max mx-auto font-bold uppercase tracking-wider">Operator POS</span>
-                    <p className="text-xs text-slate-500">Masukkan username dan password kasir yang bertugas di mesin POS cabang aktif.</p>
+                    <h3 className="font-extrabold text-[#0D1B2A] text-base md:text-lg">Login Operator Kasir</h3>
+                    <p className="text-[10px] md:text-xs text-slate-500 leading-snug">Masukkan akun kasir aktif untuk membuka konsol transaksi.</p>
                   </div>
 
                   {loginError && (
-                    <div className="p-3 bg-red-50 border border-red-200 text-red-650 rounded-xl text-xs font-semibold leading-relaxed animate-shake">
+                    <div className="p-2.5 bg-red-50 border border-red-150 text-red-650 rounded-lg text-[10px] leading-snug font-bold">
                       ⚠️ {loginError}
                     </div>
                   )}
 
                   <form onSubmit={handleCashierLogin} className="space-y-4 text-xs font-sans">
-                    <div className="space-y-1">
-                      <label className="text-slate-500 font-bold block">Username Kasir:</label>
-                      <input
-                        type="text"
-                        required
-                        value={cashierUsernameInput}
-                        onChange={(e) => setCashierUsernameInput(e.target.value.toLowerCase().replace(/\s/g, ''))}
-                        placeholder="Contoh: rian"
-                        className="w-full bg-slate-50 border border-slate-200 focus:border-sky-500 focus:bg-white rounded-xl p-3 focus:outline-none text-slate-800 font-bold"
-                        autoFocus
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-slate-500 font-bold block">Password:</label>
-                      <input
-                        type="password"
-                        required
-                        value={cashierPasswordInput}
-                        onChange={(e) => setCashierPasswordInput(e.target.value)}
-                        placeholder="Masukkan password kasir..."
-                        className="w-full bg-slate-50 border border-slate-200 focus:border-sky-500 focus:bg-white rounded-xl p-3 focus:outline-none text-slate-800 font-bold"
-                      />
+                    {/* Unified Login Input Fields Group */}
+                    <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50/50 focus-within:border-sky-500 focus-within:ring-1 focus-within:ring-sky-100 transition-all">
+                      {/* Top Input: Username */}
+                      <div className="p-2 md:p-3 pb-1 md:pb-1.5 border-b border-slate-100 flex flex-col">
+                        <span className="text-[8.5px] uppercase font-black text-slate-400 tracking-wider">Username Kasir</span>
+                        <input
+                          type="text"
+                          required
+                          value={cashierUsernameInput}
+                          onChange={(e) => setCashierUsernameInput(e.target.value.toLowerCase().replace(/\s/g, ''))}
+                          placeholder="Masukkan username (contoh: rian)"
+                          className="w-full bg-transparent border-none text-[11px] md:text-xs font-bold text-slate-800 focus:outline-none placeholder-slate-400 mt-0.5 py-0.5"
+                          autoFocus
+                        />
+                      </div>
+                      
+                      {/* Bottom Input: Password */}
+                      <div className="p-2 md:p-3 pt-1.5 flex flex-col">
+                        <span className="text-[8.5px] uppercase font-black text-slate-400 tracking-wider">Password Shift</span>
+                        <input
+                          type="password"
+                          required
+                          value={cashierPasswordInput}
+                          onChange={(e) => setCashierPasswordInput(e.target.value)}
+                          placeholder="Masukkan password shift..."
+                          className="w-full bg-transparent border-none text-[11px] md:text-xs font-bold text-slate-800 focus:outline-none placeholder-slate-400 mt-0.5 py-0.5"
+                        />
+                      </div>
                     </div>
 
                     <button
                       type="submit"
-                      className="w-full py-3 bg-slate-900 text-white rounded-xl text-xs font-extrabold hover:bg-slate-800 transition shadow-lg active:scale-[0.98]"
+                      className="w-full py-2.5 md:py-3 bg-sky-650 hover:bg-sky-750 text-white rounded-xl text-[10px] md:text-xs font-black uppercase tracking-wider transition-colors shadow-md active:scale-[0.98] cursor-pointer"
                     >
-                      Log In Sebagai Kasir ➔
+                      Mulai Tugas Shift Kasir ➔
                     </button>
+                    
+                    <div className="text-center">
+                      <span className="inline-block text-[9px] text-sky-600 bg-sky-50/70 border border-sky-100/50 px-2 py-0.5 rounded font-black uppercase tracking-wider">rian / rian123</span>
+                    </div>
                   </form>
                 </div>
               )}
