@@ -49,10 +49,15 @@ html.dark .bg-white {
 }
 
 html.dark .border-slate-100,
+html.dark .border-slate-105,
 html.dark .border-slate-150,
 html.dark .border-slate-200,
+html.dark .border-slate-250,
 html.dark .border-slate-300,
-html.dark .border-slate-200\/85 {
+html.dark .border-slate-200\/85,
+html.dark .border-gray-100,
+html.dark .border-gray-200,
+html.dark .border-indigo-100 {
   border-color: #1f2937 !important;
 }
 
@@ -61,8 +66,42 @@ html.dark .bg-slate-50\/40,
 html.dark .bg-slate-50\/30,
 html.dark .bg-slate-150,
 html.dark .bg-slate-50\/50,
-html.dark .bg-slate-100 {
+html.dark .bg-slate-100,
+html.dark .bg-slate-105,
+html.dark .bg-slate-200,
+html.dark .bg-slate-250,
+html.dark .bg-gray-50,
+html.dark .bg-gray-100 {
   background-color: #1f2937 !important;
+}
+
+/* Colored soft light backgrounds overridden to rich dark theme colors */
+html.dark .bg-indigo-50,
+html.dark .bg-indigo-100 {
+  background-color: #1e1b4b !important; /* dark indigo */
+}
+
+html.dark .bg-emerald-50,
+html.dark .bg-emerald-100 {
+  background-color: #064e3b !important; /* dark emerald */
+}
+
+html.dark .bg-amber-50,
+html.dark .bg-amber-100,
+html.dark .bg-orange-50 {
+  background-color: #451a03 !important; /* dark amber/orange */
+}
+
+html.dark .bg-sky-50,
+html.dark .bg-sky-100 {
+  background-color: #082f49 !important; /* dark sky */
+}
+
+html.dark .bg-rose-50,
+html.dark .bg-rose-100,
+html.dark .bg-red-50,
+html.dark .bg-red-100 {
+  background-color: #450a0a !important; /* dark red */
 }
 
 html.dark .text-slate-800,
@@ -113,4 +152,143 @@ html.dark .shadow-md, html.dark .shadow-2xl {
 html.dark .bg-white .border-b {
   border-color: #1f2937 !important;
 }
+
+/* ========================================================================= */
+/* ACCESSIBILITY & POSITIONING OVERRIDES: TOP-ALIGNED MODALS & POP-UPS        */
+/* Prevents layouts from locking on vertical dead-center to improve UX.      */
+/* ========================================================================= */
+.fixed.inset-0.flex.items-center.justify-center,
+.fixed.inset-0.flex.items-center,
+[id^="modal-"].fixed.inset-0,
+[id$="-modal"].fixed.inset-0 {
+  align-items: flex-start !important;
+  justify-content: center !important;
+  padding-top: 1.5rem !important; /* Mobile offset */
+  padding-bottom: 2rem !important;
+  overflow-y: auto !important;
+}
+
+@media (min-width: 640px) {
+  .fixed.inset-0.flex.items-center.justify-center,
+  .fixed.inset-0.flex.items-center {
+    padding-top: 3.5rem !important; /* Tablet spacing */
+  }
+}
+
+@media (min-width: 768px) {
+  .fixed.inset-0.flex.items-center.justify-center,
+  .fixed.inset-0.flex.items-center {
+    padding-top: 5rem !important; /* Desktop margin */
+  }
+}
+
+/* ========================================================================= */
+/* BULLETPROOF HIGH-CONTRAST DARK MODE TEXT & BADGE OVERRIDES               */
+/* ========================================================================= */
+html.dark .text-slate-700,
+html.dark .text-slate-750,
+html.dark .text-slate-755,
+html.dark .text-slate-800,
+html.dark .text-slate-850,
+html.dark .text-slate-900,
+html.dark .text-slate-905,
+html.dark .text-slate-950,
+html.dark .text-gray-700,
+html.dark .text-gray-800,
+html.dark .text-gray-900,
+html.dark .text-gray-950 {
+  color: #f8fafc !important; /* crisp white-gray for title headers */
+}
+
+html.dark .text-slate-500,
+html.dark .text-slate-550,
+html.dark .text-slate-600,
+html.dark .text-slate-650,
+html.dark .text-gray-500,
+html.dark .text-gray-600,
+html.dark .text-gray-650,
+html.dark .text-\[\#475569\] {
+  color: #cbd5e1 !important; /* soft readable body text */
+}
+
+html.dark .text-slate-350,
+html.dark .text-slate-400,
+html.dark .text-slate-450,
+html.dark .text-slate-455,
+html.dark .text-slate-405,
+html.dark .text-gray-400 {
+  color: #94a3b8 !important; /* muted metadata/subtitle info */
+}
+
+/* Bright fluorescent colored text overrides for badge contents, alerts, and badges */
+html.dark .text-indigo-900,
+html.dark .text-indigo-950,
+html.dark .text-indigo-800,
+html.dark .text-indigo-700,
+html.dark .text-indigo-600 {
+  color: #c7d2fe !important;
+}
+
+html.dark .text-emerald-950,
+html.dark .text-emerald-900,
+html.dark .text-emerald-800,
+html.dark .text-emerald-700,
+html.dark .text-emerald-600 {
+  color: #a7f3d0 !important;
+}
+
+html.dark .text-amber-950,
+html.dark .text-amber-900,
+html.dark .text-amber-800,
+html.dark .text-amber-700,
+html.dark .text-amber-600 {
+  color: #fde68a !important;
+}
+
+html.dark .text-sky-950,
+html.dark .text-sky-900,
+html.dark .text-sky-800,
+html.dark .text-sky-700,
+html.dark .text-sky-600 {
+  color: #bae6fd !important;
+}
+
+html.dark .text-rose-950,
+html.dark .text-rose-900,
+html.dark .text-rose-800,
+html.dark .text-red-950,
+html.dark .text-red-900,
+html.dark .text-red-800,
+html.dark .text-red-650,
+html.dark .text-red-600,
+html.dark .text-red-700 {
+  color: #fca5a5 !important;
+}
+
+/* Ensure strong nested text tags e.g. strong, b, header titles inside tables are white */
+html.dark table th,
+html.dark th {
+  color: #f1f5f9 !important;
+  background-color: #111827 !important;
+}
+
+html.dark td strong, 
+html.dark td span, 
+html.dark td {
+  color: #e2e8f0 !important;
+}
+
+/* Force dark modal bodies to be fully dark glass & text to be crisp */
+html.dark [class*="modal"], 
+html.dark .dialog,
+html.dark form {
+  color: #f8fafc !important;
+}
+
+html.dark button[type="button"].bg-slate-100 {
+  background-color: #1f2937 !important;
+  color: #f1f5f9 !important;
+}
+
+
 

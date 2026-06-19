@@ -92,6 +92,7 @@ export interface Order {
   perfume?: string;
   cashierId?: string;
   cashierName?: string;
+  isImported?: boolean;
 }
 
 export type ExpenseCategory =

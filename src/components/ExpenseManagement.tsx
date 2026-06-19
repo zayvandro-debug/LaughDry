@@ -157,6 +157,14 @@ export const ExpenseManagement: React.FC<ExpenseManagementProps> = ({
   };
 
   const branchExps = expenses.filter(e => e.branchId === currentUser.branchId);
+  const oneWeekAgo = new Date();
+  oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+  oneWeekAgo.setHours(0, 0, 0, 0);
+
+  const filteredBranchExps = branchExps.filter(e => {
+    const expDate = new Date(e.date);
+    return expDate >= oneWeekAgo;
+  });
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-fadeIn" id="menu-content-expense">
@@ -268,30 +276,18 @@ export const ExpenseManagement: React.FC<ExpenseManagementProps> = ({
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
           <div>
             <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider">
-              Riwayat Pengeluaran Cabang ({branchExps.length})
+              Riwayat Pengeluaran Cabang ({filteredBranchExps.length})
             </h3>
-            <p className="text-[10.5px] text-slate-400 mt-0.5 hidden md:block">Daftar biaya operasional yang tercatat untuk cabang ini harian.</p>
-          </div>
-
-          <div className="p-3 bg-rose-50/50 border border-rose-100 rounded-2xl flex items-center justify-between">
-            <div>
-              <span className="text-[10px] text-rose-800 uppercase font-bold">Total Pengeluaran Cabang:</span>
-              <div className="font-sans font-black text-lg text-rose-700">
-                Rp {branchExps.reduce((sum, e) => sum + e.amount, 0).toLocaleString()}
-              </div>
-            </div>
-            <div className="text-right">
-              <span className="text-[10px] bg-rose-100 text-rose-800 font-extrabold px-2 py-0.75 rounded-md uppercase tracking-tight">Buku Operasional</span>
-            </div>
+            <p className="text-[10.5px] text-slate-400 mt-0.5 hidden md:block">Daftar biaya operasional yang tercatat untuk cabang ini dalam 1 minggu terakhir.</p>
           </div>
 
           <div className="max-h-96 overflow-y-auto space-y-2 pr-1">
-            {branchExps.length === 0 ? (
+            {filteredBranchExps.length === 0 ? (
               <div className="py-12 text-center text-xs text-slate-400 font-medium whitespace-normal bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                Belum ada pengeluaran rutin tercatat hari ini.
+                Belum ada pengeluaran rutin tercatat dalam 1 minggu terakhir.
               </div>
             ) : (
-              branchExps.map(exp => (
+              filteredBranchExps.map(exp => (
                 <div key={exp.id} className={`p-3 border rounded-xl hover:border-slate-300 transition-all flex items-center justify-between gap-3 text-xs ${editingExpense?.id === exp.id ? 'bg-amber-50/50 border-amber-200' : 'bg-white border-slate-150'}`}>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 flex-wrap">
@@ -301,8 +297,8 @@ export const ExpenseManagement: React.FC<ExpenseManagementProps> = ({
                       </span>
                       <span className={`text-[9.5px] font-black px-1.5 py-0.25 rounded-md uppercase tracking-tight border ${
                         exp.paymentMethod === 'QRIS'
-                          ? 'bg-purple-50 text-purple-700 border-purple-200'
-                          : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                           ? 'bg-purple-50 text-purple-700 border-purple-200'
+                           : 'bg-emerald-50 text-emerald-700 border-emerald-200'
                       }`}>
                         {exp.paymentMethod === 'QRIS' ? '📱 QRIS' : '💵 Cash'}
                       </span>

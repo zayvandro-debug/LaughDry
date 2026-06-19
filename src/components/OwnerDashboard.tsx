@@ -41,7 +41,10 @@ import {
   Smartphone,
   Globe,
   MoreVertical,
-  Menu
+  Menu,
+  Search,
+  UserCheck,
+  Star
 } from 'lucide-react';
 import { auth, db } from '../lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
@@ -245,6 +248,21 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [ownerCustomerSearch, setOwnerCustomerSearch] = useState<string>('');
+  const [ownerCustomerSortBy, setOwnerCustomerSortBy] = useState<'A-Z' | 'Z-A' | 'poin'>('A-Z');
+  const [ownerCustomerLimit, setOwnerCustomerLimit] = useState<number>(50);
+
+  useEffect(() => {
+    setOwnerCustomerLimit(50);
+  }, [ownerCustomerSearch, ownerCustomerSortBy]);
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [editingCustomerForm, setEditingCustomerForm] = useState({
+    name: '',
+    phone: '',
+    address: '',
+    depositBalance: 0,
+    loyaltyPoints: 0
+  });
   
   const [canRestoreOrders, setCanRestoreOrders] = useState<boolean>(() => {
     return !!localStorage.getItem('laughdry_backup_orders');
@@ -256,6 +274,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [templates, setTemplates] = useState<WhatsAppTemplate[]>([]);
   const [settings, setSettings] = useState(LaughDryDatabase.getSettings());
+  const [settingsSaveStatus, setSettingsSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('saved');
   const [settingsHistory, setSettingsHistory] = useState<SettingsVersion[]>(LaughDryDatabase.getSettingsHistory());
   const [newVersionNote, setNewVersionNote] = useState<string>('');
   const [expandedElementId, setExpandedElementId] = useState<string | null>(null);
@@ -317,9 +336,16 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
 
   // Custom inner sub-tab controllers
   const [analyticsInnerTab, setAnalyticsInnerTab] = useState<'financial' | 'monthly' | 'productivity'>('financial');
+  const [trendType, setTrendType] = useState<'day' | 'week' | 'month'>('day');
+  const [trendTablePage, setTrendTablePage] = useState<number>(1);
   const [servicesInnerTab, setServicesInnerTab] = useState<'rates' | 'perfumes'>('rates');
   const [ratesTab, setRatesTab] = useState<'kiloan' | 'satuan'>('kiloan');
   const [settingsInnerTab, setSettingsInnerTab] = useState<'general' | 'receipt' | 'wa'>('general');
+
+  // Reset trendTablePage when period unit changes
+  React.useEffect(() => {
+    setTrendTablePage(1);
+  }, [trendType]);
 
   // Popup lists & Custom date trackers
   const [showMonthlyRevenueDetail, setShowMonthlyRevenueDetail] = useState<boolean>(false);
@@ -389,13 +415,39 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
   const [activePopupField, setActivePopupField] = useState<'category' | 'unit' | 'promiseDurationUnit' | 'sizeOption' | null>(null);
   const [showToast, setShowToast] = useState<string | null>(null);
   const [showTodayTransactionsModal, setShowTodayTransactionsModal] = useState(false);
+  const [todayTransactionsPage, setTodayTransactionsPage] = useState<number>(1);
+  const [selectedPaymentMethodDetails, setSelectedPaymentMethodDetails] = useState<string | null>(null);
+  const [selectedPaymentMethodPage, setSelectedPaymentMethodPage] = useState<number>(1);
   const [showAccumulatedOmzetModal, setShowAccumulatedOmzetModal] = useState(false);
+  const [accumulatedOmzetPage, setAccumulatedOmzetPage] = useState<number>(1);
   const [accumulatedStartDate, setAccumulatedStartDate] = useState('2026-05-01');
   const [accumulatedEndDate, setAccumulatedEndDate] = useState('2026-06-30');
   const [showPiutangModal, setShowPiutangModal] = useState(false);
+  const [piutangPage, setPiutangPage] = useState<number>(1);
   const [showOPEXModal, setShowOPEXModal] = useState(false);
+  const [opexPage, setOpexPage] = useState<number>(1);
   const [opexFilterStartDate, setOpexFilterStartDate] = useState('2026-05-01');
   const [opexFilterEndDate, setOpexFilterEndDate] = useState('2026-06-30');
+
+  React.useEffect(() => {
+    setTodayTransactionsPage(1);
+  }, [showTodayTransactionsModal]);
+
+  React.useEffect(() => {
+    setSelectedPaymentMethodPage(1);
+  }, [selectedPaymentMethodDetails, paymentStartDate, paymentEndDate]);
+
+  React.useEffect(() => {
+    setAccumulatedOmzetPage(1);
+  }, [showAccumulatedOmzetModal, accumulatedStartDate, accumulatedEndDate]);
+
+  React.useEffect(() => {
+    setPiutangPage(1);
+  }, [showPiutangModal]);
+
+  React.useEffect(() => {
+    setOpexPage(1);
+  }, [showOPEXModal, opexFilterStartDate, opexFilterEndDate]);
   const [users, setUsers] = useState<any[]>([]);
   const [attendanceRecords, setAttendanceRecords] = useState<any[]>([]);
   const [attendanceStaffFilter, setAttendanceStaffFilter] = useState<string>('all');
@@ -442,6 +494,12 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
   const [selectedMonthlySummaryMonth, setSelectedMonthlySummaryMonth] = useState('2026-05');
   const [monthlyReportStartDate, setMonthlyReportStartDate] = useState('2026-06-01');
   const [monthlyReportEndDate, setMonthlyReportEndDate] = useState('2026-06-30');
+  const [monthlyTransactionsPage, setMonthlyTransactionsPage] = useState<number>(1);
+
+  React.useEffect(() => {
+    setMonthlyTransactionsPage(1);
+  }, [showMonthlyRevenueDetail, monthlyReportStartDate, monthlyReportEndDate]);
+
   const [cashierDetailStartDate, setCashierDetailStartDate] = useState('2026-06-01');
   const [cashierDetailEndDate, setCashierDetailEndDate] = useState('2026-06-30');
 
@@ -943,6 +1001,36 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     setShowAddBranch(true);
   };
 
+  const handleUpdateCustomer = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCustomer) return;
+
+    const validatedPoints = Number(editingCustomerForm.loyaltyPoints);
+    if (isNaN(validatedPoints)) {
+      alert("Poin harus berupa angka!");
+      return;
+    }
+
+    const updated = customers.map(c => {
+      if (c.id === editingCustomer.id) {
+        return {
+          ...c,
+          name: editingCustomerForm.name.trim(),
+          phone: editingCustomerForm.phone.trim(),
+          address: editingCustomerForm.address.trim(),
+          depositBalance: Number(editingCustomerForm.depositBalance) || 0,
+          loyaltyPoints: validatedPoints
+        };
+      }
+      return c;
+    });
+
+    LaughDryDatabase.saveCustomers(updated);
+    setCustomers(updated);
+    setEditingCustomer(null);
+    triggerToast("🎉 Informasi pelanggan berhasil diperbarui!");
+  };
+
   const executeDeleteBranch = () => {
     if (!deleteConfirmBranch) return;
     const updatedBranches = branches.filter(b => b.id !== deleteConfirmBranch.id);
@@ -1279,9 +1367,25 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
         const updatedIdx = headers.indexOf("Diubah_Pada");
         const estIdx = headers.indexOf("Estimasi_Selesai");
         const complIdx = headers.indexOf("Selesai_Pada");
-        const payDateIdx = headers.indexOf("Tanggal_Pembayaran");
-        const ptsEarnIdx = headers.indexOf("Poin_Didapat");
-        const ptsRedIdx = headers.indexOf("Poin_Ditukar");
+              const payDateIdx = headers.indexOf("Tanggal_Pembayaran");
+        
+        // Flexible lookup for points column (could be Poin, Poin_Didapat, etc.)
+        let ptsEarnIdx = headers.indexOf("Poin_Didapat");
+        if (ptsEarnIdx === -1) {
+          ptsEarnIdx = headers.findIndex(h => {
+            const lower = h.toLowerCase().replace(/[\s_-]/g, "");
+            return lower === "poin" || lower === "points" || lower === "poindidapat" || lower === "pointsdearned" || lower === "poinmasuk";
+          });
+        }
+
+        let ptsRedIdx = headers.indexOf("Poin_Ditukar");
+        if (ptsRedIdx === -1) {
+          ptsRedIdx = headers.findIndex(h => {
+            const lower = h.toLowerCase().replace(/[\s_-]/g, "");
+            return lower === "poinditukar" || lower === "poinkeluar" || lower === "pointsredeemed" || lower === "pointspent";
+          });
+        }
+
         const perfumeIdx = headers.indexOf("Aroma_Parfum");
         const cashierIdIdx = headers.indexOf("ID_Kasir");
         const cashierNameIdx = headers.indexOf("Nama_Kasir");
@@ -1318,8 +1422,30 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
           const paymentDate = (payDateIdx !== -1 && cols[payDateIdx]) 
             ? parseExcelDate(cols[payDateIdx]) 
             : (paymentStatus === 'Lunas' ? parseExcelDate(createdAt) : undefined);
-          const pointsEarned = ptsEarnIdx !== -1 ? (Number(cols[ptsEarnIdx]) || 0) : 0;
-          const pointsRedeemed = ptsRedIdx !== -1 ? (Number(cols[ptsRedIdx]) || 0) : undefined;
+          // Validate and parse pointsEarned to ensure it's a numeric value
+          let pointsEarned = 0;
+          if (ptsEarnIdx !== -1 && cols[ptsEarnIdx] !== undefined && cols[ptsEarnIdx] !== null) {
+            const rawVal = cols[ptsEarnIdx];
+            const parsedVal = Number(rawVal);
+            if (!isNaN(parsedVal)) {
+              pointsEarned = parsedVal;
+            } else {
+              console.warn(`Nilai pointsEarned (poin) tidak berupa angka pada baris ${k + 1}: ${rawVal}, default ke 0`);
+            }
+          }
+
+          // Validate and parse pointsRedeemed to ensure it's a numeric value
+          let pointsRedeemed: number | undefined = undefined;
+          if (ptsRedIdx !== -1 && cols[ptsRedIdx] !== undefined && cols[ptsRedIdx] !== null) {
+            const rawVal = cols[ptsRedIdx];
+            const parsedVal = Number(rawVal);
+            if (!isNaN(parsedVal)) {
+              pointsRedeemed = parsedVal;
+            } else {
+              console.warn(`Nilai pointsRedeemed tidak berupa angka pada baris ${k + 1}: ${rawVal}, default ke 0`);
+              pointsRedeemed = 0;
+            }
+          }
           const perfume = (perfumeIdx !== -1 && cols[perfumeIdx]) ? cols[perfumeIdx] as any : undefined;
           const cashierId = (cashierIdIdx !== -1 && cols[cashierIdIdx]) ? String(cols[cashierIdIdx]) : undefined;
           const cashierName = (cashierNameIdx !== -1 && cols[cashierNameIdx]) ? String(cols[cashierNameIdx]) : undefined;
@@ -1371,7 +1497,8 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
             pointsRedeemed,
             perfume,
             cashierId,
-            cashierName
+            cashierName,
+            isImported: true
           };
           importedOrders.push(newOrder);
         }
@@ -1388,6 +1515,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
 
         const currentOrders = [...orders];
         let importCount = 0;
+        const newOrderIds = new Set<string>();
         
         importedOrders.forEach(imp => {
           const existsIdx = currentOrders.findIndex(o => o.id === imp.id || o.invoiceNumber === imp.invoiceNumber);
@@ -1395,6 +1523,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
             currentOrders[existsIdx] = imp;
           } else {
             currentOrders.push(imp);
+            newOrderIds.add(imp.id);
             importCount++;
           }
         });
@@ -1404,9 +1533,12 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
 
         const currentCustomers = [...customers];
         let addedCustomers = 0;
+        let updatedCustomersCount = 0;
+
         importedOrders.forEach(imp => {
-          const custExists = currentCustomers.some(c => c.id === imp.customerId || c.phone === imp.customerPhone);
-          if (!custExists && imp.customerName) {
+          let custIdx = currentCustomers.findIndex(c => c.id === imp.customerId || c.phone === imp.customerPhone);
+          
+          if (custIdx === -1 && imp.customerName) {
             const newCust: Customer = {
               id: imp.customerId,
               name: imp.customerName,
@@ -1418,10 +1550,33 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
               lastActive: imp.updatedAt
             };
             currentCustomers.push(newCust);
+            custIdx = currentCustomers.length - 1;
             addedCustomers++;
           }
+
+          if (custIdx !== -1) {
+            const pEarned = imp.pointsEarned || 0;
+            const pRedeemed = imp.pointsRedeemed !== undefined ? imp.pointsRedeemed : 0;
+            const netPoints = pEarned - pRedeemed;
+
+            const isNewCustomer = (custIdx >= currentCustomers.length - addedCustomers);
+            const isNewOrder = newOrderIds.has(imp.id);
+
+            // Jika pelanggan baru rilis dari excel, kumpulkan semua poin historis transaksinya
+            // Jika pelanggan lama, tambahkan poin hanya dari transaksi baru hasil impor agar tidak ganda
+            if (isNewCustomer || isNewOrder) {
+              if (netPoints !== 0 && !isNaN(netPoints)) {
+                const currentPoints = Number(currentCustomers[custIdx].loyaltyPoints);
+                const validatedCurrentPoints = isNaN(currentPoints) ? 0 : currentPoints;
+                currentCustomers[custIdx].loyaltyPoints = Math.max(0, validatedCurrentPoints + netPoints);
+                updatedCustomersCount++;
+              }
+              currentCustomers[custIdx].lastActive = imp.updatedAt;
+            }
+          }
         });
-        if (addedCustomers > 0) {
+
+        if (addedCustomers > 0 || updatedCustomersCount > 0) {
           LaughDryDatabase.saveCustomers(currentCustomers);
           setCustomers(currentCustomers);
         }
@@ -1689,8 +1844,18 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
 
   const handleSettingsChange = (field: string, val: any) => {
     const updated = { ...settings, [field]: val };
+    setSettingsSaveStatus('saving');
     LaughDryDatabase.saveSettings(updated);
     setSettings(updated);
+
+    LaundryService.saveSettings(updated)
+      .then(() => {
+        setSettingsSaveStatus('saved');
+      })
+      .catch((err) => {
+        console.error("Gagal save settings ke Firestore secara langsung:", err);
+        setSettingsSaveStatus('error');
+      });
   };
 
   // CALCULATIONS (with branch filters)
@@ -1719,28 +1884,31 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
   const activeOrdersCount = filteredOrders.filter(o => o.status !== OrderStatus.SELESAI && o.status !== OrderStatus.DIBATALKAN).length;
   const completedOrdersCount = filteredOrders.filter(o => o.status === OrderStatus.SELESAI).length;
   
-  const totalOPEX = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const totalOPEX = expenses
+    .filter(e => selectedBranch === 'all' || e.branchId === selectedBranch)
+    .reduce((sum, e) => sum + e.amount, 0);
   const labaKotor = totalOmzet; // Revenue riil
   const labaBersih = totalOmzet - totalOPEX;
 
   const todayDateStr = new Date().toISOString().slice(0, 10);
-  const hasOrdersToday = filteredOrders.some(o => getOrderLocalDate(o.createdAt) === todayDateStr);
-  const activeTodayStr = hasOrdersToday ? todayDateStr : '2026-05-30';
+  const activeTodayStr = todayDateStr;
 
-  const orderHariIniCount = filteredOrders.filter(o => getOrderLocalDate(o.createdAt) === activeTodayStr).length;
+  const orderHariIniCount = filteredOrders.filter(
+    o => !o.isImported && getOrderLocalDate(o.paymentDate || o.createdAt) === activeTodayStr && o.paymentStatus === 'Lunas' && o.status !== OrderStatus.DIBATALKAN
+  ).length;
   const omzetHariIni = filteredOrders
-    .filter(o => getOrderLocalDate(o.paymentDate || o.createdAt) === activeTodayStr && o.paymentStatus === 'Lunas' && o.status !== OrderStatus.DIBATALKAN)
+    .filter(o => !o.isImported && getOrderLocalDate(o.paymentDate || o.createdAt) === activeTodayStr && o.paymentStatus === 'Lunas' && o.status !== OrderStatus.DIBATALKAN)
     .reduce((sum, o) => sum + o.totalAmount, 0);
 
   const piutangHariIni = filteredOrders
-    .filter(o => getOrderLocalDate(o.createdAt) === activeTodayStr && o.paymentStatus !== 'Lunas' && o.status !== OrderStatus.DIBATALKAN)
+    .filter(o => !o.isImported && getOrderLocalDate(o.createdAt) === activeTodayStr && o.paymentStatus !== 'Lunas' && o.status !== OrderStatus.DIBATALKAN)
     .reduce((sum, o) => sum + o.totalAmount, 0);
 
   // Business Intelligence Forecasting (Linear Regression trend)
   // Let's analyze omzet of 28th, 29th, 30th May 2026 to output standard forecast
   const getOmzetByDate = (dateStr: string) => {
     return filteredOrders
-      .filter(o => getOrderLocalDate(o.paymentDate || o.createdAt) === dateStr && o.paymentStatus === 'Lunas' && o.status !== OrderStatus.DIBATALKAN)
+      .filter(o => !o.isImported && getOrderLocalDate(o.paymentDate || o.createdAt) === dateStr && o.paymentStatus === 'Lunas' && o.status !== OrderStatus.DIBATALKAN)
       .reduce((sum, o) => sum + o.totalAmount, 0);
   };
 
@@ -1880,6 +2048,23 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     };
   }, [filteredOrders, paymentStartDate, paymentEndDate]);
 
+  // Selected Payment Method Detail Transactions
+  const selectedPaymentMethodTransactions = React.useMemo(() => {
+    if (!selectedPaymentMethodDetails) return [];
+    const start = paymentStartDate ? new Date(paymentStartDate + "T00:00:00") : null;
+    const end = paymentEndDate ? new Date(paymentEndDate + "T23:59:59") : null;
+    
+    return filteredOrders.filter(o => {
+      if (o.status === OrderStatus.DIBATALKAN || o.paymentStatus !== 'Lunas') return false;
+      const oDate = new Date(o.createdAt);
+      if (start && oDate < start) return false;
+      if (end && oDate > end) return false;
+      
+      const pm = o.paymentMethod || 'Cash';
+      return pm.toLowerCase() === selectedPaymentMethodDetails.toLowerCase();
+    });
+  }, [selectedPaymentMethodDetails, filteredOrders, paymentStartDate, paymentEndDate]);
+
   // Real-time Monthly Financial Summary Data
   const monthlyRevenueData = React.useMemo(() => {
     const data = [];
@@ -1976,6 +2161,142 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
       };
     });
   }, [popularPaymentMethodStats]);
+
+  // Real-time Revenue Trends Data (Daily, Weekly, Monthly)
+  const revenueTrendData = React.useMemo(() => {
+    const successfulOrders = filteredOrders.filter(
+      o => o.paymentStatus === 'Lunas' && o.status !== OrderStatus.DIBATALKAN
+    );
+
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+
+    // --- DAILY GROUPING ---
+    const dailyMap: { [key: string]: { revenue: number; transactions: number } } = {};
+    successfulOrders.forEach(o => {
+      const dateStr = getOrderLocalDate(o.paymentDate || o.createdAt);
+      if (!dateStr) return;
+      if (!dailyMap[dateStr]) {
+        dailyMap[dateStr] = { revenue: 0, transactions: 0 };
+      }
+      dailyMap[dateStr].revenue += o.totalAmount;
+      dailyMap[dateStr].transactions += 1;
+    });
+
+    const dailyTrend = Object.keys(dailyMap)
+      .sort()
+      .map(dateStr => {
+        const parts = dateStr.split('-');
+        const day = parts[2];
+        const monthIndex = parseInt(parts[1], 10) - 1;
+        const monthLabel = monthNames[monthIndex] || parts[1];
+        const label = `${day} ${monthLabel}`;
+        const { revenue, transactions } = dailyMap[dateStr];
+        return {
+          key: dateStr,
+          label,
+          revenue,
+          transactions,
+          avgTicket: transactions > 0 ? Math.round(revenue / transactions) : 0,
+        };
+      });
+
+    // --- WEEKLY GROUPING ---
+    const getMondayStr = (dateStr: string) => {
+      const d = new Date(dateStr + 'T12:00:00'); // noon avoiding tz shifts
+      if (isNaN(d.getTime())) return '';
+      const day = d.getDay();
+      const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+      const mon = new Date(d.setDate(diff));
+      const y = mon.getFullYear();
+      const m = String(mon.getMonth() + 1).padStart(2, '0');
+      const date = String(mon.getDate()).padStart(2, '0');
+      return `${y}-${m}-${date}`;
+    };
+
+    const weeklyMap: { [key: string]: { revenue: number; transactions: number } } = {};
+    successfulOrders.forEach(o => {
+      const dateStr = getOrderLocalDate(o.paymentDate || o.createdAt);
+      if (!dateStr) return;
+      const mondayStr = getMondayStr(dateStr);
+      if (!mondayStr) return;
+      if (!weeklyMap[mondayStr]) {
+        weeklyMap[mondayStr] = { revenue: 0, transactions: 0 };
+      }
+      weeklyMap[mondayStr].revenue += o.totalAmount;
+      weeklyMap[mondayStr].transactions += 1;
+    });
+
+    const weeklyTrend = Object.keys(weeklyMap)
+      .sort()
+      .map(monStr => {
+        const parts = monStr.split('-');
+        const day = parts[2];
+        const monthIndex = parseInt(parts[1], 10) - 1;
+        const monthLabel = monthNames[monthIndex] || parts[1];
+        
+        const monDate = new Date(monStr + 'T12:00:00');
+        const sunDate = new Date(monDate);
+        sunDate.setDate(monDate.getDate() + 6);
+        const sunDay = String(sunDate.getDate()).padStart(2, '0');
+        const sunMonthIndex = sunDate.getMonth();
+        const sunMonthLabel = monthNames[sunMonthIndex] || String(sunMonthIndex + 1);
+
+        const label = `Mgg, ${day}/${parts[1]}`;
+        const rangeLabel = `Minggu (${day} ${monthLabel} - ${sunDay} ${sunMonthLabel})`;
+        const { revenue, transactions } = weeklyMap[monStr];
+        return {
+          key: monStr,
+          label,
+          rangeLabel,
+          revenue,
+          transactions,
+          avgTicket: transactions > 0 ? Math.round(revenue / transactions) : 0,
+        };
+      });
+
+    // --- MONTHLY GROUPING ---
+    const monthlyMap: { [key: string]: { revenue: number; transactions: number } } = {};
+    successfulOrders.forEach(o => {
+      const dateStr = getOrderLocalDate(o.paymentDate || o.createdAt);
+      if (!dateStr) return;
+      const yearMonth = dateStr.substring(0, 7); // 'YYYY-MM'
+      if (!monthlyMap[yearMonth]) {
+        monthlyMap[yearMonth] = { revenue: 0, transactions: 0 };
+      }
+      monthlyMap[yearMonth].revenue += o.totalAmount;
+      monthlyMap[yearMonth].transactions += 1;
+    });
+
+    const monthlyTrend = Object.keys(monthlyMap)
+      .sort()
+      .map(ymStr => {
+        const parts = ymStr.split('-');
+        const year = parts[0];
+        const monthIndex = parseInt(parts[1], 10) - 1;
+        const monthLabel = monthNames[monthIndex] || parts[1];
+        const label = `${monthLabel} '${year.slice(2)}`;
+        const { revenue, transactions } = monthlyMap[ymStr];
+        return {
+          key: ymStr,
+          label,
+          revenue,
+          transactions,
+          avgTicket: transactions > 0 ? Math.round(revenue / transactions) : 0,
+        };
+      });
+
+    return {
+      daily: dailyTrend,
+      weekly: weeklyTrend,
+      monthly: monthlyTrend,
+    };
+  }, [filteredOrders]);
+
+  const activeTrendData = React.useMemo(() => {
+    if (trendType === 'day') return revenueTrendData.daily;
+    if (trendType === 'week') return revenueTrendData.weekly;
+    return revenueTrendData.monthly;
+  }, [revenueTrendData, trendType]);
 
   // Real-time calculation of employee activity metrics based on customizable date range
   const getCashierActivityBreakdown = (cashierId: string, startDateStr: string, endDateStr: string) => {
@@ -2535,7 +2856,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
           <div className="bg-white p-3.5 rounded-2xl border border-slate-150 shadow-xs flex items-center justify-between flex-wrap gap-2.5">
             <div className="flex items-center gap-1.5">
               <span className="text-base">📊</span>
-              <span className="font-extrabold text-[#0D1B2A] text-xs uppercase tracking-wider font-sans">Menu Analisis Laundry</span>
+              <span className="font-extrabold text-[#b360ad] text-xs uppercase tracking-wider font-sans">Menu Analisis Laundry</span>
             </div>
             <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-150">
               <button
@@ -2713,7 +3034,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Chart 1: Revenue Trend 28-30 May */}
             <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
-              <h4 className="font-bold text-sm text-slate-800 mb-3 block">Grafik Omzet & Margin Usaha Hari Berjalan (Mei 2026)</h4>
+              <h4 className="font-bold text-sm text-[#75b110] mb-3 block">Grafik Omzet & Margin Usaha Hari Berjalan (Mei 2026)</h4>
               <div className="h-48 flex items-end justify-between gap-4 border-b border-slate-100 pb-2 relative font-sans">
                 {/* Horizontal Guide Lines */}
                 <div className="absolute left-0 right-0 top-1/4 border-t border-slate-100/60 pointer-events-none"></div>
@@ -2751,51 +3072,344 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
             <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
               <h4 className="font-bold text-sm text-slate-800 mb-3 block">Bauran Pengeluaran Operasional (OPEX Breakdown)</h4>
               <div className="space-y-3.5 pt-1 text-xs">
-                {/* Salary */}
-                <div>
-                  <div className="flex justify-between font-semibold text-slate-700 mb-1">
-                    <span>Gaji & Kesejahteraan Karyawan</span>
-                    <span>Rp {expenses.filter(e => e.category === 'Gaji').reduce((s, e) => s + e.amount, 0).toLocaleString()} ({(Math.round((expenses.filter(e => e.category === 'Gaji').reduce((s, e) => s + e.amount, 0) / (totalOPEX || 1)) * 100)) || 0}%)</span>
+                {(() => {
+                  const bExpenses = expenses.filter(e => selectedBranch === 'all' || e.branchId === selectedBranch);
+                  const gajiVal = bExpenses.filter(e => e.category === 'Gaji').reduce((s, e) => s + e.amount, 0);
+                  const utilVal = bExpenses.filter(e => e.category === 'Listrik' || e.category === 'Air' || e.category === 'Gas').reduce((s, e) => s + e.amount, 0);
+                  const detVal = bExpenses.filter(e => e.category === 'Detergen/Softener' || e.category === 'Perlengkapan').reduce((s, e) => s + e.amount, 0);
+                  const maintVal = bExpenses.filter(e => e.category === 'Maintenance' || e.category === 'Transportasi').reduce((s, e) => s + e.amount, 0);
+
+                  return (
+                    <>
+                      {/* Salary */}
+                      <div>
+                        <div className="flex justify-between font-semibold text-slate-700 mb-1">
+                          <span>Gaji & Kesejahteraan Karyawan</span>
+                          <span>Rp {gajiVal.toLocaleString()} ({(Math.round((gajiVal / (totalOPEX || 1)) * 100)) || 0}%)</span>
+                        </div>
+                        <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                          <div className="bg-red-500 h-full rounded-full" style={{ width: `${(gajiVal / (totalOPEX || 1)) * 100}%` }}></div>
+                        </div>
+                      </div>
+
+                      {/* Utilities (Listrik + Air + Gas) */}
+                      <div>
+                        <div className="flex justify-between font-semibold text-slate-700 mb-1">
+                          <span>Utilitas Listrik, Gas & Air</span>
+                          <span>Rp {utilVal.toLocaleString()} ({(Math.round((utilVal / (totalOPEX || 1)) * 100)) || 0}%)</span>
+                        </div>
+                        <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                          <div className="bg-amber-500 h-full rounded-full" style={{ width: `${(utilVal / (totalOPEX || 1)) * 100}%` }}></div>
+                        </div>
+                      </div>
+
+                      {/* Detergents */}
+                      <div>
+                        <div className="flex justify-between font-semibold text-slate-700 mb-1">
+                          <span>Detergen, Softener & Perlengkapan Harian</span>
+                          <span>Rp {detVal.toLocaleString()} ({(Math.round((detVal / (totalOPEX || 1)) * 100)) || 0}%)</span>
+                        </div>
+                        <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                          <div className="bg-cyan-500 h-full rounded-full" style={{ width: `${(detVal / (totalOPEX || 1)) * 100}%` }}></div>
+                        </div>
+                      </div>
+
+                      {/* Maintenance / Transport */}
+                      <div>
+                        <div className="flex justify-between font-semibold text-slate-700 mb-1">
+                          <span>Pemeliharaan Mesin & BBM Transport</span>
+                          <span>Rp {maintVal.toLocaleString()} ({(Math.round((maintVal / (totalOPEX || 1)) * 100)) || 0}%)</span>
+                        </div>
+                        <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                          <div className="bg-slate-700 h-full rounded-full" style={{ width: `${(maintVal / (totalOPEX || 1)) * 100}%` }}></div>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
+
+          {/* Real-time Revenue Trends Dashboard (Hari, Minggu, Bulan) */}
+          <div className="bg-white p-6 rounded-3xl border border-slate-150 shadow-sm space-y-6" id="section-revenue-trends">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-100 pb-4 gap-4">
+              <div>
+                <h4 className="font-extrabold text-[#0D1B2A] text-xs uppercase tracking-wider flex items-center gap-2 font-sans">
+                  <span>📈</span> Analisis Tren Pendapatan Usaha (Revenue Trends)
+                </h4>
+                <p className="text-[10.5px] text-slate-500 font-semibold font-sans mt-0.5">
+                  Visualisasikan performa omzet lunas laundry Anda berdasarkan periode harian, mingguan, dan bulanan untuk monitoring performa bisnis.
+                </p>
+              </div>
+              <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-150 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setTrendType('day')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                    trendType === 'day'
+                      ? 'bg-[#0D1B2A] text-white shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                  }`}
+                >
+                  Harian
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTrendType('week')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                    trendType === 'week'
+                      ? 'bg-[#0D1B2A] text-white shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                  }`}
+                >
+                  Mingguan
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTrendType('month')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                    trendType === 'month'
+                      ? 'bg-[#0D1B2A] text-white shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+                  }`}
+                >
+                  Bulanan
+                </button>
+              </div>
+            </div>
+
+            {/* Visualizer Chart Layout */}
+            {activeTrendData.length > 0 ? (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pb-2">
+                {/* Left Side: Chart Graph Area */}
+                <div className="lg:col-span-8 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Visualisasi Grafik Tren ({trendType === 'day' ? 'Harian' : trendType === 'week' ? 'Mingguan' : 'Bulanan'})</span>
+                    <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                      Total {activeTrendData.length} Titik Data
+                    </span>
                   </div>
-                  <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                    <div className="bg-red-500 h-full rounded-full" style={{ width: `${(expenses.filter(e => e.category === 'Gaji').reduce((s, e) => s + e.amount, 0) / (totalOPEX || 1)) * 100}%` }}></div>
+                  <div className="h-64 w-full text-[10px] pt-3 bg-slate-50/20 rounded-2xl border border-slate-100/50 p-3">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart
+                        data={activeTrendData}
+                        margin={{ top: 10, right: 10, left: 10, bottom: 5 }}
+                      >
+                        <defs>
+                          <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor={settings.accentColor || '#3b82f6'} stopOpacity={0.25}/>
+                            <stop offset="95%" stopColor={settings.accentColor || '#3b82f6'} stopOpacity={0.0}/>
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
+                        <XAxis 
+                          dataKey="label" 
+                          stroke="#64748B" 
+                          fontSize={10} 
+                          tickLine={false} 
+                          axisLine={false}
+                        />
+                        <YAxis 
+                          stroke="#64748B" 
+                          fontSize={10} 
+                          tickLine={false} 
+                          axisLine={false}
+                          tickFormatter={(value) => value >= 1000000 ? `Rp ${(value / 1000000).toFixed(1)}jt` : value >= 1000 ? `Rp ${(value / 1000).toFixed(0)}rb` : `Rp ${value}`} 
+                        />
+                        <Tooltip
+                          formatter={(value: any, name: any) => {
+                            if (name === 'revenue') return [`Rp ${value.toLocaleString('id-ID')}`, "Omzet Lunas"];
+                            if (name === 'transactions') return [`${value} Transaksi`, "Volume"];
+                            if (name === 'avgTicket') return [`Rp ${value.toLocaleString('id-ID')}`, "Rata-rata Order"];
+                            return [value, name];
+                          }}
+                          labelFormatter={(label, payload) => {
+                            if (payload && payload[0] && payload[0].payload && payload[0].payload.rangeLabel) {
+                              return payload[0].payload.rangeLabel;
+                            }
+                            return `Periode: ${label}`;
+                          }}
+                          contentStyle={{ 
+                            fontSize: '11px', 
+                            borderRadius: '12px', 
+                            border: '1px solid #E2E8F0', 
+                            boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.05)'
+                          }}
+                        />
+                        <Area 
+                          type="monotone" 
+                          dataKey="revenue" 
+                          stroke={settings.accentColor || '#3b82f6'} 
+                          strokeWidth={2.5}
+                          fillOpacity={1} 
+                          fill="url(#colorRevenue)" 
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
                   </div>
                 </div>
 
-                {/* Utilities (Listrik + Air + Gas) */}
-                <div>
-                  <div className="flex justify-between font-semibold text-slate-700 mb-1">
-                    <span>Utilitas Listrik, Gas & Air</span>
-                    <span>Rp {expenses.filter(e => e.category === 'Listrik' || e.category === 'Air' || e.category === 'Gas').reduce((s, e) => s + e.amount, 0).toLocaleString()} ({(Math.round((expenses.filter(e => e.category === 'Listrik' || e.category === 'Air' || e.category === 'Gas').reduce((s, e) => s + e.amount, 0) / (totalOPEX || 1)) * 100)) || 0}%)</span>
-                  </div>
-                  <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                    <div className="bg-amber-500 h-full rounded-full" style={{ width: `${(expenses.filter(e => e.category === 'Listrik' || e.category === 'Air' || e.category === 'Gas').reduce((s, e) => s + e.amount, 0) / (totalOPEX || 1)) * 100}%` }}></div>
-                  </div>
-                </div>
+                {/* Right Side: Quick Highlights Metrics Panel */}
+                <div className="lg:col-span-4 bg-slate-50/60 rounded-2xl p-4.5 border border-slate-100 flex flex-col justify-between space-y-4">
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-widest block" style={{ color: '#d7d758' }}>Ringkasan Statistik Tren</span>
+                    
+                    <div className="mt-4 space-y-3.5">
+                      {/* Stat 1: Total Revenue in view */}
+                      <div className="bg-white p-3 rounded-xl border border-slate-100 shadow-xs">
+                        <span className="text-[9px] font-bold text-slate-400 uppercase block">Total Omzet Pada Tren</span>
+                        <div className="text-sm font-black font-mono mt-0.5" style={{ color: '#63d7c0' }}>
+                          Rp {activeTrendData.reduce((sum, item) => sum + item.revenue, 0).toLocaleString('id-ID')}
+                        </div>
+                      </div>
 
-                {/* Detergents */}
-                <div>
-                  <div className="flex justify-between font-semibold text-slate-700 mb-1">
-                    <span>Detergen, Softener & Perlengkapan Harian</span>
-                    <span>Rp {expenses.filter(e => e.category === 'Detergen/Softener' || e.category === 'Perlengkapan').reduce((s, e) => s + e.amount, 0).toLocaleString()} ({(Math.round((expenses.filter(e => e.category === 'Detergen/Softener' || e.category === 'Perlengkapan').reduce((s, e) => s + e.amount, 0) / (totalOPEX || 1)) * 100)) || 0}%)</span>
-                  </div>
-                  <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                    <div className="bg-cyan-500 h-full rounded-full" style={{ width: `${(expenses.filter(e => e.category === 'Detergen/Softener' || e.category === 'Perlengkapan').reduce((s, e) => s + e.amount, 0) / (totalOPEX || 1)) * 100}%` }}></div>
-                  </div>
-                </div>
+                      {/* Stat 2: Total Transactions in view */}
+                      <div className="bg-white p-3 rounded-xl border border-slate-100 shadow-xs">
+                        <span className="text-[9px] font-bold text-slate-400 uppercase block">Total Volume Transaksi</span>
+                        <div className="text-sm font-black text-slate-850 font-sans mt-0.5">
+                          {activeTrendData.reduce((sum, item) => sum + item.transactions, 0)} Transaksi
+                        </div>
+                      </div>
 
-                {/* Maintenance / Transport */}
-                <div>
-                  <div className="flex justify-between font-semibold text-slate-700 mb-1">
-                    <span>Pemeliharaan Mesin & BBM Transport</span>
-                    <span>Rp {expenses.filter(e => e.category === 'Maintenance' || e.category === 'Transportasi').reduce((s, e) => s + e.amount, 0).toLocaleString()}</span>
+                      {/* Stat 3: Average Ticket size in view */}
+                      <div className="bg-white p-3 rounded-xl border border-slate-100 shadow-xs">
+                        <span className="text-[9px] font-bold text-slate-400 uppercase block">Rerata Per Transaksi (Ticket Size)</span>
+                        <div className="text-sm font-black text-emerald-700 font-mono mt-0.5">
+                          Rp {Math.round(
+                            activeTrendData.reduce((sum, item) => sum + item.revenue, 0) / 
+                            (activeTrendData.reduce((sum, item) => sum + item.transactions, 0) || 1)
+                          ).toLocaleString('id-ID')}
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                    <div className="bg-slate-700 h-full rounded-full" style={{ width: `${(expenses.filter(e => e.category === 'Maintenance' || e.category === 'Transportasi').reduce((s, e) => s + e.amount, 0) / (totalOPEX || 1)) * 100}%` }}></div>
+
+                  <div className="text-[9.5px] font-semibold leading-normal pt-2 border-t border-slate-100" style={{ color: '#404b5b' }}>
+                    💡 Performa bisnis dapat dipantau lebih akurat dengan melihat grafik tanjakan atau turunan omzet per periode.
                   </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div className="py-12 text-center text-slate-400 text-xs bg-slate-50 rounded-2xl border border-slate-150 border-dashed">
+                Belum terdapat data transaksi lunas pada periode ini.
+              </div>
+            )}
+
+            {/* Summary Performance Table with Pagination */}
+            {activeTrendData.length > 0 && (() => {
+              const reversedData = [...activeTrendData].reverse();
+              const itemsPerPage = 5;
+              const totalTrendPages = Math.ceil(reversedData.length / itemsPerPage) || 1;
+              const safeTrendPage = Math.min(trendTablePage, totalTrendPages);
+              const paginatedTrendData = reversedData.slice((safeTrendPage - 1) * itemsPerPage, safeTrendPage * itemsPerPage);
+
+              return (
+                <div className="space-y-2 pt-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Tabel Ringkasan Performa (Halaman {safeTrendPage} dari {totalTrendPages})</span>
+                    <span className="text-[9px] text-[#b360ad] font-bold font-mono">
+                      Menampilkan {paginatedTrendData.length} dari {reversedData.length} periode
+                    </span>
+                  </div>
+                  
+                  <div className="overflow-x-auto rounded-xl border border-slate-150 shadow-xs">
+                    <table className="w-full text-left border-collapse text-xs font-sans">
+                      <thead>
+                        <tr className="bg-slate-50 text-slate-500 font-extrabold uppercase text-[9.5px] tracking-wider border-b border-slate-150">
+                          <th className="p-3">Periode</th>
+                          <th className="p-3 text-right">Pendapatan Lunas</th>
+                          <th className="p-3 text-center">Volume Transaksi</th>
+                          <th className="p-3 text-right">Rerata Transaksi (Ticket Size)</th>
+                          <th className="p-3 text-center">Tren Pertumbuhan</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 bg-white">
+                        {paginatedTrendData.map(item => {
+                          const originIdx = activeTrendData.findIndex(x => x.key === item.key);
+                          const priorItem = originIdx > 0 ? activeTrendData[originIdx - 1] : null;
+                          const growth = priorItem && priorItem.revenue > 0 ? ((item.revenue - priorItem.revenue) / priorItem.revenue) * 100 : null;
+
+                          return (
+                            <tr key={item.key} className="hover:bg-slate-50/50 transition">
+                              <td className="p-3 font-bold text-slate-700">
+                                {item.rangeLabel ? (
+                                  <span title={item.rangeLabel}>{item.label} <span className="text-[10px] text-slate-400 font-medium">({item.rangeLabel.replace('Minggu (', '').replace(')', '')})</span></span>
+                                ) : (
+                                  item.label
+                                )}
+                              </td>
+                              <td className="p-3 text-right font-mono font-bold text-[#0D1B2A]">
+                                Rp {item.revenue.toLocaleString('id-ID')}
+                              </td>
+                              <td className="p-3 text-center font-semibold text-slate-600">
+                                {item.transactions} Order
+                              </td>
+                              <td className="p-3 text-right font-mono text-slate-500 font-semibold">
+                                Rp {item.avgTicket.toLocaleString('id-ID')}
+                              </td>
+                              <td className="p-3 text-center">
+                                {growth !== null ? (
+                                  <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[9.5px] font-extrabold border uppercase tracking-wider ${
+                                    growth >= 0 
+                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                                      : 'bg-rose-50 text-rose-700 border-rose-200'
+                                  }`}>
+                                    {growth >= 0 ? `▲ +${growth.toFixed(1)}%` : `▼ ${growth.toFixed(1)}%`}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400 font-bold">—</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Navigation Bar for Table Pagination */}
+                  {totalTrendPages > 1 && (
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 pb-1 border-t border-slate-100 mt-2">
+                      <div className="text-[10.5px] text-slate-500 font-semibold font-sans">
+                        Menampilkan <span className="font-bold text-[#0D1B2A]">{(safeTrendPage - 1) * itemsPerPage + 1}-{Math.min(reversedData.length, safeTrendPage * itemsPerPage)}</span> dari <span className="font-bold text-slate-700">{reversedData.length}</span> periode
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0 bg-slate-50 p-1 rounded-xl border border-slate-150">
+                        <button
+                          type="button"
+                          onClick={() => setTrendTablePage(prev => Math.max(1, prev - 1))}
+                          disabled={safeTrendPage <= 1}
+                          className={`w-7 h-7 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center ${
+                            safeTrendPage <= 1
+                              ? 'text-slate-300 cursor-not-allowed'
+                              : 'text-slate-700 hover:bg-white hover:text-black border border-slate-150/40 shadow-2xs bg-white/70 active:scale-90'
+                          }`}
+                          title="Sebelumnya"
+                        >
+                          ◀
+                        </button>
+                        <span className="text-[10.5px] font-extrabold text-[#0D1B2A] px-2 min-w-[40px] text-center font-sans tracking-tight">
+                          {safeTrendPage} / {totalTrendPages}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setTrendTablePage(prev => Math.min(totalTrendPages, prev + 1))}
+                          disabled={safeTrendPage >= totalTrendPages}
+                          className={`w-7 h-7 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center ${
+                            safeTrendPage >= totalTrendPages
+                              ? 'text-slate-300 cursor-not-allowed'
+                              : 'text-slate-700 hover:bg-white hover:text-black border border-slate-150/40 shadow-2xs bg-white/70 active:scale-90'
+                          }`}
+                          title="Berikutnya"
+                        >
+                          ▶
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           {/* METODE PEMBAYARAN TERPOPULER GRAPHICAL ANALYTICS */}
@@ -2860,18 +3474,24 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                       <div className="text-[9.5px] font-black uppercase text-slate-450 tracking-wider">Metode Penerimaan Terakumulasi:</div>
                       <div className="grid grid-cols-2 gap-2 text-xs">
                         {paymentPieData.map((item) => (
-                          <div key={item.name} className="p-2.5 bg-slate-50 border border-slate-100 rounded-2xl space-y-0.5">
+                          <button
+                            key={item.name}
+                            type="button"
+                            onClick={() => setSelectedPaymentMethodDetails(item.name)}
+                            className="p-2.5 bg-slate-50 border border-slate-150 rounded-2xl space-y-0.5 text-left w-full cursor-pointer hover:border-slate-350 hover:bg-slate-100/60 hover:shadow-xs active:scale-[0.98] transition-all group"
+                            title={`Klik untuk melihat rincian transaksi ${item.name}`}
+                          >
                             <div className="flex items-center gap-1.5">
                               <span className="w-2 rounded-full shrink-0 h-2" style={{ backgroundColor: item.color }}></span>
-                              <span className="font-extrabold text-slate-800">{item.name}</span>
+                              <span className="font-extrabold text-slate-800 group-hover:text-black transition-colors">{item.name}</span>
                               <span className="text-[9.5px] font-bold text-slate-400 ml-auto">{item.percentage}%</span>
                             </div>
                             <div className="font-mono font-black text-slate-850 text-xs">Rp {item.value.toLocaleString()}</div>
-                            <div className="text-[9.0px] text-slate-400 font-semibold flex justify-between">
+                            <div className="text-[9.0px] text-slate-400 font-semibold flex justify-between w-full">
                               <span>Volume:</span>
-                              <strong className="text-slate-700">{item.count} Trx</strong>
+                              <strong className="text-slate-700 underline group-hover:text-[#0D1B2A]">{item.count} Trx</strong>
                             </div>
-                          </div>
+                          </button>
                         ))}
                       </div>
                       <div className="p-2.5 bg-indigo-50 border border-indigo-150 rounded-2xl text-[10.5px] font-extrabold text-indigo-900 flex justify-between font-mono">
@@ -4745,63 +5365,160 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
 
           {/* Pengaturan Tema Warna Identitas Brand (Custom Accent Color) */}
           {settingsInnerTab === 'general' && (
-          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4 font-sans text-xs animate-scaleIn">
-            <h4 className="font-bold text-slate-800 text-sm flex items-center gap-2">
-              <span className="text-base text-sky-500">🎨</span>
-              Kustomisasi Tema Warna Brand Laundry (Accent Color)
-            </h4>
-
-            <div className="space-y-3">
-              <label className="text-slate-600 block font-semibold">Pilih Palet Warna Populer:</label>
-              <div className="flex flex-wrap gap-2.5">
-                {[
-                  { name: 'Sky Sparkle (Def)', value: '#3b82f6' },
-                  { name: 'Fresh Teal/Mint', value: '#10b981' },
-                  { name: 'Aroma Lavender', value: '#8b5cf6' },
-                  { name: 'Sunset Orange', value: '#f97316' },
-                  { name: 'Elegant Clean Slate', value: '#1e293b' },
-                  { name: 'Rose Petal', value: '#f43f5e' },
-                ].map((color) => (
-                  <button
-                    key={color.value}
-                    type="button"
-                    onClick={() => handleSettingsChange('accentColor', color.value)}
-                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all border cursor-pointer ${
-                      settings.accentColor === color.value
-                        ? 'bg-slate-900 border-slate-900 text-white shadow-md font-black'
-                        : 'bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-705'
-                    }`}
-                  >
-                    <span className="w-3 h-3 rounded-full border border-white/20 shadow-xs" style={{ backgroundColor: color.value }}></span>
-                    <span>{color.name}</span>
-                  </button>
-                ))}
+          <div className="bg-white p-6 rounded-2xl border border-slate-150 shadow-sm space-y-6 font-sans text-xs animate-scaleIn" id="accent-color-branding-panel">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3.5 gap-2">
+              <div>
+                <h4 className="font-extrabold text-slate-800 text-sm flex items-center gap-2">
+                  <span className="text-base">🎨</span>
+                  Kustomisasi Tema & Warna Identitas Brand (Real-time Firestore)
+                </h4>
+                <p className="text-[10.5px] text-slate-450 mt-1 font-semibold">
+                  Tentukan warna aksen utama yang akan diaplikasikan di seluruh tombol, lencana (badge), border, dan link navigasi di seluruh aplikasi.
+                </p>
               </div>
 
-              <div className="space-y-1.5 pt-2">
-                <label className="text-slate-600 block font-semibold text-[11px]">Kustomisasi Nilai Hex Warna & Color Picker:</label>
-                <div className="flex gap-2 max-w-sm">
-                  <div className="relative flex-1">
-                    <span className="absolute left-3 top-2 text-slate-400 font-bold select-none text-xs">Hex:</span>
-                    <input
-                      type="text"
-                      maxLength={7}
-                      value={settings.accentColor || '#3b82f6'}
-                      onChange={(e) => {
-                        let val = e.target.value;
-                        if (val && !val.startsWith('#')) val = '#' + val;
-                        handleSettingsChange('accentColor', val);
+              {/* Real-time Status Sync Badge */}
+              <div className="flex items-center shrink-0">
+                {settingsSaveStatus === 'saving' && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 font-extrabold text-[10px] uppercase border border-amber-200 shadow-xs animate-pulse">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                    Menyimpan ke Firestore...
+                  </span>
+                )}
+                {settingsSaveStatus === 'saved' && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 font-extrabold text-[10px] uppercase border border-emerald-200 shadow-xs">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                    ✓ Tersimpan di Firestore
+                  </span>
+                )}
+                {settingsSaveStatus === 'error' && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-50 text-red-700 font-extrabold text-[10px] uppercase border border-red-200 shadow-xs animate-pulse">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                    ⚠ Gagal Sinkronisasi
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Interactive Preview Mockup Box */}
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+              <div className="md:col-span-5 bg-slate-50/60 rounded-2xl p-4 border border-slate-100 flex flex-col justify-between space-y-4">
+                <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest block">Live Visual Preview</span>
+                
+                <div className="space-y-3">
+                  {/* Button Demo */}
+                  <div className="flex items-center justify-between gap-2 p-1 bg-white rounded-xl shadow-xs border border-slate-100">
+                    <span className="text-[10px] font-bold text-slate-600 pl-2">Tombol Aksi</span>
+                    <button 
+                      type="button"
+                      className="px-3 py-1.5 rounded-lg text-[10.5px] font-black text-white hover:opacity-90 shadow-xs cursor-default shrink-0"
+                      style={{ backgroundColor: settings.accentColor || '#3b82f6' }}
+                    >
+                      Tombol Utama
+                    </button>
+                  </div>
+
+                  {/* Badge & Text Demo */}
+                  <div className="flex items-center justify-between gap-2 p-1.5 bg-white rounded-xl shadow-xs border border-slate-100 pl-2 pr-2 py-2">
+                    <span className="text-[10px] font-bold text-slate-600">Status & Tag</span>
+                    <span 
+                      className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border uppercase tracking-wider"
+                      style={{ 
+                        backgroundColor: (settings.accentColor || '#3b82f6') + '15',
+                        borderColor: settings.accentColor || '#3b82f6',
+                        color: settings.accentColor || '#3b82f6' 
                       }}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 pl-10 focus:bg-white focus:outline-none focus:border-slate-500 font-mono text-xs font-bold"
+                    >
+                      Selesai
+                    </span>
+                  </div>
+
+                  {/* Border Input Focus Demo */}
+                  <div className="flex items-center justify-between gap-2 p-1.5 bg-white rounded-xl shadow-xs border pl-2" style={{ borderColor: settings.accentColor || '#3b82f6' }}>
+                    <span className="text-[10px] font-bold text-slate-650">Border / Focus</span>
+                    <span className="text-[9.5px] text-slate-400 font-medium pr-1.5">Focus Highlight</span>
+                  </div>
+                </div>
+
+                <div className="text-[9.5px] text-slate-400 leading-normal font-semibold">
+                  Semua tombol transaksi, border input, status order, dan lencana di konsol Owner + Kasir otomatis berubah warna secara instan.
+                </div>
+              </div>
+
+              {/* Selector Panels */}
+              <div className="md:col-span-7 space-y-4">
+                <div className="space-y-2">
+                  <label className="text-slate-650 block font-extrabold uppercase text-[10px] tracking-wider">Pilih Palet Warna Populer:</label>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                    {[
+                      { name: 'Sky Sparkle (Def)', value: '#3b82f6' },
+                      { name: 'Fresh Teal/Mint', value: '#10b981' },
+                      { name: 'Aroma Lavender', value: '#8b5cf6' },
+                      { name: 'Sunset Orange', value: '#f97316' },
+                      { name: 'Elegant Clean Slate', value: '#1e293b' },
+                      { name: 'Rose Petal', value: '#f43f5e' },
+                    ].map((color) => (
+                      <button
+                        key={color.value}
+                        type="button"
+                        onClick={() => handleSettingsChange('accentColor', color.value)}
+                        className={`flex items-center gap-2 p-2.5 rounded-xl border font-bold transition-all text-left cursor-pointer hover:border-slate-300 ${
+                          (settings.accentColor || '#3b82f6') === color.value
+                            ? 'bg-slate-900 border-slate-900 text-white shadow-sm font-black'
+                            : 'bg-slate-50 border-slate-200 hover:bg-slate-100 text-slate-700'
+                        }`}
+                      >
+                        <span className="w-3.5 h-3.5 rounded-full border border-white/20 shrink-0 shadow-xs" style={{ backgroundColor: color.value }}></span>
+                        <span className="truncate text-[10.5px]">{color.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5 pt-2">
+                  <label className="text-slate-650 block font-extrabold uppercase text-[10px] tracking-wider">Kustomisasi Nilai Hex Warna & Color Picker:</label>
+                  <div className="flex gap-2 max-w-sm">
+                    <div className="relative flex-1">
+                      <span className="absolute left-3 top-2.5 text-slate-400 font-bold select-none text-xs">Hex:</span>
+                      <input
+                        type="text"
+                        maxLength={7}
+                        value={settings.accentColor || '#3b82f6'}
+                        onChange={(e) => {
+                          let val = e.target.value;
+                          if (val && !val.startsWith('#')) val = '#' + val;
+                          handleSettingsChange('accentColor', val);
+                        }}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 pl-10 focus:bg-white focus:outline-none focus:border-slate-500 font-mono text-xs font-bold"
+                      />
+                    </div>
+                    <input
+                      type="color"
+                      value={settings.accentColor || '#3b82f6'}
+                      onChange={(e) => handleSettingsChange('accentColor', e.target.value)}
+                      className="w-12 h-10 p-1 border border-slate-200 rounded-xl cursor-pointer bg-white shrink-0 shadow-xs"
                     />
                   </div>
-                  <input
-                    type="color"
-                    value={settings.accentColor || '#3b82f6'}
-                    onChange={(e) => handleSettingsChange('accentColor', e.target.value)}
-                    className="w-10 h-8 p-0 border border-slate-200 rounded-lg cursor-pointer bg-transparent shrink-0"
-                  />
                 </div>
+
+                {/* Direct save trigger reassurance */}
+                <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2.5">
+                  <span className="text-[10px] font-semibold text-slate-450">
+                    Setiap perubahan langsung diperbarui ke Firestore & disinkronkan ke seluruh klien aktif.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleSettingsChange('accentColor', settings.accentColor || '#3b82f6');
+                      triggerToast("🎉 Sukses mendaftarkan identitas warna ke database Firestore!");
+                    }}
+                    className="px-4 py-2 rounded-xl text-white font-black text-[10.5px] uppercase shadow-md transition transform hover:-translate-y-0.5 active:translate-y-0 inline-flex items-center gap-1 min-h-[36px] cursor-pointer shrink-0"
+                    style={{ backgroundColor: settings.accentColor || '#3b82f6' }}
+                  >
+                    <span>💾 Simpan Paksa</span>
+                  </button>
+                </div>
+
               </div>
             </div>
           </div>
@@ -6664,7 +7381,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
 
           {/* BRANCH LIST GRID */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {branches.map(b => {
+            {branches.map((b, idx) => {
               const assignedCashiers = users.filter(u => u.branchId === b.id && u.role === 'karyawan');
               const totalBranchOrders = orders.filter(o => o.branchId === b.id).length;
               return (
@@ -6693,32 +7410,41 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                         <span className="font-mono text-slate-600">{b.phone}</span>
                       </div>
                       {b.latitude && b.longitude ? (
-                        <div className="flex items-center gap-1.5 text-emerald-700 bg-emerald-50/85 px-2.5 py-1 rounded-xl border border-emerald-150 max-w-max text-[9.5px] font-black uppercase tracking-wider">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                        <div 
+                          style={idx === 0 ? { backgroundColor: '#023535' } : undefined}
+                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl border max-w-max text-[9.5px] font-black uppercase tracking-wider ${idx === 0 ? 'text-white border-teal-800' : 'text-emerald-700 bg-emerald-50/85 border-emerald-150'}`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${idx === 0 ? 'bg-teal-400' : 'bg-emerald-500'}`}></span>
                           <span>Geofence GPS: {b.latitude.toFixed(4)}, {b.longitude.toFixed(4)}</span>
                         </div>
                       ) : (
-                        <div className="flex items-center gap-1.5 text-amber-700 bg-amber-50/70 px-2.5 py-1 rounded-xl border border-amber-150 max-w-max text-[9.5px] font-bold uppercase tracking-wider">
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-450"></span>
+                        <div 
+                          style={idx === 0 ? { backgroundColor: '#023535' } : undefined}
+                          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl border max-w-max text-[9.5px] font-bold uppercase tracking-wider ${idx === 0 ? 'text-white border-teal-800' : 'text-amber-700 bg-amber-50/70 border-amber-150'}`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${idx === 0 ? 'bg-teal-400' : 'bg-amber-450'}`}></span>
                           <span>GPS Tanpa Geofencing</span>
                         </div>
                       )}
                     </div>
 
                     {/* Stats counters */}
-                    <div className="grid grid-cols-2 gap-2 bg-slate-50/70 p-3 rounded-2xl border border-slate-50">
+                    <div 
+                      style={idx === 0 ? { backgroundColor: '#2a2a98' } : undefined}
+                      className={`grid grid-cols-2 gap-2 p-3 rounded-2xl border ${idx === 0 ? 'border-indigo-900 text-white' : 'bg-slate-50/70 border-slate-50'}`}
+                    >
                       <div className="text-center md:text-left">
-                        <span className="text-[10px] uppercase text-slate-400 font-bold block">Staf Kasir</span>
+                        <span className={`text-[10px] uppercase font-bold block ${idx === 0 ? 'text-indigo-200' : 'text-slate-400'}`}>Staf Kasir</span>
                         <div className="flex items-center justify-center md:justify-start gap-1 mt-0.5">
-                          <Users className="w-3.5 h-3.5 text-sky-400" />
-                          <strong className="text-slate-800 text-xs font-mono">{assignedCashiers.length} Orang</strong>
+                          <Users className={`w-3.5 h-3.5 ${idx === 0 ? 'text-indigo-300' : 'text-sky-400'}`} />
+                          <strong className={`text-xs font-mono ${idx === 0 ? 'text-white' : 'text-slate-800'}`}>{assignedCashiers.length} Orang</strong>
                         </div>
                       </div>
-                      <div className="text-center md:text-left border-l border-slate-150 pl-3">
-                        <span className="text-[10px] uppercase text-slate-400 font-bold block">Riwayat Nota</span>
+                      <div className={`text-center md:text-left border-l pl-3 ${idx === 0 ? 'border-indigo-800' : 'border-slate-150'}`}>
+                        <span className={`text-[10px] uppercase font-bold block ${idx === 0 ? 'text-indigo-200' : 'text-slate-400'}`}>Riwayat Nota</span>
                         <div className="flex items-center justify-center md:justify-start gap-1 mt-0.5">
-                          <FileText className="w-3.5 h-3.5 text-indigo-400" />
-                          <strong className="text-slate-800 text-xs font-mono">{totalBranchOrders} Order</strong>
+                          <FileText className={`w-3.5 h-3.5 ${idx === 0 ? 'text-indigo-300' : 'text-indigo-400'}`} />
+                          <strong className={`text-xs font-mono ${idx === 0 ? 'text-white' : 'text-slate-800'}`}>{totalBranchOrders} Order</strong>
                         </div>
                       </div>
                     </div>
@@ -6751,6 +7477,314 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
         </div>
       </div>
     )}
+
+      {/* 7.5. CUSTOMER DATABASE & REAL-TIME LOYALTY POINTS AREA */}
+      {activeSubTab === 'customers' && (
+        <div className="space-y-6 mt-4 animate-fadeIn" id="section-customers">
+              {/* Main Table Card */}
+          <div className="bg-white rounded-2xl border border-slate-150 shadow-sm overflow-hidden text-slate-800">
+            <div className="p-5 border-b border-slate-150 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <h4 className="text-xs font-black text-[#0F172A] uppercase tracking-wider flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse"></span>
+                Tabel Basis Data Pelanggan CRM & Loyalty
+              </h4>
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full md:w-auto">
+                <div className="relative w-full md:w-80 shrink-0">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    placeholder="Cari nama, HP, atau alamat..."
+                    value={ownerCustomerSearch}
+                    onChange={(e) => setOwnerCustomerSearch(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 pl-9 pr-4 py-1.5 text-xs focus:bg-white focus:outline-none focus:border-sky-500 rounded-lg font-medium text-slate-800"
+                  />
+                </div>
+                
+                <div className="flex items-center gap-1.5 shrink-0 bg-slate-50 border border-slate-200 p-1.5 rounded-lg">
+                  <span className="text-[10px] font-black uppercase text-slate-400 px-1">Urutan:</span>
+                  <select
+                    value={ownerCustomerSortBy}
+                    onChange={(e) => setOwnerCustomerSortBy(e.target.value as any)}
+                    className="bg-transparent border-none text-xs text-slate-700 font-extrabold focus:outline-none cursor-pointer pr-1"
+                  >
+                    <option value="A-Z">🔤 A-Z (Nama)</option>
+                    <option value="Z-A">🔤 Z-A (Nama)</option>
+                    <option value="poin">⭐ Poin Terbanyak</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              {(() => {
+                const query = ownerCustomerSearch.toLowerCase().trim();
+                const filtered = customers.filter(c =>
+                  (c.name || '').toLowerCase().includes(query) ||
+                  (c.phone || '').includes(query) ||
+                  (c.address || '').toLowerCase().includes(query)
+                );
+
+                if (filtered.length === 0) {
+                  return (
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-50 select-none text-[10px] font-black uppercase tracking-wider text-slate-500 border-b border-slate-150">
+                          <th className="p-4 pl-6">ID Pelanggan</th>
+                          <th className="p-4">Nama Pelanggan</th>
+                          <th className="p-4">Nomor HP WhatsApp</th>
+                          <th className="p-4">Alamat Rumah</th>
+                          <th className="p-4 text-right">Saldo Deposit</th>
+                          <th className="p-4 text-center text-amber-700">Total Poin</th>
+                          <th className="p-4 text-right">Terakhir Aktif</th>
+                          <th className="p-4 text-center">Tindakan</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td colSpan={8} className="p-12 text-center text-slate-400 font-bold">
+                            Tidak ada data pelanggan yang cocok dengan saringan filter Anda.
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  );
+                }
+
+                const sorted = [...filtered].sort((a, b) => {
+                  if (ownerCustomerSortBy === 'A-Z') {
+                    return (a.name || '').localeCompare(b.name || '');
+                  } else if (ownerCustomerSortBy === 'Z-A') {
+                    return (b.name || '').localeCompare(a.name || '');
+                  } else if (ownerCustomerSortBy === 'poin') {
+                    return (b.loyaltyPoints || 0) - (a.loyaltyPoints || 0);
+                  }
+                  return 0;
+                });
+
+                const visibleSorted = sorted.slice(0, ownerCustomerLimit);
+                const hasMore = sorted.length > ownerCustomerLimit;
+
+                return (
+                  <>
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-50 select-none text-[10px] font-black uppercase tracking-wider text-slate-500 border-b border-slate-150">
+                          <th className="p-4 pl-6">ID Pelanggan</th>
+                          <th className="p-4">Nama Pelanggan</th>
+                          <th className="p-4">Nomor HP WhatsApp</th>
+                          <th className="p-4">Alamat Rumah</th>
+                          <th className="p-4 text-right">Saldo Deposit</th>
+                          <th className="p-4 text-center text-amber-700">Total Poin</th>
+                          <th className="p-4 text-right">Terakhir Aktif</th>
+                          <th className="p-4 text-center">Tindakan</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
+                        {visibleSorted.map((c, idx) => {
+                          let activeStr = 'Baru Terdaftar';
+                          try {
+                            if (c.lastActive) activeStr = new Date(c.lastActive).toLocaleDateString('id-ID', { dateStyle: 'medium' });
+                          } catch(e) {}
+
+                          return (
+                            <tr key={c.id || idx} className="hover:bg-slate-50/70 transition duration-155">
+                              <td className="p-4 pl-6 font-mono text-[10px] text-slate-455">
+                                {c.id}
+                              </td>
+                              <td className="p-4 font-extrabold text-slate-900 text-xs">
+                                {c.name}
+                              </td>
+                              <td className="p-4 font-mono font-bold text-slate-500">
+                                {c.phone || <span className="italic text-slate-305 font-normal">--</span>}
+                              </td>
+                              <td className="p-4 max-w-[150px] truncate text-slate-500 leading-normal" title={c.address}>
+                                {c.address || <span className="italic text-slate-305 font-normal">Belum diisi</span>}
+                              </td>
+                              <td className="p-4 text-right font-black text-emerald-600">
+                                Rp {(c.depositBalance || 0).toLocaleString('id-ID')}
+                              </td>
+                              <td className="p-4 text-center font-mono">
+                                <span className="px-2 py-0.5 bg-amber-500 text-slate-950 border border-amber-600/10 rounded-md text-[9.5px] font-black tracking-wider uppercase inline-flex items-center gap-1 shadow-3xs">
+                                  ⭐ {c.loyaltyPoints || 0} Poin
+                                </span>
+                              </td>
+                              <td className="p-4 text-right font-mono text-[10px] text-slate-455">
+                                {activeStr}
+                              </td>
+                              <td className="p-4 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingCustomer(c);
+                                    setEditingCustomerForm({
+                                      name: c.name || '',
+                                      phone: c.phone || '',
+                                      address: c.address || '',
+                                      depositBalance: c.depositBalance || 0,
+                                      loyaltyPoints: c.loyaltyPoints || 0
+                                    });
+                                  }}
+                                  className="px-2.5 py-1 bg-sky-50 hover:bg-sky-100 text-sky-700 hover:text-sky-800 rounded-lg text-[10px] font-black transition inline-flex items-center gap-1 cursor-pointer active:scale-95 animate-fadeIn"
+                                >
+                                  <Edit2 className="w-3 h-3" /> Edit CRM
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+
+                    {hasMore && (
+                      <div className="p-4 text-center border-t border-slate-100 bg-slate-50/50">
+                        <button
+                          type="button"
+                          onClick={() => setOwnerCustomerLimit(prev => prev + 50)}
+                          className="px-5 py-2 bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-800 rounded-xl text-xs font-black transition cursor-pointer"
+                        >
+                          ➕ Tampilkan Lebih Banyak Pelanggan ({sorted.length - ownerCustomerLimit} Tersisa)
+                        </button>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+
+          {/* EDIT CUSTOMER MODAL (TOP-ALIGNED AS REQUESTED) */}
+          {editingCustomer && (
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-start justify-center pt-8 sm:pt-16 p-4 z-50 overflow-y-auto animate-fadeIn text-slate-800 font-sans">
+              <form onSubmit={handleUpdateCustomer} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-2xl space-y-4 max-w-sm w-full animate-scaleIn">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <h4 className="font-extrabold text-slate-900 text-sm flex items-center gap-1.5">
+                    <span>✏️ Ubah Informasi Pelanggan</span>
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => setEditingCustomer(null)}
+                    className="text-slate-405 hover:text-slate-650 font-black text-xs cursor-pointer bg-slate-105 h-7 w-7 rounded-full flex items-center justify-center transition-colors"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="space-y-3.5 text-xs font-semibold text-slate-600">
+                  <div className="space-y-1">
+                    <label className="block text-slate-500">Nama Pelanggan:</label>
+                    <input
+                      type="text"
+                      required
+                      value={editingCustomerForm.name}
+                      onChange={(e) => setEditingCustomerForm({ ...editingCustomerForm, name: e.target.value })}
+                      className="w-full bg-slate-100 border border-slate-200 rounded-lg p-2 focus:border-indigo-650 focus:outline-none focus:bg-white text-slate-800 font-medium"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-slate-500">Nomor HP WhatsApp:</label>
+                    <input
+                      type="text"
+                      required
+                      value={editingCustomerForm.phone}
+                      onChange={(e) => setEditingCustomerForm({ ...editingCustomerForm, phone: e.target.value })}
+                      className="w-full bg-slate-100 border border-slate-200 rounded-lg p-2 focus:border-indigo-650 focus:outline-none focus:bg-white text-slate-800 font-mono font-medium"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-slate-500">Alamat Rumah:</label>
+                    <textarea
+                      value={editingCustomerForm.address || ''}
+                      onChange={(e) => setEditingCustomerForm({ ...editingCustomerForm, address: e.target.value })}
+                      rows={2}
+                      className="w-full bg-slate-100 border border-slate-200 rounded-lg p-2 focus:border-indigo-650 focus:outline-none focus:bg-white text-slate-800 font-medium"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="block text-slate-500">Saldo Deposit (Rp):</label>
+                      <input
+                        type="number"
+                        min="0"
+                        required
+                        value={editingCustomerForm.depositBalance}
+                        onChange={(e) => setEditingCustomerForm({ ...editingCustomerForm, depositBalance: Number(e.target.value) || 0 })}
+                        className="w-full bg-slate-100 border border-slate-200 rounded-lg p-2 focus:border-indigo-650 focus:outline-none focus:bg-white text-slate-800 font-mono font-medium"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="block text-slate-500 text-amber-700 font-bold">Total Poin Loyalitas:</label>
+                      <input
+                        type="number"
+                        min="0"
+                        required
+                        value={editingCustomerForm.loyaltyPoints}
+                        onChange={(e) => {
+                          const parsed = Number(e.target.value);
+                          setEditingCustomerForm({ ...editingCustomerForm, loyaltyPoints: isNaN(parsed) ? 0 : parsed });
+                        }}
+                        className="w-full bg-slate-100 border border-amber-300 rounded-lg p-2 focus:border-amber-500 focus:outline-none focus:bg-white text-slate-800 font-mono font-black"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setEditingCustomer(null)}
+                    className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 py-2 bg-sky-600 hover:bg-sky-700 text-white font-black rounded-xl transition shadow-sm"
+                  >
+                    Simpan Perubahan
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* Quick Stats Grid - PLACED AT THE VERY BOTTOM FOR COMPACT LAYOUT */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-4 border-t border-slate-150">
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-slate-800 shadow-3xs">
+              <div>
+                <div className="text-[9px] text-[#475569] font-black uppercase tracking-wider">Total Pelanggan CRM</div>
+                <div className="text-sm font-black text-slate-900 mt-0.5">{customers.length} Orang</div>
+              </div>
+              <span className="text-base">👤</span>
+            </div>
+
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-slate-800 shadow-3xs">
+              <div>
+                <div className="text-[9px] text-[#475569] font-black uppercase tracking-wider">Total Dana Titipan Deposit</div>
+                <div className="text-sm font-black text-emerald-600 mt-0.5">
+                  Rp {customers.reduce((acc, c) => acc + (Number(c.depositBalance) || 0), 0).toLocaleString('id-ID')}
+                </div>
+              </div>
+              <span className="text-base text-emerald-600">💸</span>
+            </div>
+
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-slate-800 shadow-3xs">
+              <div>
+                <div className="text-[9px] text-[#475569] font-black uppercase tracking-wider">Rata-rata Poin Loyalitas</div>
+                <div className="text-sm font-black text-amber-600 mt-0.5">
+                  {customers.length > 0
+                    ? Math.round(customers.reduce((acc, c) => acc + (Number(c.loyaltyPoints) || 0), 0) / customers.length)
+                    : 0} Poin
+                </div>
+              </div>
+              <span className="text-base">⭐</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 8. REKAP PRESENSI & JAM KERJA KARYAWAN ACCORDION */}
       {activeSubTab === 'attendance' && (
@@ -7093,58 +8127,108 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
             </div>
 
             <div className="p-6 overflow-y-auto flex-1">
-              {filteredOrders.filter(o => getOrderLocalDate(o.createdAt) === activeTodayStr && o.paymentStatus === 'Lunas').length === 0 ? (
-                <div className="text-center py-12 text-slate-400 text-xs font-medium">
-                  Tidak ada transaksi lunas yang tercatat hari ini.
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[10px] pb-2">
-                        <th className="pb-3 text-left">No Nota</th>
-                        <th className="pb-3 text-left">Nama Pelanggan</th>
-                        <th className="pb-3 text-left">Layanan Laundry</th>
-                        <th className="pb-3 text-center">Status Cucian</th>
-                        <th className="pb-3 text-center">Bayar</th>
-                        <th className="pb-3 text-right">Biaya Akhir</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 text-slate-700">
-                      {filteredOrders
-                        .filter(o => getOrderLocalDate(o.createdAt) === activeTodayStr && o.paymentStatus === 'Lunas')
-                        .map(order => {
-                          return (
-                            <tr key={order.id} className="hover:bg-slate-50/60 transition duration-150">
-                              <td className="py-3 font-mono font-bold text-slate-900">{order.invoiceNumber}</td>
-                              <td className="py-3 font-medium">
-                                <div>{order.customerName}</div>
-                                <div className="text-[10px] text-slate-400 font-mono">{order.customerPhone}</div>
-                              </td>
-                              <td className="py-3">
-                                <div className="max-w-[200px] truncate" title={order.items.map(it => `${it.serviceName} (${it.quantity}x)`).join(', ')}>
-                                  {order.items.map(it => `${it.serviceName} (${it.quantity}x)`).join(', ')}
-                                </div>
-                              </td>
-                              <td className="py-3 text-center">
-                                <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-indigo-50 text-indigo-700">
-                                  {order.status}
-                                </span>
-                              </td>
-                              <td className="py-3 text-center">
-                                <span className={`px-2 py-0.5 rounded text-[9.5px] font-black uppercase ${order.paymentStatus === 'Lunas' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600 border border-rose-150'}`}>
-                                  {order.paymentStatus === 'Lunas' ? 'Lunas' : 'Piutang'}
-                                </span>
-                                <span className="text-[10px] block text-slate-400 mt-0.5">{order.paymentMethod}</span>
-                              </td>
-                              <td className="py-3 text-right font-bold text-slate-850">Rp {order.totalAmount.toLocaleString('id-ID')}</td>
-                            </tr>
-                          );
-                        })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+              {(() => {
+                const todayLunasOrders = filteredOrders.filter(o => getOrderLocalDate(o.paymentDate || o.createdAt) === activeTodayStr && o.paymentStatus === 'Lunas' && o.status !== OrderStatus.DIBATALKAN);
+                const itemsPerPage = 5;
+                const totalPages = Math.ceil(todayLunasOrders.length / itemsPerPage) || 1;
+                const safePage = Math.min(todayTransactionsPage, totalPages);
+                const paginatedOrders = todayLunasOrders.slice((safePage - 1) * itemsPerPage, safePage * itemsPerPage);
+
+                if (todayLunasOrders.length === 0) {
+                  return (
+                    <div className="text-center py-12 text-slate-400 text-xs font-medium">
+                      Tidak ada transaksi lunas yang tercatat hari ini.
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="space-y-4">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[10px] pb-2">
+                            <th className="pb-3 text-left">No Nota</th>
+                            <th className="pb-3 text-left">Nama Pelanggan</th>
+                            <th className="pb-3 text-left">Layanan Laundry</th>
+                            <th className="pb-3 text-center">Status Cucian</th>
+                            <th className="pb-3 text-center">Bayar</th>
+                            <th className="pb-3 text-right">Biaya Akhir</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 text-slate-700">
+                          {paginatedOrders.map(order => {
+                            return (
+                              <tr key={order.id} className="hover:bg-slate-50/60 transition duration-150 animate-fadeIn">
+                                <td className="py-3 font-mono font-bold text-slate-900">{order.invoiceNumber}</td>
+                                <td className="py-3 font-medium">
+                                  <div>{order.customerName}</div>
+                                  <div className="text-[10px] text-slate-400 font-mono">{order.customerPhone}</div>
+                                </td>
+                                <td className="py-3">
+                                  <div className="max-w-[200px] truncate" title={order.items.map(it => `${it.serviceName} (${it.quantity}x)`).join(', ')}>
+                                    {order.items.map(it => `${it.serviceName} (${it.quantity}x)`).join(', ')}
+                                  </div>
+                                </td>
+                                <td className="py-3 text-center">
+                                  <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-indigo-50 text-indigo-700">
+                                    {order.status}
+                                  </span>
+                                </td>
+                                <td className="py-3 text-center">
+                                  <span className={`px-2 py-0.5 rounded text-[9.5px] font-black uppercase ${order.paymentStatus === 'Lunas' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600 border border-rose-150'}`}>
+                                    {order.paymentStatus === 'Lunas' ? 'Lunas' : 'Piutang'}
+                                  </span>
+                                  <span className="text-[10px] block text-slate-400 mt-0.5">{order.paymentMethod}</span>
+                                </td>
+                                <td className="py-3 text-right font-bold text-slate-850">Rp {order.totalAmount.toLocaleString('id-ID')}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Pagination Nav */}
+                    {totalPages > 1 && (
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-100">
+                        <div className="text-[10.5px] text-slate-500 font-semibold font-sans">
+                          Menampilkan <span className="font-bold text-[#0D1B2A]">{(safePage - 1) * itemsPerPage + 1}-{Math.min(todayLunasOrders.length, safePage * itemsPerPage)}</span> dari <span className="font-bold text-slate-700">{todayLunasOrders.length}</span> transaksi
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0 bg-slate-50 p-1 rounded-xl border border-slate-150">
+                          <button
+                            type="button"
+                            onClick={() => setTodayTransactionsPage(prev => Math.max(1, prev - 1))}
+                            className={`w-7 h-7 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center ${
+                              safePage <= 1
+                                ? 'text-slate-300 cursor-not-allowed'
+                                : 'text-slate-700 hover:bg-white hover:text-black border border-slate-150/40 shadow-2xs bg-white/70 active:scale-90'
+                            }`}
+                            title="Sebelumnya"
+                          >
+                            ◀
+                          </button>
+                          <span className="text-[10.5px] font-extrabold text-[#0D1B2A] px-2 min-w-[40px] text-center font-sans">
+                            {safePage} / {totalPages}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setTodayTransactionsPage(prev => Math.min(totalPages, prev + 1))}
+                            className={`w-7 h-7 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center ${
+                              safePage >= totalPages
+                                ? 'text-slate-300 cursor-not-allowed'
+                                : 'text-slate-700 hover:bg-white hover:text-black border border-slate-150/40 shadow-2xs bg-white/70 active:scale-90'
+                            }`}
+                            title="Berikutnya"
+                          >
+                            ▶
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Footer Buttons */}
@@ -7168,7 +8252,160 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
         </div>
       )}
 
-      {/* MONTHLY REVENUE DETAILS MODAL */}
+      {/* PAYMENT METHOD DETAILS MODAL */}
+      {selectedPaymentMethodDetails && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="bg-white rounded-3xl max-w-4xl w-full border border-slate-200 shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-scaleIn font-sans text-slate-800">
+            
+            {/* Header */}
+            <div className="p-6 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
+              <div>
+                <h3 className="text-base font-bold flex items-center gap-2">
+                  <span className="p-1 px-1.5 bg-emerald-500/10 text-emerald-400 rounded-lg text-xs">💳</span>
+                  Rincian Transaksi Metode: <span className="text-emerald-400">{selectedPaymentMethodDetails}</span>
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Menampilkan seluruh transaksi lunas berbasis pembayaran {selectedPaymentMethodDetails} pada rentang: {paymentStartDate || 'Awal'} s/d {paymentEndDate || 'Akhir'}
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedPaymentMethodDetails(null)}
+                className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition cursor-pointer"
+              >
+                ✕ Tutup
+              </button>
+            </div>
+
+            {/* Total Revenue Summary Bar */}
+            <div className="grid grid-cols-2 gap-4 p-4.5 bg-slate-50 border-b border-slate-150">
+              <div className="bg-white p-3 rounded-xl border border-slate-200">
+                <span className="text-[9.5px] font-black uppercase text-slate-405 block tracking-wider">Total Volume Trx</span>
+                <strong className="text-sm font-black text-slate-800">
+                  {selectedPaymentMethodTransactions.length} Transaksi
+                </strong>
+              </div>
+              <div className="bg-white p-3 rounded-xl border border-slate-200">
+                <span className="text-[9.5px] font-black uppercase text-slate-405 block tracking-wider">Total Nominal Lunas</span>
+                <strong className="text-sm font-black text-emerald-700 font-mono">
+                  Rp {selectedPaymentMethodTransactions.reduce((acc, o) => acc + o.totalAmount, 0).toLocaleString('id-ID')}
+                </strong>
+              </div>
+            </div>
+
+            <div className="p-6 overflow-y-auto flex-1 text-slate-705">
+              {(() => {
+                const itemsPerPage = 5;
+                const totalPages = Math.ceil(selectedPaymentMethodTransactions.length / itemsPerPage) || 1;
+                const safePage = Math.min(selectedPaymentMethodPage, totalPages);
+                const paginatedTransactions = selectedPaymentMethodTransactions.slice((safePage - 1) * itemsPerPage, safePage * itemsPerPage);
+
+                if (selectedPaymentMethodTransactions.length === 0) {
+                  return (
+                    <div className="text-center py-12 text-slate-400 text-xs font-medium">
+                      Tidak ada transaksi lunas menggunakan metode {selectedPaymentMethodDetails} dalam rentang tanggal terpilih.
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="space-y-4">
+                    <div className="overflow-x-auto">
+                       <table className="w-full text-left border-collapse text-xs text-slate-700">
+                         <thead>
+                           <tr className="border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[10px] pb-2">
+                             <th className="pb-3 text-left">No Nota</th>
+                             <th className="pb-3 text-left">Nama Pelanggan</th>
+                             <th className="pb-3 text-left">Layanan Laundry</th>
+                             <th className="pb-3 text-center">Tanggal Bayar</th>
+                             <th className="pb-3 text-center">Status Cucian</th>
+                             <th className="pb-3 text-right">Biaya Akhir</th>
+                           </tr>
+                         </thead>
+                         <tbody className="divide-y divide-slate-100">
+                           {paginatedTransactions.map(order => {
+                             return (
+                               <tr key={order.id} className="hover:bg-slate-50/60 transition duration-150 animate-fadeIn">
+                                 <td className="py-3 font-mono font-bold text-slate-900">{order.invoiceNumber}</td>
+                                 <td className="py-3 font-medium">
+                                   <div>{order.customerName}</div>
+                                   <div className="text-[10px] text-slate-400 font-mono">{order.customerPhone}</div>
+                                 </td>
+                                 <td className="py-3">
+                                   <div className="max-w-[200px] truncate" title={order.items.map(it => `${it.serviceName} (${it.quantity}x)`).join(', ')}>
+                                     {order.items.map(it => `${it.serviceName} (${it.quantity}x)`).join(', ')}
+                                   </div>
+                                 </td>
+                                 <td className="py-3 text-center font-mono text-slate-500">
+                                   {getOrderLocalDate(order.paymentDate || order.createdAt)}
+                                 </td>
+                                 <td className="py-3 text-center">
+                                   <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-indigo-50 text-indigo-700">
+                                     {order.status}
+                                   </span>
+                                 </td>
+                                 <td className="py-3 text-right font-bold text-slate-850">Rp {order.totalAmount.toLocaleString('id-ID')}</td>
+                               </tr>
+                             );
+                           })}
+                         </tbody>
+                       </table>
+                    </div>
+
+                    {/* Pagination Nav */}
+                    {totalPages > 1 && (
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-100">
+                        <div className="text-[10.5px] text-slate-500 font-semibold font-sans">
+                          Menampilkan <span className="font-bold text-[#0D1B2A]">{(safePage - 1) * itemsPerPage + 1}-{Math.min(selectedPaymentMethodTransactions.length, safePage * itemsPerPage)}</span> dari <span className="font-bold text-slate-700">{selectedPaymentMethodTransactions.length}</span> transaksi
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0 bg-slate-50 p-1 rounded-xl border border-slate-150">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedPaymentMethodPage(prev => Math.max(1, prev - 1))}
+                            className={`w-7 h-7 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center ${
+                              safePage <= 1
+                                ? 'text-slate-300 cursor-not-allowed'
+                                : 'text-slate-700 hover:bg-white hover:text-black border border-slate-150/40 shadow-2xs bg-white/70 active:scale-90'
+                            }`}
+                            title="Sebelumnya"
+                          >
+                            ◀
+                          </button>
+                          <span className="text-[10.5px] font-extrabold text-[#0D1B2A] px-2 min-w-[40px] text-center font-sans">
+                            {safePage} / {totalPages}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedPaymentMethodPage(prev => Math.min(totalPages, prev + 1))}
+                            className={`w-7 h-7 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center ${
+                              safePage >= totalPages
+                                ? 'text-slate-300 cursor-not-allowed'
+                                : 'text-slate-700 hover:bg-white hover:text-black border border-slate-150/40 shadow-2xs bg-white/70 active:scale-90'
+                            }`}
+                            title="Berikutnya"
+                          >
+                            ▶
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+              <button
+                onClick={() => setSelectedPaymentMethodDetails(null)}
+                className="px-4 py-2 bg-slate-950 text-white rounded-xl text-xs font-bold hover:bg-slate-800 transition shadow-sm cursor-pointer active:scale-95"
+              >
+                Tutup Detail
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
       {showMonthlyRevenueDetail && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
           <div className="bg-white rounded-3xl max-w-4xl w-full border border-slate-200 shadow-2xl flex flex-col max-h-[90vh] overflow-hidden animate-scaleIn font-sans text-slate-800">
@@ -7243,60 +8480,111 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
             </div>
 
             <div className="p-6 overflow-y-auto flex-1 scrollbar-thin">
-              {monthlyTransactions.length === 0 ? (
-                <div className="text-center py-12 text-slate-400 text-xs font-medium">
-                  Tidak ada transaksi yang tercatat dalam rentang tanggal terpilih.
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[10px] pb-2">
-                        <th className="pb-3 text-left">No Nota</th>
-                        <th className="pb-3 text-left">Tanggal</th>
-                        <th className="pb-3 text-left">Nama Pelanggan</th>
-                        <th className="pb-3 text-left">Layanan Laundry</th>
-                        <th className="pb-3 text-center">Status Cucian</th>
-                        <th className="pb-3 text-center">Bayar</th>
-                        <th className="pb-3 text-right">Biaya Akhir</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 text-slate-700">
-                      {monthlyTransactions.map(order => {
-                        return (
-                          <tr key={order.id} className="hover:bg-slate-50/60 transition duration-150">
-                            <td className="py-3 font-mono font-bold text-slate-900">{order.invoiceNumber}</td>
-                            <td className="py-3 text-slate-500 font-mono text-[10px]">
-                              {new Date(order.createdAt).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                            </td>
-                            <td className="py-3 font-medium">
-                              <div>{order.customerName}</div>
-                              <div className="text-[10px] text-slate-400 font-mono">{order.customerPhone}</div>
-                            </td>
-                            <td className="py-3">
-                              <div className="max-w-[200px] truncate" title={order.items.map(it => `${it.serviceName} (${it.quantity}x)`).join(', ')}>
-                                {order.items.map(it => `${it.serviceName} (${it.quantity}x)`).join(', ')}
-                              </div>
-                            </td>
-                            <td className="py-3 text-center">
-                              <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-indigo-50 text-indigo-700">
-                                {order.status}
-                              </span>
-                            </td>
-                            <td className="py-3 text-center">
-                              <span className={`px-2 py-0.5 rounded text-[9.5px] font-black uppercase ${order.paymentStatus === 'Lunas' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600 border border-rose-150'}`}>
-                                {order.paymentStatus === 'Lunas' ? 'Lunas' : 'Piutang'}
-                              </span>
-                              <span className="text-[10px] block text-slate-400 mt-0.5">{order.paymentMethod}</span>
-                            </td>
-                            <td className="py-3 text-right font-bold text-slate-850">Rp {order.totalAmount.toLocaleString('id-ID')}</td>
+              {(() => {
+                const itemsPerPage = 5;
+                const totalPages = Math.ceil(monthlyTransactions.length / itemsPerPage) || 1;
+                const safePage = Math.min(monthlyTransactionsPage, totalPages);
+                const paginatedTransactions = monthlyTransactions.slice((safePage - 1) * itemsPerPage, safePage * itemsPerPage);
+
+                if (monthlyTransactions.length === 0) {
+                  return (
+                    <div className="text-center py-12 text-slate-400 text-xs font-medium">
+                      Tidak ada transaksi yang tercatat dalam rentang tanggal terpilih.
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="space-y-4">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[10px] pb-2">
+                            <th className="pb-3 text-left">No Nota</th>
+                            <th className="pb-3 text-left">Tanggal</th>
+                            <th className="pb-3 text-left">Nama Pelanggan</th>
+                            <th className="pb-3 text-left">Layanan Laundry</th>
+                            <th className="pb-3 text-center">Status Cucian</th>
+                            <th className="pb-3 text-center">Bayar</th>
+                            <th className="pb-3 text-right">Biaya Akhir</th>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 text-slate-700">
+                          {paginatedTransactions.map(order => {
+                            return (
+                              <tr key={order.id} className="hover:bg-slate-50/60 transition duration-150 animate-fadeIn">
+                                <td className="py-3 font-mono font-bold text-slate-900">{order.invoiceNumber}</td>
+                                <td className="py-3 text-slate-500 font-mono text-[10px]">
+                                  {new Date(order.createdAt).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                </td>
+                                <td className="py-3 font-medium">
+                                  <div>{order.customerName}</div>
+                                  <div className="text-[10px] text-slate-400 font-mono">{order.customerPhone}</div>
+                                </td>
+                                <td className="py-3">
+                                  <div className="max-w-[200px] truncate" title={order.items.map(it => `${it.serviceName} (${it.quantity}x)`).join(', ')}>
+                                    {order.items.map(it => `${it.serviceName} (${it.quantity}x)`).join(', ')}
+                                  </div>
+                                </td>
+                                <td className="py-3 text-center">
+                                  <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-indigo-50 text-indigo-700">
+                                    {order.status}
+                                  </span>
+                                </td>
+                                <td className="py-3 text-center">
+                                  <span className={`px-2 py-0.5 rounded text-[9.5px] font-black uppercase ${order.paymentStatus === 'Lunas' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600 border border-rose-150'}`}>
+                                    {order.paymentStatus === 'Lunas' ? 'Lunas' : 'Piutang'}
+                                  </span>
+                                  <span className="text-[10px] block text-slate-400 mt-0.5">{order.paymentMethod}</span>
+                                </td>
+                                <td className="py-3 text-right font-bold text-slate-850">Rp {order.totalAmount.toLocaleString('id-ID')}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Pagination Nav */}
+                    {totalPages > 1 && (
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-100">
+                        <div className="text-[10.5px] text-slate-500 font-semibold font-sans">
+                          Menampilkan <span className="font-bold text-[#0D1B2A]">{(safePage - 1) * itemsPerPage + 1}-{Math.min(monthlyTransactions.length, safePage * itemsPerPage)}</span> dari <span className="font-bold text-slate-700">{monthlyTransactions.length}</span> transaksi
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0 bg-slate-50 p-1 rounded-xl border border-slate-150">
+                          <button
+                            type="button"
+                            onClick={() => setMonthlyTransactionsPage(prev => Math.max(1, prev - 1))}
+                            className={`w-7 h-7 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center ${
+                              safePage <= 1
+                                ? 'text-slate-300 cursor-not-allowed'
+                                : 'text-slate-700 hover:bg-white hover:text-black border border-slate-150/40 shadow-2xs bg-white/70 active:scale-90'
+                            }`}
+                            title="Sebelumnya"
+                          >
+                            ◀
+                          </button>
+                          <span className="text-[10.5px] font-extrabold text-[#0D1B2A] px-2 min-w-[40px] text-center font-sans">
+                            {safePage} / {totalPages}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setMonthlyTransactionsPage(prev => Math.min(totalPages, prev + 1))}
+                            className={`w-7 h-7 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center ${
+                              safePage >= totalPages
+                                ? 'text-slate-300 cursor-not-allowed'
+                                : 'text-slate-700 hover:bg-white hover:text-black border border-slate-150/40 shadow-2xs bg-white/70 active:scale-90'
+                            }`}
+                            title="Berikutnya"
+                          >
+                            ▶
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Footer Buttons */}
@@ -7624,6 +8912,11 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                   return oDate >= accumulatedStartDate && oDate <= accumulatedEndDate && o.paymentStatus === 'Lunas' && o.status !== OrderStatus.DIBATALKAN;
                 });
 
+                const itemsPerPage = 5;
+                const totalPages = Math.ceil(filtered.length / itemsPerPage) || 1;
+                const safePage = Math.min(accumulatedOmzetPage, totalPages);
+                const paginatedOrders = filtered.slice((safePage - 1) * itemsPerPage, safePage * itemsPerPage);
+
                 if (filtered.length === 0) {
                   return (
                     <div className="text-center py-16 text-slate-400 text-xs font-medium">
@@ -7633,47 +8926,87 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                 }
 
                 return (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse text-xs">
-                      <thead>
-                        <tr className="border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[10px] pb-2">
-                          <th className="pb-3 text-left">No Nota</th>
-                          <th className="pb-3 text-left">Tanggal Bayar</th>
-                          <th className="pb-3 text-left">Nama Pelanggan</th>
-                          <th className="pb-3 text-left">Layanan</th>
-                          <th className="pb-3 text-center">Metode</th>
-                          <th className="pb-3 text-right">Biaya Akhir</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 text-slate-700">
-                        {filtered.map(order => {
-                          const paymentTime = order.paymentDate || order.createdAt;
-                          return (
-                            <tr key={order.id} className="hover:bg-slate-50/60 transition duration-150 animate-fadeIn">
-                              <td className="py-3 font-mono font-bold text-slate-900">{order.invoiceNumber}</td>
-                              <td className="py-3 text-[10px] text-slate-500">
-                                {new Date(paymentTime).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}
-                              </td>
-                              <td className="py-3 font-medium">
-                                <div>{order.customerName}</div>
-                                <div className="text-[10px] text-slate-400 font-mono">{order.customerPhone}</div>
-                              </td>
-                              <td className="py-3">
-                                <div className="max-w-[180px] truncate" title={order.items.map(it => `${it.serviceName} (${it.quantity}x)`).join(', ')}>
-                                  {order.items.map(it => `${it.serviceName} (${it.quantity}x)`).join(', ')}
-                                </div>
-                              </td>
-                              <td className="py-3 text-center whitespace-nowrap">
-                                <span className="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-[9px] font-bold uppercase text-slate-600">
-                                  {order.paymentMethod}
-                                </span>
-                              </td>
-                              <td className="py-3 text-right font-bold text-slate-850">Rp {order.totalAmount.toLocaleString('id-ID')}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                  <div className="space-y-4">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[10px] pb-2">
+                            <th className="pb-3 text-left">No Nota</th>
+                            <th className="pb-3 text-left">Tanggal Bayar</th>
+                            <th className="pb-3 text-left">Nama Pelanggan</th>
+                            <th className="pb-3 text-left">Layanan</th>
+                            <th className="pb-3 text-center">Metode</th>
+                            <th className="pb-3 text-right">Biaya Akhir</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 text-slate-700">
+                          {paginatedOrders.map(order => {
+                            const paymentTime = order.paymentDate || order.createdAt;
+                            return (
+                              <tr key={order.id} className="hover:bg-slate-50/60 transition duration-150 animate-fadeIn">
+                                <td className="py-3 font-mono font-bold text-slate-900">{order.invoiceNumber}</td>
+                                <td className="py-3 text-[10px] text-slate-500">
+                                  {new Date(paymentTime).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}
+                                </td>
+                                <td className="py-3 font-medium">
+                                  <div>{order.customerName}</div>
+                                  <div className="text-[10px] text-slate-400 font-mono">{order.customerPhone}</div>
+                                </td>
+                                <td className="py-3">
+                                  <div className="max-w-[180px] truncate" title={order.items.map(it => `${it.serviceName} (${it.quantity}x)`).join(', ')}>
+                                    {order.items.map(it => `${it.serviceName} (${it.quantity}x)`).join(', ')}
+                                  </div>
+                                </td>
+                                <td className="py-3 text-center whitespace-nowrap">
+                                  <span className="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-[9px] font-bold uppercase text-slate-600">
+                                    {order.paymentMethod}
+                                  </span>
+                                </td>
+                                <td className="py-3 text-right font-bold text-slate-850">Rp {order.totalAmount.toLocaleString('id-ID')}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Pagination Nav */}
+                    {totalPages > 1 && (
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-100">
+                        <div className="text-[10.5px] text-slate-500 font-semibold font-sans">
+                          Menampilkan <span className="font-bold text-[#0D1B2A]">{(safePage - 1) * itemsPerPage + 1}-{Math.min(filtered.length, safePage * itemsPerPage)}</span> dari <span className="font-bold text-slate-700">{filtered.length}</span> transaksi
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0 bg-slate-50 p-1 rounded-xl border border-slate-150">
+                          <button
+                            type="button"
+                            onClick={() => setAccumulatedOmzetPage(prev => Math.max(1, prev - 1))}
+                            className={`w-7 h-7 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center ${
+                              safePage <= 1
+                                ? 'text-slate-300 cursor-not-allowed'
+                                : 'text-slate-700 hover:bg-white hover:text-black border border-slate-150/40 shadow-2xs bg-white/70 active:scale-90'
+                            }`}
+                            title="Sebelumnya"
+                          >
+                            ◀
+                          </button>
+                          <span className="text-[10.5px] font-extrabold text-[#0D1B2A] px-2 min-w-[40px] text-center font-sans">
+                            {safePage} / {totalPages}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setAccumulatedOmzetPage(prev => Math.min(totalPages, prev + 1))}
+                            className={`w-7 h-7 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center ${
+                              safePage >= totalPages
+                                ? 'text-slate-300 cursor-not-allowed'
+                                : 'text-slate-700 hover:bg-white hover:text-black border border-slate-150/40 shadow-2xs bg-white/70 active:scale-90'
+                            }`}
+                            title="Berikutnya"
+                          >
+                            ▶
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })()}
@@ -7751,6 +9084,11 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
               {(() => {
                 const unfulfilled = filteredOrders.filter(o => o.paymentStatus !== 'Lunas' && o.status !== OrderStatus.DIBATALKAN);
 
+                const itemsPerPage = 5;
+                const totalPages = Math.ceil(unfulfilled.length / itemsPerPage) || 1;
+                const safePage = Math.min(piutangPage, totalPages);
+                const paginatedOrders = unfulfilled.slice((safePage - 1) * itemsPerPage, safePage * itemsPerPage);
+
                 if (unfulfilled.length === 0) {
                   return (
                     <div className="text-center py-16 text-slate-400 text-xs font-medium">
@@ -7760,57 +9098,97 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                 }
 
                 return (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse text-xs">
-                      <thead>
-                        <tr className="border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[10px] pb-2">
-                          <th className="pb-3 text-left">No Nota</th>
-                          <th className="pb-3 text-left">Tanggal Masuk</th>
-                          <th className="pb-3 text-left">Nama Pelanggan</th>
-                          <th className="pb-3 text-left">Layanan</th>
-                          <th className="pb-3 text-center">Status Cucian</th>
-                          <th className="pb-3 text-center font-bold text-rose-600">Terutang</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 text-slate-700">
-                        {unfulfilled.map(order => {
-                          return (
-                            <tr key={order.id} className="hover:bg-slate-50/60 transition duration-150 animate-fadeIn">
-                              <td className="py-3 font-mono font-bold text-slate-900">{order.invoiceNumber}</td>
-                              <td className="py-3 text-[10px] text-slate-500">
-                                {new Date(order.createdAt).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}
-                              </td>
-                              <td className="py-3 font-medium">
-                                <div>{order.customerName}</div>
-                                <div className="text-[10px] text-rose-600 font-mono font-semibold flex items-center gap-1.5 mt-0.5">
-                                  <span>📞 {order.customerPhone}</span>
-                                  <a 
-                                    href={`https://wa.me/${order.customerPhone.replace(/[^0-9]/g, '')}`} 
-                                    target="_blank" 
-                                    rel="noreferrer" 
-                                    className="px-1 py-0.5 bg-emerald-50 text-emerald-700 rounded border border-emerald-150 text-[8px] active:scale-95 font-bold uppercase"
-                                    title="Hubungi via WA"
-                                  >
-                                    WA ➔
-                                  </a>
-                                </div>
-                              </td>
-                              <td className="py-3">
-                                <div className="max-w-[180px] truncate" title={order.items.map(it => `${it.serviceName} (${it.quantity}x)`).join(', ')}>
-                                  {order.items.map(it => `${it.serviceName} (${it.quantity}x)`).join(', ')}
-                                </div>
-                              </td>
-                              <td className="py-3 text-center">
-                                <span className="px-2 py-0.5 text-[8.5px] font-extrabold uppercase rounded bg-amber-50 text-amber-700 border border-amber-150">
-                                  {order.status}
-                                </span>
-                              </td>
-                              <td className="py-3 text-right font-black text-rose-600">Rp {order.totalAmount.toLocaleString('id-ID')}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                  <div className="space-y-4">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[10px] pb-2">
+                            <th className="pb-3 text-left">No Nota</th>
+                            <th className="pb-3 text-left">Tanggal Masuk</th>
+                            <th className="pb-3 text-left">Nama Pelanggan</th>
+                            <th className="pb-3 text-left">Layanan</th>
+                            <th className="pb-3 text-center">Status Cucian</th>
+                            <th className="pb-3 text-center font-bold text-rose-600">Terutang</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 text-slate-700">
+                          {paginatedOrders.map(order => {
+                            return (
+                              <tr key={order.id} className="hover:bg-slate-50/60 transition duration-150 animate-fadeIn">
+                                <td className="py-3 font-mono font-bold text-slate-900">{order.invoiceNumber}</td>
+                                <td className="py-3 text-[10px] text-slate-500">
+                                  {new Date(order.createdAt).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}
+                                </td>
+                                <td className="py-3 font-medium">
+                                  <div>{order.customerName}</div>
+                                  <div className="text-[10px] text-rose-600 font-mono font-semibold flex items-center gap-1.5 mt-0.5">
+                                    <span>📞 {order.customerPhone}</span>
+                                    <a 
+                                      href={`https://wa.me/${order.customerPhone.replace(/[^0-9]/g, '')}`} 
+                                      target="_blank" 
+                                      rel="noreferrer" 
+                                      className="px-1 py-0.5 bg-emerald-50 text-emerald-700 rounded border border-emerald-150 text-[8px] active:scale-95 font-bold uppercase cursor-pointer"
+                                      title="Hubungi via WA"
+                                    >
+                                      WA ➔
+                                    </a>
+                                  </div>
+                                </td>
+                                <td className="py-3">
+                                  <div className="max-w-[180px] truncate" title={order.items.map(it => `${it.serviceName} (${it.quantity}x)`).join(', ')}>
+                                    {order.items.map(it => `${it.serviceName} (${it.quantity}x)`).join(', ')}
+                                  </div>
+                                </td>
+                                <td className="py-3 text-center">
+                                  <span className="px-2 py-0.5 text-[8.5px] font-extrabold uppercase rounded bg-amber-50 text-amber-700 border border-amber-150">
+                                    {order.status}
+                                  </span>
+                                </td>
+                                <td className="py-3 text-right font-black text-rose-600">Rp {order.totalAmount.toLocaleString('id-ID')}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Pagination Nav */}
+                    {totalPages > 1 && (
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-100">
+                        <div className="text-[10.5px] text-slate-500 font-semibold font-sans">
+                          Menampilkan <span className="font-bold text-rose-950">{(safePage - 1) * itemsPerPage + 1}-{Math.min(unfulfilled.length, safePage * itemsPerPage)}</span> dari <span className="font-bold text-slate-700">{unfulfilled.length}</span> piutang
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0 bg-slate-50 p-1 rounded-xl border border-slate-150">
+                          <button
+                            type="button"
+                            onClick={() => setPiutangPage(prev => Math.max(1, prev - 1))}
+                            className={`w-7 h-7 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center ${
+                              safePage <= 1
+                                ? 'text-slate-300 cursor-not-allowed'
+                                : 'text-slate-700 hover:bg-white hover:text-black border border-slate-150/40 shadow-2xs bg-white/70 active:scale-90'
+                            }`}
+                            title="Sebelumnya"
+                          >
+                            ◀
+                          </button>
+                          <span className="text-[10.5px] font-extrabold text-[#0D1B2A] px-2 min-w-[40px] text-center font-sans">
+                            {safePage} / {totalPages}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setPiutangPage(prev => Math.min(totalPages, prev + 1))}
+                            className={`w-7 h-7 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center ${
+                              safePage >= totalPages
+                                ? 'text-slate-300 cursor-not-allowed'
+                                : 'text-slate-700 hover:bg-white hover:text-black border border-slate-150/40 shadow-2xs bg-white/70 active:scale-90'
+                            }`}
+                            title="Berikutnya"
+                          >
+                            ▶
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })()}
@@ -7905,6 +9283,11 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                   return e.date >= startLimit && e.date <= endLimit;
                 });
 
+                const itemsPerPage = 5;
+                const totalPages = Math.ceil(filtered.length / itemsPerPage) || 1;
+                const safePage = Math.min(opexPage, totalPages);
+                const paginatedExpenses = filtered.slice((safePage - 1) * itemsPerPage, safePage * itemsPerPage);
+
                 if (filtered.length === 0) {
                   return (
                     <div className="text-center py-16 text-slate-400 text-xs font-medium">
@@ -7914,37 +9297,77 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                 }
 
                 return (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse text-xs">
-                      <thead>
-                        <tr className="border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[10px] pb-2">
-                          <th className="pb-3 text-left">Tanggal</th>
-                          <th className="pb-3 text-left">Deskripsi Pengeluaran</th>
-                          <th className="pb-3 text-left">Kategori</th>
-                          <th className="pb-3 text-left">Disimpan Oleh</th>
-                          <th className="pb-3 text-right">Jumlah Biaya</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 text-slate-700">
-                        {filtered.map(exp => {
-                          return (
-                            <tr key={exp.id} className="hover:bg-slate-50/60 transition duration-150 animate-fadeIn overflow-hidden">
-                              <td className="py-3 font-mono text-slate-500">
-                                {new Date(exp.date).toLocaleDateString('id-ID', { dateStyle: 'medium' })}
-                              </td>
-                              <td className="py-3 font-semibold text-slate-900">{exp.description}</td>
-                              <td className="py-3 text-left">
-                                <span className="px-2 py-0.5 text-[8.5px] font-bold rounded bg-red-50 text-red-700 border border-red-150 uppercase">
-                                  {exp.category}
-                                </span>
-                              </td>
-                              <td className="py-3 text-slate-500 font-mono text-[10.5px]">{exp.recordedBy || 'Owner'}</td>
-                              <td className="py-3 text-right font-black text-rose-600">Rp {exp.amount.toLocaleString('id-ID')}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
+                  <div className="space-y-4">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider text-[10px] pb-2">
+                            <th className="pb-3 text-left">Tanggal</th>
+                            <th className="pb-3 text-left">Deskripsi Pengeluaran</th>
+                            <th className="pb-3 text-left">Kategori</th>
+                            <th className="pb-3 text-left">Disimpan Oleh</th>
+                            <th className="pb-3 text-right">Jumlah Biaya</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 text-slate-700">
+                          {paginatedExpenses.map(exp => {
+                            return (
+                              <tr key={exp.id} className="hover:bg-slate-50/60 transition duration-150 animate-fadeIn overflow-hidden">
+                                <td className="py-3 font-mono text-slate-500">
+                                  {new Date(exp.date).toLocaleDateString('id-ID', { dateStyle: 'medium' })}
+                                </td>
+                                <td className="py-3 font-semibold text-slate-900">{exp.description}</td>
+                                <td className="py-3 text-left">
+                                  <span className="px-2 py-0.5 text-[8.5px] font-bold rounded bg-red-50 text-red-700 border border-red-150 uppercase">
+                                    {exp.category}
+                                  </span>
+                                </td>
+                                <td className="py-3 text-slate-500 font-mono text-[10.5px]">{exp.recordedBy || 'Owner'}</td>
+                                <td className="py-3 text-right font-black text-rose-600">Rp {exp.amount.toLocaleString('id-ID')}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Pagination Nav */}
+                    {totalPages > 1 && (
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-100">
+                        <div className="text-[10.5px] text-slate-500 font-semibold font-sans">
+                          Menampilkan <span className="font-bold text-red-950">{(safePage - 1) * itemsPerPage + 1}-{Math.min(filtered.length, safePage * itemsPerPage)}</span> dari <span className="font-bold text-slate-700">{filtered.length}</span> catatan operasional
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0 bg-slate-50 p-1 rounded-xl border border-slate-150">
+                          <button
+                            type="button"
+                            onClick={() => setOpexPage(prev => Math.max(1, prev - 1))}
+                            className={`w-7 h-7 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center ${
+                              safePage <= 1
+                                ? 'text-slate-300 cursor-not-allowed'
+                                : 'text-slate-700 hover:bg-white hover:text-black border border-slate-150/40 shadow-2xs bg-white/70 active:scale-90'
+                            }`}
+                            title="Sebelumnya"
+                          >
+                            ◀
+                          </button>
+                          <span className="text-[10.5px] font-extrabold text-[#0D1B2A] px-2 min-w-[40px] text-center font-sans">
+                            {safePage} / {totalPages}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setOpexPage(prev => Math.min(totalPages, prev + 1))}
+                            className={`w-7 h-7 rounded-lg text-[10px] font-bold transition-all cursor-pointer flex items-center justify-center ${
+                              safePage >= totalPages
+                                ? 'text-slate-300 cursor-not-allowed'
+                                : 'text-slate-700 hover:bg-white hover:text-black border border-slate-150/40 shadow-2xs bg-white/70 active:scale-90'
+                            }`}
+                            title="Berikutnya"
+                          >
+                            ▶
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })()}
@@ -8410,6 +9833,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                   { key: 'branches', icon: '🏢', label: 'Master Data & Cabang' },
                   { key: 'settings', icon: '🔧', label: 'Pengaturan & WA Templates' },
                   { key: 'attendance', icon: '📅', label: 'Rekap Absensi Karyawan' },
+                  { key: 'customers', icon: '👤', label: 'Daftar Pelanggan (CRM)' },
                   { key: 'owner_mgmt', icon: '👑', label: 'Owner & Staff Management' }
                 ].map((item) => {
                   const isActive = activeSubTab === item.key;

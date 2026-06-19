@@ -22,6 +22,7 @@ import {
 import { LaundryService } from '../services/laundryService';
 import { collection, doc, onSnapshot } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
+import logoImg from '../assets/images/logo_laughdry_1781839107009.jpg';
 
 // Let's seed with rich initial data that demonstrates the platform's features instantly.
 const INITIAL_USERS: User[] = [
@@ -109,7 +110,7 @@ Promo berlaku hingga akhir bulan ini.`
 const INITIAL_ATTENDANCE: AttendanceRecord[] = [];
 
 const INITIAL_SETTINGS: SystemSettings = {
-  logoUrl: 'https://images.unsplash.com/photo-1545173168-9f1947e8017e?q=80&w=200&auto=format&fit=crop',
+  logoUrl: logoImg,
   pointsMultiplier: 10000, // 1 point per 10,000 IDR
   pointsValue: 100, // 1 point = 100 IDR discount
   bluetoothPrinterAddress: 'CC:3F:1D:9B:D2:4E (Thermal POS-58)',
@@ -127,7 +128,7 @@ const INITIAL_SETTINGS: SystemSettings = {
   receiptFontSize: 'medium',
   receiptAlignment: 'center',
   customReceiptHeader: 'LAUGHDRY EXPRESS\nLAUNDRY KILOAN & SATUAN BINTARO',
-  customReceiptHeaderLogoImg: 'https://images.unsplash.com/photo-1545173168-9f1947e8017e?q=80&w=200&auto=format&fit=crop',
+  customReceiptHeaderLogoImg: logoImg,
   customReceiptFooter: 'TERIMA KASIH ATAS KUNJUNGAN ANDA!\nSIMPAN STRUK INI SEBAGAI PENJAMIN',
   receiptElements: [
     { id: 'outlet_name', label: 'Nama Outlet / Cabang', fontSize: 13, alignment: 'center', isBold: true, isVisible: true, showPrefix: true, isItalic: false },
@@ -610,7 +611,15 @@ export class LaughDryDatabase {
   public static getCustomers(): Customer[] { return this.loadKey('customers', INITIAL_CUSTOMERS); }
   public static saveCustomers(data: Customer[]) { 
     const previous = this.getCustomers();
-    this.saveKey('customers', data); 
+    // Ensure all loyaltyPoints are valid numeric values before saving to Database
+    const validatedData = data.map(c => {
+      const parsedPoints = Number(c.loyaltyPoints);
+      return {
+        ...c,
+        loyaltyPoints: isNaN(parsedPoints) ? 0 : parsedPoints
+      };
+    });
+    this.saveKey('customers', validatedData); 
     
     // Auto-update phone & name on existing orders if customer info has changed!
     // PERBAIKAN: Memperbarui nomor telepon pelanggan secara global pada semua riwayat transaksi aktif saat admin mengedit data pelanggan di CRM
@@ -748,7 +757,22 @@ export class LaughDryDatabase {
   }
 
   public static getSettings(): SystemSettings { 
+    const isClient = typeof window !== 'undefined';
+    const gateLogo = isClient ? localStorage.getItem('laughdry_gate_logo') : null;
+    const defaultLogo = gateLogo || logoImg;
+
+    INITIAL_SETTINGS.logoUrl = defaultLogo;
+    INITIAL_SETTINGS.customReceiptHeaderLogoImg = defaultLogo;
+
     const settings = this.loadKey('settings', INITIAL_SETTINGS); 
+
+    if (!settings.logoUrl || settings.logoUrl.includes('unsplash') || settings.logoUrl.includes('logo_laughdry_1781839107009')) {
+      settings.logoUrl = defaultLogo;
+    }
+    if (!settings.customReceiptHeaderLogoImg || settings.customReceiptHeaderLogoImg.includes('unsplash') || settings.customReceiptHeaderLogoImg.includes('logo_laughdry_1781839107009')) {
+      settings.customReceiptHeaderLogoImg = defaultLogo;
+    }
+
     const hasNewEl = settings.receiptElements && settings.receiptElements.some(el => el.id === 'cashier_info');
     if (!settings.receiptElements || settings.receiptElements.length === 0 || !hasNewEl) {
       settings.receiptElements = INITIAL_SETTINGS.receiptElements;

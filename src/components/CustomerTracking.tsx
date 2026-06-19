@@ -66,7 +66,11 @@ export default function CustomerTracking() {
           setCustomer(found);
           setIsUrlSession(true);
           const allOrders = LaughDryDatabase.getOrders();
-          const userOrders = allOrders.filter(o => o.customerId === found.id);
+          const userOrders = allOrders.filter(o => {
+            const oPhoneClean = o.customerPhone ? o.customerPhone.replace(/\D/g, '') : '';
+            const fPhoneClean = found.phone ? found.phone.replace(/\D/g, '') : '';
+            return o.customerId === found.id || (oPhoneClean && fPhoneClean && oPhoneClean === fPhoneClean);
+          });
           
           const active = userOrders.filter(o => o.status !== OrderStatus.SELESAI && o.status !== OrderStatus.DIBATALKAN);
           const history = userOrders.filter(o => o.status === OrderStatus.SELESAI || o.status === OrderStatus.DIBATALKAN);
@@ -116,7 +120,11 @@ export default function CustomerTracking() {
     if (found) {
       setCustomer(found);
       const allOrders = LaughDryDatabase.getOrders();
-      const userOrders = allOrders.filter(o => o.customerId === found.id);
+      const userOrders = allOrders.filter(o => {
+        const oPhoneClean = o.customerPhone ? o.customerPhone.replace(/\D/g, '') : '';
+        const fPhoneClean = found.phone ? found.phone.replace(/\D/g, '') : '';
+        return o.customerId === found.id || (oPhoneClean && fPhoneClean && oPhoneClean === fPhoneClean);
+      });
       
       const active = userOrders.filter(o => o.status !== OrderStatus.SELESAI && o.status !== OrderStatus.DIBATALKAN);
       const history = userOrders.filter(o => o.status === OrderStatus.SELESAI || o.status === OrderStatus.DIBATALKAN);

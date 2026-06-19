@@ -32,7 +32,9 @@ import {
   Award,
   Shirt,
   MoreVertical,
-  LogOut
+  LogOut,
+  BookOpen,
+  Smartphone
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { LaughDryDatabase } from '../data/mockDatabase';
@@ -137,12 +139,216 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
 
   // Post-submit Choice Popup (print / send WA)
   const [showCheckoutConfirmModal, setShowCheckoutConfirmModal] = useState(false);
-  const [showProcessSuccessModal, setShowProcessSuccessModal] = useState(false);
+  const [showProcessSuccessModal, _setShowProcessSuccessModal] = useState(false);
   const [showInvoiceChoiceModal, setShowInvoiceChoiceModal] = useState(false);
   const [showThermalReceiptModal, setShowThermalReceiptModal] = useState(false);
   const [isAutoPrintEnabled, setIsAutoPrintEnabled] = useState<boolean>(() => {
     return localStorage.getItem('laughdry_autoprint_enabled') !== 'false';
   });
+
+  // Web Bluetooth and Celebration States
+  const bluetoothCharacteristicRef = useRef<any>(null);
+  const bluetoothDeviceRef = useRef<any>(null);
+  const [confettiParticles, setConfettiParticles] = useState<any[]>([]);
+
+  const triggerConfetti = () => {
+    const listColors = ['#38BDF8', '#818CF8', '#FB7185', '#FBBF24', '#34D399', '#A78BFA'];
+    const p = Array.from({ length: 65 }).map((_, i) => ({
+      id: `${Date.now()}-${i}-${Math.random()}`,
+      x: Math.random() * 100, // percentage of viewport width
+      y: -20, // offset above viewport
+      size: Math.random() * 9 + 6, // size
+      color: listColors[Math.floor(Math.random() * listColors.length)],
+      angle: Math.random() * 360,
+      delay: Math.random() * 0.4,
+      duration: Math.random() * 1.6 + 1.2
+    }));
+    setConfettiParticles(p);
+    setTimeout(() => {
+      setConfettiParticles([]);
+    }, 4000);
+  };
+
+  const setShowProcessSuccessModal = (val: boolean) => {
+    _setShowProcessSuccessModal(val);
+    if (val) {
+      triggerConfetti();
+    }
+  };
+
+  const connectWebBluetooth = async () => {
+    if (typeof navigator === 'undefined' || !('bluetooth' in navigator)) {
+      showToast("❌ Browser Anda tidak mendukung Web Bluetooth API.");
+      return;
+    }
+    try {
+      showToast("🔍 Mencari printer Thermal Bluetooth terdekat...");
+      const device = await (navigator as any).bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: [
+          '000018f0-0000-1000-8000-00805f9b34fb', // Thermal receipt service
+          '00001101-0000-1000-8000-00805f9b34fb', // Standard Serial/RFCOMM service
+          'e7810a71-73ae-499d-8c15-faa9aef0c3f2'  // BLE Print service
+        ]
+      });
+      if (!device) return;
+      
+      showToast(`🔌 Menyambungkan ke: ${device.name || 'Thermal Device'}...`);
+      const server = await device.gatt.connect();
+      
+      showToast("⚙️ Mencari service penulisan data (Print)...");
+      let characteristic: any = null;
+      const services = await server.getPrimaryServices().catch(() => []);
+      
+      for (const service of services) {
+        const characteristics = await service.getCharacteristics().catch(() => []);
+        for (const char of characteristics) {
+          if (char.properties.write || char.properties.writeWithoutResponse) {
+            characteristic = char;
+            break;
+          }
+        }
+        if (characteristic) break;
+      }
+      
+      if (!characteristic) {
+        try {
+          const service = await server.getPrimaryService('000018f0-0000-1000-8000-00805f9b34fb');
+          characteristic = await service.getCharacteristic('00002af1-0000-1000-8000-00805f9b34fb');
+        } catch (err) {
+          try {
+            const service = await server.getPrimaryService('00001101-0000-1000-8000-00805f9b34fb');
+            characteristic = await service.getCharacteristic('00001101-0000-1000-8000-00805f9b34fb');
+          } catch (e) {}
+        }
+      }
+      
+      if (characteristic) {
+        bluetoothCharacteristicRef.current = characteristic;
+        bluetoothDeviceRef.current = device;
+        setIsPrinterConnected(true);
+        setConnectedPrinterName(device.name || "MTP-2 Web POS");
+        localStorage.setItem('laughdry_printer_connected', 'true');
+        localStorage.setItem('laughdry_printer_name', device.name || "MTP-2 Web POS");
+        const updatedSettings = { ...settings, bluetoothPrinterAddress: device.name || "MTP-2 Web POS" };
+        LaughDryDatabase.saveSettings(updatedSettings);
+        setSettings(updatedSettings);
+        showToast(`🎉 Berhasil tersambung via Web Bluetooth ke ${device.name}!`);
+      } else {
+        setIsPrinterConnected(true);
+        setConnectedPrinterName(device.name || "MTP-2 Web POS");
+        localStorage.setItem('laughdry_printer_connected', 'true');
+        localStorage.setItem('laughdry_printer_name', device.name || "MTP-2 Web POS");
+        const updatedSettings = { ...settings, bluetoothPrinterAddress: device.name || "MTP-2 Web POS" };
+        LaughDryDatabase.saveSettings(updatedSettings);
+        setSettings(updatedSettings);
+        showToast(`⚠️ Tersambung via Web Bluetooth (${device.name}), tetapi service cetak tidak teridentifikasi. Cetakan disimulasikan.`);
+      }
+    } catch (err: any) {
+      console.error(err);
+      const errMsg = (err.message || err.toString()).toLowerCase();
+      if (errMsg.includes("permission") || errMsg.includes("policy") || errMsg.includes("disallow") || errMsg.includes("security")) {
+        showToast("⚠️ Bluetooth dibatasi oleh kebijakan keamanan iframe AI Studio. Silakan klik 'Buka di Tab Baru' (New Tab) di pojok kanan atas agar Bluetooth berfungsi lancar!");
+      } else {
+        showToast(`❌ Gagal tersambung: ${err.message || err.toString()}`);
+      }
+    }
+  };
+
+  const generateTextReceipt = (invoice: Order, currentSettings: any, cUser: any) => {
+    let t = "";
+    const sep = "--------------------------------\n";
+    const header = (currentSettings.customReceiptHeader || 'LAUGHDRY EXPRESS').toUpperCase();
+    t += "\n" + centerAlignPrefix(header, 32) + "\n";
+    if (currentSettings.showBranchPhone) {
+      t += centerAlignPrefix("TELP BRANCH: 0812-3456-7890", 32) + "\n";
+    }
+    t += sep;
+    t += `Nota : ${invoice.invoiceNumber}\n`;
+    t += `Tgl  : ${new Date(invoice.createdAt).toLocaleDateString('id-ID')}\n`;
+    t += `Cust : ${invoice.customerName}\n`;
+    if (currentSettings.showCustomerPhoneInReceipt && invoice.customerPhone) {
+      t += `Telp : ${invoice.customerPhone}\n`;
+    }
+    if (currentSettings.showCashierNameInReceipt && cUser) {
+      t += `Kasir: ${cUser.name}\n`;
+    }
+    if (invoice.status) {
+      t += `Stat : ${invoice.status}\n`;
+    }
+    if (invoice.estimatedCompletion) {
+      t += `Est  : ${new Date(invoice.estimatedCompletion).toLocaleDateString('id-ID')}\n`;
+    }
+    if (invoice.perfume) {
+      t += `Parfm: ${invoice.perfume}\n`;
+    }
+    t += sep;
+    
+    if (invoice.items && invoice.items.length > 0) {
+      invoice.items.forEach((item: any) => {
+        t += `${item.serviceName}\n`;
+        const qtyStr = `${item.qty} ${item.unit || 'Kg/Pcs'}`;
+        const priceStr = `Rp ${(item.price || 0).toLocaleString('id-ID')}`;
+        const subStr = `Rp ${(item.amount || 0).toLocaleString('id-ID')}`;
+        t += justifyRowPrefix(`${qtyStr} x ${priceStr}`, subStr, 32) + "\n";
+      });
+    } else {
+      t += justifyRowPrefix(`Layanan Laundry`, `Rp ${(invoice.totalAmount || 0).toLocaleString('id-ID')}`, 32) + "\n";
+    }
+    
+    t += sep;
+    t += justifyRowPrefix("TOTAL CHARGE", `Rp ${(invoice.totalAmount || 0).toLocaleString('id-ID')}`, 32) + "\n";
+    t += justifyRowPrefix("Metode Bayar", invoice.paymentMethod || 'Cash', 32) + "\n";
+    t += justifyRowPrefix("Status Bayar", invoice.paymentStatus || 'Belum Lunas', 32) + "\n";
+    t += sep;
+    
+    const footerText = currentSettings.customReceiptFooter || 'Terima kasih atas kunjungan Anda!\nKwidansi ini dalah bukti sah.';
+    footerText.split('\n').forEach((line: string) => {
+      t += centerAlignPrefix(line.trim().toUpperCase(), 32) + "\n";
+    });
+    t += "\n\n\n\n";
+    return t;
+  };
+
+  const centerAlignPrefix = (str: string, width: number) => {
+    if (str.length >= width) return str;
+    const padding = Math.floor((width - str.length) / 2);
+    return " ".repeat(padding) + str;
+  };
+
+  const justifyRowPrefix = (left: string, right: string, width: number) => {
+    const spaces = width - (left.length + right.length);
+    if (spaces <= 0) return left + " " + right;
+    return left + " ".repeat(spaces) + right;
+  };
+
+  const printToBluetoothPrinter = async (receiptText: string) => {
+    if (bluetoothCharacteristicRef.current) {
+      try {
+        showToast("📤 Mengirim data cetak thermal ke printer...");
+        const encoder = new TextEncoder();
+        const data = encoder.encode(receiptText);
+        
+        const CHUNK_SIZE = 512;
+        for (let i = 0; i < data.length; i += CHUNK_SIZE) {
+          const chunk = data.slice(i, i + CHUNK_SIZE);
+          if (bluetoothCharacteristicRef.current.writeValueWithoutResponse) {
+            await bluetoothCharacteristicRef.current.writeValueWithoutResponse(chunk);
+          } else {
+            await bluetoothCharacteristicRef.current.writeValue(chunk);
+          }
+        }
+        showToast("✅ Struk fisik berhasil dicetak!");
+      } catch (err: any) {
+        console.error("Gagal mengirim data cetak:", err);
+        showToast(`⚠️ Kegagalan printer fisik: ${err.message || 'Error RFCOMM Bluetooth'}. Disimulasikan.`);
+        alert(`🖨️ [Simulasi Cetak POS-58] Mengirim data cetak ke ${connectedPrinterName}:\n\n${receiptText}`);
+      }
+    } else {
+      showToast("🖨️ Mencetak struk ke printer Bluetooth (Tersimulasi)...");
+      alert(`🖨️ [Simulasi Cetak POS-58] Mengirim data cetak ke ${connectedPrinterName || 'Thermal Printer'}:\n\n${receiptText}`);
+    }
+  };
 
   // New Customer Profile Form
   const [showAddCustomer, setShowAddCustomer] = useState(false);
@@ -151,6 +357,42 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     phone: '',
     address: '',
   });
+
+  const handlePickContactEC = async () => {
+    if ('contacts' in navigator && 'ContactsManager' in window) {
+      try {
+        const props = ['name', 'tel'];
+        const opts = { multiple: false };
+        const contacts = await (navigator as any).contacts.select(props, opts);
+        if (contacts && contacts.length > 0) {
+          const contact = contacts[0];
+          const rawName = contact.name && contact.name[0] ? contact.name[0] : '';
+          const rawPhone = contact.tel && contact.tel[0] ? contact.tel[0] : '';
+          
+          let cleanPhone = rawPhone.replace(/[^\d+]/g, '');
+          if (cleanPhone.startsWith('+62')) {
+            cleanPhone = '0' + cleanPhone.slice(3);
+          } else if (cleanPhone.startsWith('62')) {
+            cleanPhone = '0' + cleanPhone.slice(2);
+          }
+          
+          setCustomerForm(prev => ({
+            ...prev,
+            name: rawName || prev.name,
+            phone: cleanPhone || prev.phone
+          }));
+          setToastMessage("Berhasil mengambil kontak perangkat!");
+          setTimeout(() => setToastMessage(null), 3000);
+          return;
+        }
+      } catch (err: any) {
+        console.warn("Contact picker native API error:", err);
+        alert("Gagal mengambil kontak dari HP. Pastikan Anda telah memberikan izin akses kontak jika diminta.");
+      }
+    } else {
+      alert("Browser/perangkat Anda tidak mendukung fitur mengambil kontak otomatis (Contact Picker API). Silakan gunakan Google Chrome di HP Android atau ketik nomor secara manual.");
+    }
+  };
 
   // Deposit Top Up Form
   const [showTopUpForm, setShowTopUpForm] = useState(false);
@@ -324,6 +566,34 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   const [queueServiceFilter, setQueueServiceFilter] = useState('all');
   const [completedSearchQuery, setCompletedSearchQuery] = useState('');
   const [completedSelectedMonth, setCompletedSelectedMonth] = useState('all');
+  const [completedLimit, setCompletedLimit] = useState(50);
+  const [completedStartDate, setCompletedStartDate] = useState('');
+  const [completedEndDate, setCompletedEndDate] = useState('');
+  const [completedScrollTop, setCompletedScrollTop] = useState(0);
+  const completedScrollTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    setCompletedLimit(50);
+  }, [completedSearchQuery, completedSelectedMonth, completedStartDate, completedEndDate, activeMenuTab]);
+
+  useEffect(() => {
+    return () => {
+      if (completedScrollTimeoutRef.current) {
+        cancelAnimationFrame(completedScrollTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleCompletedScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const scrollVal = e.currentTarget.scrollTop;
+    if (completedScrollTimeoutRef.current) {
+      cancelAnimationFrame(completedScrollTimeoutRef.current);
+    }
+    completedScrollTimeoutRef.current = requestAnimationFrame(() => {
+      setCompletedScrollTop(scrollVal);
+    });
+  };
+
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([]);
   const [attendanceNotes, setAttendanceNotes] = useState('');
 
@@ -923,8 +1193,12 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
           setSettings(updatedSettings);
           showToast(`🟢 Terhubung ke ${device.name}`);
         }
-      } catch (subErr) {
+      } catch (subErr: any) {
         console.log("Web Bluetooth cancelled or blocked", subErr);
+        const errMsg = (subErr.message || subErr.toString()).toLowerCase();
+        if (errMsg.includes("permission") || errMsg.includes("policy") || errMsg.includes("disallow") || errMsg.includes("security")) {
+          showToast("⚠️ Bluetooth dibatasi oleh kebijakan keamanan iframe AI Studio. Silakan klik 'Buka di Tab Baru' (New Tab) di pojok kanan atas!");
+        }
       }
     }
   };
@@ -1814,6 +2088,35 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
         </div>
       )}
 
+      {/* Confetti Particles Celebration */}
+      {confettiParticles.map((p) => (
+        <motion.div
+          key={p.id}
+          initial={{ y: -30, x: `${p.x}vw`, rotate: 0, opacity: 1 }}
+          animate={{ 
+            y: '110vh', 
+            rotate: p.angle + 360,
+            opacity: [1, 1, 0]
+          }}
+          transition={{
+            duration: p.duration,
+            delay: p.delay,
+            ease: "easeOut"
+          }}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: `${p.size}px`,
+            height: `${p.size}px`,
+            backgroundColor: p.color,
+            borderRadius: Math.random() > 0.5 ? '50%' : '2px',
+            zIndex: 99999,
+            pointerEvents: 'none'
+          }}
+        />
+      ))}
+
       {/* Operator Info strip */}
       <div className="bg-white p-2 md:p-2.5 rounded-xl md:rounded-2xl border border-slate-200 shadow-sm flex flex-row items-center justify-between gap-2 overflow-hidden">
         <div className="flex items-center gap-1.5 md:gap-3 min-w-0">
@@ -2052,7 +2355,18 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-slate-500">Nomor HP (WhatsApp):</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-slate-500">Nomor HP (WhatsApp):</label>
+                    <button
+                      type="button"
+                      onClick={handlePickContactEC}
+                      className="flex items-center gap-1 text-[10px] bg-sky-50 text-sky-700 hover:bg-sky-100 border border-sky-150 rounded px-1.5 py-0.5 font-bold transition active:scale-95 cursor-pointer"
+                      title="Ambil kontak otomatis dari HP"
+                    >
+                      <BookOpen className="w-2.5 h-2.5" />
+                      <span>Ambil Kontak HP</span>
+                    </button>
+                  </div>
                   <input
                     type="text"
                     required
@@ -2134,7 +2448,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
 
           {/* Catalog Services (Step 2) */}
           <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-            <h3 className="text-xs font-extrabold text-[#0F172A] uppercase tracking-wider flex items-center gap-1.5">
+            <h3 className="text-xs font-extrabold uppercase tracking-wider flex items-center gap-1.5" style={{ color: '#2dcc5b' }}>
               <span className="w-1.5 h-1.5 rounded-full bg-sky-500"></span>
               Langkah 2: Katalog Jasa Layanan Laundry
             </h3>
@@ -2178,7 +2492,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                   groupedServices[s.name].push(s);
                 });
 
-                return Object.keys(groupedServices).map(groupName => {
+                return Object.keys(groupedServices).map((groupName, idx) => {
                   const groupItems = groupedServices[groupName];
                   const firstItem = groupItems[0];
                   return (
@@ -2187,9 +2501,24 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                       type="button"
                       onClick={() => setActiveServiceGroupName(groupName)}
                       className="p-3 bg-slate-50/80 hover:bg-sky-50 hover:text-sky-900 border border-slate-100 hover:border-sky-200 rounded-xl text-left cursor-pointer transition flex items-center justify-between group font-bold text-xs text-slate-700 hover:scale-[1.01]"
+                      style={
+                        idx === 0 ? { backgroundColor: '#050538' } :
+                        idx === 1 ? { backgroundColor: '#073e5a' } :
+                        idx === 2 ? { backgroundColor: '#050538' } :
+                        undefined
+                      }
                     >
                       <div className="flex flex-col">
-                        <span>✨ {groupName}</span>
+                        <span
+                          style={
+                            idx === 0 ? { color: '#cbb7b7' } :
+                            idx === 1 ? { color: '#cabdbd' } :
+                            idx === 2 ? { color: '#b9bfc6' } :
+                            undefined
+                          }
+                        >
+                          ✨ {groupName}
+                        </span>
                         <span className="text-[10px] text-slate-400 font-normal mt-0.5">
                           {groupItems.length} Janji Penyelesaian ({firstItem.category === 'kiloan' ? 'Kiloan' : 'Satuan'})
                         </span>
@@ -3066,6 +3395,39 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
             </div>
           </div>
 
+          {/* Date Range Picker for Custom Filtering */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+            <span className="text-[10.5px] font-black uppercase text-slate-500 shrink-0">Rentang Tanggal:</span>
+            <div className="flex items-center gap-2 flex-1">
+              <input
+                type="date"
+                value={completedStartDate}
+                onChange={(e) => setCompletedStartDate(e.target.value)}
+                className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-semibold text-slate-700 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 cursor-pointer flex-1"
+              />
+              <span className="text-xs text-slate-400">s/d</span>
+              <input
+                type="date"
+                value={completedEndDate}
+                onChange={(e) => setCompletedEndDate(e.target.value)}
+                className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-semibold text-slate-700 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 cursor-pointer flex-1"
+              />
+              {(completedStartDate || completedEndDate) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCompletedStartDate('');
+                    setCompletedEndDate('');
+                  }}
+                  className="p-1 px-2.5 text-xs text-rose-600 hover:text-rose-800 font-bold bg-rose-50 hover:bg-rose-100 rounded border border-rose-200 transition-colors"
+                  title="Hapus filter rentang tanggal"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+
           {/* Search Bar for Transaksi Selesai */}
           <div className="relative">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
@@ -3078,27 +3440,46 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
             />
           </div>
 
-          {/* Grouped orders per Month */}
-          <div className="space-y-6 max-h-[550px] overflow-y-auto pr-1">
+          {/* Virtualized List Container */}
+          <div className="border border-slate-100 rounded-2xl overflow-hidden bg-white">
             {(() => {
               const completedOrders = orders.filter(o => o.branchId === currentUser.branchId && o.status === OrderStatus.SELESAI);
               
-              // Group completed orders by month
-              const groupedCompleted: { [month: string]: Order[] } = {};
-              
-              completedOrders.forEach(o => {
-                // Apply search filter
+              // Apply filters
+              const filteredCompleted = completedOrders.filter(o => {
                 if (completedSearchQuery.trim()) {
                   const q = completedSearchQuery.toLowerCase();
-                  const matchesSearch = o.invoiceNumber.toLowerCase().includes(q) ||
-                                        o.customerName.toLowerCase().includes(q) ||
-                                        (o.customerPhone && o.customerPhone.toLowerCase().includes(q));
-                  if (!matchesSearch) return;
+                  return o.invoiceNumber.toLowerCase().includes(q) ||
+                         o.customerName.toLowerCase().includes(q) ||
+                         (o.customerPhone && o.customerPhone.toLowerCase().includes(q));
                 }
-                
+                return true;
+              }).filter(o => {
                 const m = getOrderCompletedMonth(o);
-                if (completedSelectedMonth !== 'all' && m !== completedSelectedMonth) return;
-                
+                return completedSelectedMonth === 'all' || m === completedSelectedMonth;
+              }).filter(o => {
+                const dateStr = o.completedAt || o.updatedAt || o.createdAt;
+                if (!dateStr) return true;
+                const oDate = dateStr.split('T')[0];
+                if (completedStartDate && oDate < completedStartDate) return false;
+                if (completedEndDate && oDate > completedEndDate) return false;
+                return true;
+              });
+
+              // Sort descending
+              const sortedFilteredCompleted = filteredCompleted.sort((a, b) => {
+                const dateA = a.completedAt || a.updatedAt || a.createdAt;
+                const dateB = b.completedAt || b.updatedAt || b.createdAt;
+                return dateB.localeCompare(dateA);
+              });
+
+              const hasMoreCompleted = sortedFilteredCompleted.length > completedLimit;
+              const visibleCompleted = sortedFilteredCompleted.slice(0, completedLimit);
+
+              // Group completed orders by month (for headers)
+              const groupedCompleted: { [month: string]: Order[] } = {};
+              visibleCompleted.forEach(o => {
+                const m = getOrderCompletedMonth(o);
                 if (!groupedCompleted[m]) {
                   groupedCompleted[m] = [];
                 }
@@ -3109,109 +3490,172 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
 
               if (sortedMonths.length === 0) {
                 return (
-                  <div className="p-8 text-center text-xs text-slate-400 font-bold bg-slate-50 border border-slate-150 rounded-xl">
-                    Tidak ada transaksi selesai yang ditemukan atau cocok dengan kata kunci pencarian.
+                  <div className="p-8 text-center text-xs text-slate-400 font-bold bg-slate-50 border border-slate-150 rounded-xl m-4">
+                    Tidak ada transaksi selesai yang ditemukan atau cocok dengan kriteria pencarian Anda.
                   </div>
                 );
               }
 
-              return sortedMonths.map(month => {
-                const monthOrders = groupedCompleted[month].sort((a, b) => {
-                  const dateA = a.completedAt || a.updatedAt || a.createdAt;
-                  const dateB = b.completedAt || b.updatedAt || b.createdAt;
-                  return dateB.localeCompare(dateA);
+              // Build flat list for virtualization
+              const flatList: ({ type: 'header'; month: string; count: number } | { type: 'item'; order: Order })[] = [];
+              sortedMonths.forEach(month => {
+                const monthOrders = groupedCompleted[month];
+                flatList.push({ type: 'header', month, count: monthOrders.length });
+                monthOrders.forEach(o => {
+                  flatList.push({ type: 'item', order: o });
                 });
-
-                return (
-                  <div key={month} className="space-y-2.5">
-                    <div className="flex items-center gap-2 border-b border-slate-110 pb-1.5">
-                      <span className="text-xs font-black text-slate-800 uppercase tracking-wide">
-                        📋 Bulan {formatYearMonth(month)}
-                      </span>
-                      <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-110 font-bold px-1.5 py-0.2 select-none rounded-md">
-                        {monthOrders.length} Selesai
-                      </span>
-                    </div>
-
-                    <div className="space-y-2">
-                      {monthOrders.map(o => {
-                        return (
-                          <div className="bg-white border border-slate-150 rounded-xl shadow-2xs hover:border-emerald-300 transition-all text-slate-755 hover:shadow-xs" key={o.id}>
-                            <div className="p-3 flex justify-between items-center gap-2 flex-wrap sm:flex-nowrap">
-                              <div className="flex items-start gap-2 min-w-[140px]">
-                                <div className="space-y-0.5">
-                                  <span className="font-mono font-black text-slate-900 text-[11px] bg-slate-100 border border-slate-150 px-1.5 py-0.5 rounded-md block w-fit">
-                                    {o.invoiceNumber}
-                                  </span>
-                                  <span className="inline-block px-1.5 py-0.25 rounded text-[8px] font-black text-white bg-emerald-600 uppercase tracking-wider">
-                                    🏆 Selesai
-                                  </span>
-                                </div>
-                                <div className="min-w-0">
-                                  <p className="font-bold text-slate-800 text-[11px] truncate">{o.customerName}</p>
-                                  <p className="text-slate-400 font-mono text-[9px] truncate">{o.customerPhone}</p>
-                                </div>
-                              </div>
-
-                              <div className="flex-1 min-w-0 pr-2">
-                                <p className="text-[10.5px] text-slate-500 font-bold truncate">
-                                  {o.items.map(it => it.serviceName).join(', ')}
-                                </p>
-                                <div className="flex items-center gap-1.5 mt-0.5 text-[10px] flex-wrap">
-                                  <span className="font-black text-emerald-600 tracking-tight">
-                                    Rp {o.totalAmount.toLocaleString('id-ID')}
-                                  </span>
-                                  <span className="text-slate-350">|</span>
-                                  <span className="text-slate-400">Bayar: </span>
-                                  <span className="font-bold text-slate-700 bg-slate-100 px-1 rounded">{o.paymentMethod}</span>
-                                  {o.clothesCount !== undefined && o.clothesCount > 0 && (
-                                    <span className="text-[8px] font-black bg-indigo-50 text-indigo-700 border border-indigo-150 px-1 py-0.25 rounded-md flex items-center gap-0.5">
-                                      👕 {o.clothesCount} Pcs
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="text-[9px] text-slate-500 mt-1 space-y-0.5 bg-slate-50 p-1.5 rounded-lg border border-slate-100 font-sans">
-                                  <div className="flex items-center justify-between gap-1.5">
-                                    <span className="text-slate-400">📥 Masuk:</span>
-                                    <span className="font-semibold text-slate-700">{new Date(o.createdAt).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}</span>
-                                  </div>
-                                  <div className="flex items-center justify-between gap-1.5">
-                                    <span className="text-slate-400">🏆 Selesai Pada:</span>
-                                    <span className="font-black text-emerald-650">{new Date(o.completedAt || o.updatedAt).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}</span>
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-1.5 justify-end">
-                                <button
-                                  type="button"
-                                  onClick={() => setShowOrderDetailModal(o)}
-                                  className="p-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 rounded-lg text-xs transition flex items-center justify-center cursor-pointer shadow-2xs"
-                                  title="Detail Order"
-                                >
-                                  ℹ️
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setActiveInvoice(o);
-                                    setShowInvoiceChoiceModal(true);
-                                  }}
-                                  className="p-1.5 bg-white hover:bg-sky-50 border border-slate-200 text-sky-855 rounded-lg text-xs transition flex items-center justify-center cursor-pointer"
-                                  title="Cetak Struk"
-                                >
-                                  📄
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
               });
+
+              // Calculate spacing and top offsets
+              let currentOffset = 0;
+              const itemOffsets = flatList.map(item => {
+                const top = currentOffset;
+                const height = item.type === 'header' ? 44 : 148;
+                currentOffset += height;
+                return { top, height };
+              });
+              const totalHeight = currentOffset;
+
+              // Filter elements in visible range
+              const viewportMin = completedScrollTop - 400;
+              const viewportMax = completedScrollTop + 550 + 400;
+
+              const visibleIndices: number[] = [];
+              for (let i = 0; i < flatList.length; i++) {
+                const { top, height } = itemOffsets[i];
+                const bottom = top + height;
+                if (bottom >= viewportMin && top <= viewportMax) {
+                  visibleIndices.push(i);
+                }
+              }
+
+              return (
+                <div 
+                  onScroll={handleCompletedScroll}
+                  className="max-h-[550px] overflow-y-auto pr-1"
+                  style={{ position: 'relative' }}
+                >
+                  <div style={{ height: `${totalHeight}px`, position: 'relative', width: '100%' }}>
+                    {visibleIndices.map(index => {
+                      const item = flatList[index];
+                      const { top, height } = itemOffsets[index];
+
+                      return (
+                        <div 
+                          key={item.type === 'header' ? `h-${item.month}` : `item-${item.order.id}`}
+                          style={{ 
+                            position: 'absolute', 
+                            top: `${top}px`, 
+                            left: 0, 
+                            right: 0, 
+                            height: `${height}px`,
+                            padding: '4px 8px'
+                          }}
+                        >
+                          {item.type === 'header' ? (
+                            <div className="flex items-center gap-2 border-b border-slate-110 pb-1.5 pt-1 bg-white">
+                              <span className="text-xs font-black text-slate-800 uppercase tracking-wide">
+                                📋 Bulan {formatYearMonth(item.month)}
+                              </span>
+                              <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-110 font-bold px-1.5 py-0.2 select-none rounded-md">
+                                {item.count} Selesai
+                              </span>
+                            </div>
+                          ) : (
+                            (() => {
+                              const o = item.order;
+                              return (
+                                <div className="bg-white border border-slate-150 rounded-xl shadow-2xs hover:border-emerald-300 transition-all text-slate-755 hover:shadow-xs h-[140px] overflow-hidden">
+                                  <div className="p-3 flex justify-between items-center gap-2 h-full">
+                                    <div className="flex items-start gap-2 min-w-[140px] max-w-[200px]">
+                                      <div className="space-y-0.5 shrink-0">
+                                        <span className="font-mono font-black text-slate-900 text-[11px] bg-slate-100 border border-slate-150 px-1.5 py-0.5 rounded-md block w-fit">
+                                          {o.invoiceNumber}
+                                        </span>
+                                        <span className="inline-block px-1.5 py-0.25 rounded text-[8px] font-black text-white bg-emerald-600 uppercase tracking-wider">
+                                          🏆 Selesai
+                                        </span>
+                                      </div>
+                                      <div className="min-w-0">
+                                        <p className="font-bold text-slate-800 text-[11px] truncate">{o.customerName}</p>
+                                        <p className="text-slate-400 font-mono text-[9px] truncate">{o.customerPhone}</p>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex-1 min-w-0 pr-2">
+                                      <p className="text-[10.5px] text-slate-500 font-bold truncate">
+                                        {o.items.map(it => it.serviceName).join(', ')}
+                                      </p>
+                                      <div className="flex items-center gap-1.5 mt-0.5 text-[10px] flex-wrap">
+                                        <span className="font-black text-emerald-600 tracking-tight">
+                                          Rp {o.totalAmount.toLocaleString('id-ID')}
+                                        </span>
+                                        <span className="text-slate-350">|</span>
+                                        <span className="text-slate-400">Bayar: </span>
+                                        <span className="font-bold text-slate-700 bg-slate-100 px-1 rounded">{o.paymentMethod}</span>
+                                        {o.clothesCount !== undefined && o.clothesCount > 0 && (
+                                          <span className="text-[8px] font-black bg-indigo-50 text-indigo-700 border border-indigo-150 px-1 py-0.25 rounded-md flex items-center gap-0.5">
+                                            👕 {o.clothesCount} Pcs
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="text-[9px] text-slate-500 mt-1.5 space-y-0.5 bg-slate-50 p-1.5 rounded-lg border border-slate-100 font-sans">
+                                        <div className="flex items-center justify-between gap-1.5">
+                                          <span className="text-slate-400">📥 Masuk:</span>
+                                          <span className="font-semibold text-slate-700">{new Date(o.createdAt).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between gap-1.5">
+                                          <span className="text-slate-400">🏆 Selesai Pada:</span>
+                                          <span className="font-black text-emerald-650">{new Date(o.completedAt || o.updatedAt).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-1.5 justify-end shrink-0">
+                                      <button
+                                        type="button"
+                                        onClick={() => setShowOrderDetailModal(o)}
+                                        className="p-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 rounded-lg text-xs transition flex items-center justify-center cursor-pointer shadow-2xs"
+                                        title="Detail Order"
+                                      >
+                                        ℹ️
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setActiveInvoice(o);
+                                          setShowInvoiceChoiceModal(true);
+                                        }}
+                                        className="p-1.5 bg-white hover:bg-sky-50 border border-slate-200 text-sky-855 rounded-lg text-xs transition flex items-center justify-center cursor-pointer"
+                                        title="Cetak Struk"
+                                      >
+                                        📄
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })()
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  
+                  {hasMoreCompleted && (
+                    <div className="pt-4 text-center pb-8 px-4">
+                      <button
+                        type="button"
+                        onClick={() => setCompletedLimit(prev => prev + 50)}
+                        className="px-5 py-2.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-extrabold transition-all shadow-3xs cursor-pointer inline-flex items-center gap-1.5 w-full justify-center"
+                      >
+                        ➕ Tampilkan Lebih Banyak Transaksi Selesai ({sortedFilteredCompleted.length - completedLimit} Tersisa)
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
             })()}
           </div>
         </motion.div>
@@ -3221,11 +3665,12 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       {activeMenuTab === 'manajemen_pelanggan' && (
         <motion.div
           key="manajemen_pelanggan"
+          id="menu-content-customer-crm"
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -12 }}
           transition={{ duration: 0.2 }}
-          className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm w-full"
+          className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm w-full relative"
         >
           <CustomerManagement
             customers={customers}
@@ -3530,7 +3975,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       )}
 
       {/* MOBILE BOTTOM NAVIGATION BAR BAR TAB MENU */}
-      <div className="fixed bottom-0 left-0 right-0 z-45 bg-white/95 backdrop-blur-md border-t border-slate-150 shadow-2xl py-2 px-1 md:hidden flex justify-around items-center select-none" id="mobile-bottom-nav">
+      <div className="fixed bottom-0 left-0 right-0 z-45 bg-white/95 backdrop-blur-md border-t border-slate-150 shadow-2xl py-2 px-1 md:hidden flex justify-around items-center select-none" id="mobile-bottom-nav" style={{ backgroundColor: '#0f5a5a' }}>
         {[
           { key: 'input_transaksi', icon: <ShoppingCart className="w-5 h-5" />, label: 'Transaksi' },
           { key: 'antrean_cucian', icon: <Clock className="w-5 h-5" />, label: 'Antrean', badge: orders.filter(o => o.branchId === currentUser.branchId && o.status !== OrderStatus.SELESAI && o.status !== OrderStatus.DIBATALKAN).length },
@@ -3674,7 +4119,8 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                         alert("⚠️ Printer Bluetooth belum terhubung! Silakan gunakan tombol 'Sambung Bluetooth' di bagian atas layar untuk mengkoneksikan printer.");
                         return;
                       }
-                      showToast(`Mencetak struk ke printer thermal Bluetooth: ${LaughDryDatabase.getSettings().bluetoothPrinterAddress}`);
+                      const txt = generateTextReceipt(activeInvoice, settings, currentUser);
+                      printToBluetoothPrinter(txt);
                     }}
                     className="flex-1 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg transition text-[10px] flex items-center justify-center gap-1.5"
                   >
@@ -4843,7 +5289,8 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                     alert("⚠️ Printer Bluetooth belum terhubung! Silakan gunakan tombol 'Sambung Bluetooth' di bagian atas layar untuk mengkoneksikan printer.");
                     return;
                   }
-                  alert(`🖨️ Mengirim data cetak POS-58 mm ke printer termal bluetooth di ${LaughDryDatabase.getSettings().bluetoothPrinterAddress}! HP Android berhasil membroadcast struk.`);
+                  const txt = generateTextReceipt(activeInvoice, settings, currentUser);
+                  printToBluetoothPrinter(txt);
                   setShowThermalReceiptModal(false);
                   setShowProcessSuccessModal(true);
                 }}
@@ -4968,24 +5415,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
 
                   <button
                     type="button"
-                    onClick={async () => {
-                      if (typeof navigator !== 'undefined' && 'bluetooth' in navigator) {
-                        showToast("🔍 Membuka pencarian Bluetooth LE untuk mendeteksi Printer...");
-                        try {
-                          const device = await (navigator as any).bluetooth.requestDevice({
-                            acceptAllDevices: true
-                          });
-                          if (device && device.name) {
-                            const customDev = { id: `manual-${Date.now()}`, name: device.name };
-                            handleConnectDevice(customDev);
-                          }
-                        } catch (err) {
-                          showToast("⚠️ Bluetooth LE dibatalkan atau tidak didukung di perangkat ini.");
-                        }
-                      } else {
-                        showToast("❌ Browser ini tidak mendukung Bluetooth LE (Gunakan Chrome/Edge/HP Android).");
-                      }
-                    }}
+                    onClick={() => connectWebBluetooth()}
                     className="w-full py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition cursor-pointer border border-blue-200 flex items-center justify-center gap-1.5 active:scale-[0.98] select-none"
                     id="btn-scan-nearby-devices"
                   >
@@ -4997,22 +5427,6 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
             </div>
 
             <div className="space-y-3.5 text-xs text-slate-700 leading-relaxed font-medium text-left">
-              <p className="bg-blue-50 border border-blue-150 rounded-2xl p-3 text-blue-800 text-[11px] leading-normal font-semibold">
-                ⚡ **Sistem sedang mencoba mengalihkan Anda secara otomatis** ke halaman Pengaturan Bluetooth pada handphone HP Anda.
-              </p>
-
-              <div className="space-y-2 border-t pt-3">
-                <span className="text-[10px] uppercase font-black tracking-wider text-slate-400">Hubungkan Printer Bluetooth secara Manual:</span>
-                <ol className="list-decimal list-inside space-y-1.5 pl-1 text-[11px]">
-                  <li>Buka aplikasi <strong className="text-slate-900">Pengaturan (Settings)</strong> utama di HP Anda.</li>
-                  <li>Masuk ke menu <strong className="text-slate-900">Bluetooth</strong>.</li>
-                  <li>Pastikan Bluetooth dalam kondisi <strong className="text-emerald-600">AKTIF (ON)</strong>.</li>
-                  <li>Cari perangkat printer termal Bluetooth Anda (biasanya bernama <code className="bg-slate-100 px-1 py-0.5 rounded font-mono text-[10px] text-indigo-750">MTP-2</code>, <code className="bg-slate-100 px-1 py-0.5 rounded font-mono text-[10px] text-indigo-750">PT-210</code>, atau <code className="bg-slate-100 px-1 py-0.5 rounded font-mono text-[10px] text-indigo-750">RPP02N</code>).</li>
-                  <li>Lakukan pairing dengan PIN default <code className="bg-slate-100 px-1 py-0.5 rounded font-mono text-[10px] text-slate-800">0000</code> atau <code className="bg-slate-100 px-1 py-0.5 rounded font-mono text-[10px] text-slate-800">1234</code>.</li>
-                  <li>Setelah terhubung, kembali ke aplikasi ini untuk mencetak struk thermal POS secara instan!</li>
-                </ol>
-              </div>
-
               <div className="pt-2 flex flex-col gap-2">
                 <button
                   type="button"
@@ -5034,7 +5448,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                   }}
                   className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-xl transition cursor-pointer text-center flex items-center justify-center gap-1.5 active:scale-95 shadow-sm text-xs"
                 >
-                  <Bluetooth className="w-4 h-4" /> Ulangi Pengalihan Otomatis HP
+                  <Bluetooth className="w-4 h-4" /> Ulangi Pindah Bluetooth
                 </button>
                 <button
                   type="button"

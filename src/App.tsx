@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, FormEvent, TouchEvent } from 'react';
+import React, { useState, useEffect, useRef, FormEvent, TouchEvent } from 'react';
 import {
   Sparkles,
   LayoutDashboard,
@@ -28,6 +28,7 @@ import OwnerDashboard from './components/OwnerDashboard';
 import EmployeeConsole from './components/EmployeeConsole';
 import CustomerTracking from './components/CustomerTracking';
 import PRDDocument from './components/PRDDocument';
+import logoImg from './assets/images/logo_laughdry_1781839107009.jpg';
 import { LaughDryDatabase } from './data/mockDatabase';
 
 export default function App() {
@@ -50,6 +51,47 @@ export default function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     return (localStorage.getItem('laughdry_theme') as 'light' | 'dark') || 'light';
   });
+
+  const [logoScale, setLogoScale] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('laughdry_gate_logo_scale');
+      return saved ? parseFloat(saved) : 1.0;
+    }
+    return 1.0;
+  });
+
+  const logoInputRef = useRef<HTMLInputElement>(null);
+
+  const handleLogoClick = () => {
+    logoInputRef.current?.click();
+  };
+
+  const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 2 * 1024 * 1024) {
+      alert("Ukuran gambar logo tidak boleh melebihi 2MB!");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64 = event.target?.result as string;
+      if (base64) {
+        const currentSettings = LaughDryDatabase.getSettings();
+        const updatedSettings = {
+          ...currentSettings,
+          customReceiptHeaderLogoImg: base64,
+          showHeaderLogoInReceipt: true
+        };
+        LaughDryDatabase.saveSettings(updatedSettings);
+        setSettings(updatedSettings);
+        alert("🎉 Logo Header berhasil diperbarui secara real-time!");
+      }
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Firebase Authentication State
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
@@ -138,6 +180,18 @@ export default function App() {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
+    const handleLogoChangedEvent = () => {
+      setSettings(LaughDryDatabase.getSettings());
+    };
+    const handleScaleChangedEvent = (e: Event) => {
+      const scale = (e as CustomEvent).detail;
+      if (typeof scale === 'number') {
+        setLogoScale(scale);
+      }
+    };
+    window.addEventListener('laughdry_logo_changed', handleLogoChangedEvent);
+    window.addEventListener('laughdry_logo_scale_changed', handleScaleChangedEvent);
+
     // Settings live updates listener
     const handleSettingsUpdate = (e: Event) => {
       const detail = (e as CustomEvent).detail;
@@ -161,6 +215,8 @@ export default function App() {
       window.removeEventListener('laughdry_sync_queue_updated', updateCount);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('laughdry_logo_changed', handleLogoChangedEvent);
+      window.removeEventListener('laughdry_logo_scale_changed', handleScaleChangedEvent);
       window.removeEventListener('laughdry_settings_updated', handleSettingsUpdate);
       clearInterval(interval);
     };
@@ -346,8 +402,11 @@ export default function App() {
         .bg-sky-500, 
         .bg-sky-600, 
         .bg-indigo-600,
+        .bg-blue-500,
+        .bg-blue-600,
         .bg-sky-600\\/10,
-        .bg-indigo-600\\/10 {
+        .bg-indigo-600\\/10,
+        .bg-blue-600\\/10 {
           background-color: var(--brand-color) !important;
         }
 
@@ -356,7 +415,8 @@ export default function App() {
         form button[type="submit"],
         button.bg-brand,
         .bg-indigo-600,
-        .bg-sky-600 {
+        .bg-sky-600,
+        .bg-blue-600 {
           background-color: var(--brand-color) !important;
           color: white !important;
         }
@@ -366,24 +426,33 @@ export default function App() {
         .text-[#38BDF8],
         .text-sky-600,
         .text-indigo-600,
+        .text-[#1e3a8a],
         .text-sky-700,
-        .text-indigo-700 {
+        .text-indigo-700,
+        .text-blue-500,
+        .text-blue-600,
+        .text-blue-700 {
           color: var(--brand-color) !important;
         }
 
         /* Border highlights */
         .border-sky-500,
         .border-indigo-500,
+        .border-blue-500,
         .border-sky-200,
         .border-indigo-200,
+        .border-blue-200,
+        .border-blue-150,
         .focus\\:border-sky-500:focus,
-        .focus\\:border-slate-800:focus {
+        .focus\\:border-slate-800:focus,
+        .focus\\:border-blue-500:focus {
           border-color: var(--brand-color) !important;
         }
 
         /* Tiny icon badges and alert bubbles */
         .bg-sky-50,
-        .bg-indigo-50 {
+        .bg-indigo-50,
+        .bg-blue-50 {
           background-color: var(--brand-color-light) !important;
         }
 
@@ -391,6 +460,8 @@ export default function App() {
         .hover\\:bg-sky-600:hover,
         .hover\\:bg-sky-700:hover,
         .hover\\:bg-indigo-700:hover,
+        .hover\\:bg-blue-600:hover,
+        .hover\\:bg-blue-700:hover,
         .hover\\:bg-slate-800:hover {
           background-color: var(--brand-color-hover) !important;
           color: white !important;
@@ -435,9 +506,42 @@ export default function App() {
           
           {/* Logo & Slogan */}
           <div className="flex items-center gap-1.5 md:gap-3">
-            <div className="w-6 h-6 md:w-10 md:h-10 rounded-lg md:rounded-2xl bg-gradient-to-br from-[#38BDF8] to-blue-600 text-slate-950 flex items-center justify-center font-black text-[10px] md:text-lg shadow-lg">
-              LD
-            </div>
+            <input 
+              type="file" 
+              ref={logoInputRef} 
+              onChange={handleLogoChange} 
+              accept="image/*" 
+              className="hidden" 
+            />
+            {settings.customReceiptHeaderLogoImg && !settings.customReceiptHeaderLogoImg.includes('unsplash.com') ? (
+              <div 
+                onClick={handleLogoClick}
+                className="w-[60px] h-[60px] rounded-lg md:rounded-xl overflow-hidden cursor-pointer shadow-lg hover:ring-1 hover:ring-sky-400 active:scale-95 transition-all flex items-center justify-center bg-slate-900 border border-slate-800 shrink-0 p-0.5"
+                title="Klik untuk mengedit atau mengubah gambar logo ini"
+              >
+                <img 
+                  src={settings.customReceiptHeaderLogoImg} 
+                  alt="Logo" 
+                  className="w-full h-full object-contain transition-transform duration-200"
+                  style={{ transform: `scale(${logoScale})` }}
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+            ) : (
+              <div 
+                onClick={handleLogoClick}
+                className="w-[60px] h-[60px] rounded-lg md:rounded-xl overflow-hidden cursor-pointer shadow-lg hover:ring-1 hover:ring-sky-450 active:scale-95 transition-all flex items-center justify-center bg-slate-900 border border-slate-800 shrink-0 p-0.5"
+                title="Klik untuk mengupload logo kustom"
+              >
+                <img 
+                  src={logoImg} 
+                  alt="LaughDry App Mascot" 
+                  className="w-full h-full object-contain rounded-lg transition-transform duration-250"
+                  style={{ transform: `scale(${logoScale})` }}
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+            )}
             <div>
               <div className="flex items-center gap-1 md:gap-1.5">
                 <span className="font-extrabold text-[11px] md:text-lg tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-200 bg-clip-text text-transparent">
@@ -783,34 +887,27 @@ export default function App() {
       </main>
 
       {/* Clean Footer Bar */}
-      <footer className="bg-white border-t border-slate-200 py-6 text-xs text-slate-400 font-sans mt-12">
-        <div className="max-w-7xl mx-auto px-4 md:px-8 flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <strong>LaughDry &copy; 2026</strong> &mdash; Sistem Manajemen Laundry Terintegrasi Premium.
-          </div>
-          <div className="flex gap-4">
-            <span className="font-semibold text-slate-600">SaaS POS, CRM, ERP, & Business Intelligence</span>
-            <span className="text-slate-300">|</span>
-            <span className="text-slate-400 font-mono">PostgreSQL DDL & REST API Compliant</span>
-          </div>
+      <footer className="py-4 text-[11px] text-slate-400 font-sans mt-8 text-center border-t border-slate-100">
+        <div className="max-w-7xl mx-auto px-4">
+          <span>LaughDry &copy; 2026</span>
         </div>
       </footer>
 
       {/* Sign Out Confirmation Modal */}
       {showSignOutConfirmModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-[999] animate-fadeIn" id="modal-signout-cloud-confirm">
-          <div className="bg-white rounded-3xl p-6 max-w-sm w-full border border-slate-150 shadow-2xl space-y-4 text-center select-none">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl space-y-4 text-center select-none overflow-hidden relative border-0">
             <div className="space-y-1">
               <div className="text-4xl">⚠️</div>
               <h4 className="font-extrabold text-slate-900 text-sm">Keluar dari Sesi Cloud?</h4>
-              <p className="text-slate-500 font-bold text-xs">Apakah Anda yakin ingin keluar? Sesi cloud Anda akan dinonaktifkan dan data lokal akan direset untuk proteksi keamanan kredensial.</p>
+              <p className="text-slate-500 font-bold text-xs leading-relaxed">Apakah Anda yakin ingin keluar? Sesi cloud Anda akan dinonaktifkan dan data lokal akan direset untuk proteksi keamanan kredensial.</p>
             </div>
             
             <div className="grid grid-cols-2 gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setShowSignOutConfirmModal(false)}
-                className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold rounded-xl text-center text-xs transition cursor-pointer"
+                className="w-full py-2 bg-slate-100 hover:bg-slate-205 text-slate-800 font-extrabold rounded-xl text-center text-xs transition cursor-pointer"
               >
                 Batal
               </button>

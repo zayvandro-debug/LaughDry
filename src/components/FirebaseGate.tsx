@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
@@ -10,9 +10,10 @@ import {
   sendPasswordResetEmail
 } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
-import { Mail, Lock, User as UserIcon, LogIn, UserPlus, Info, Sparkles, CheckCircle, Network, Link2, Unlink, Copy, Check } from 'lucide-react';
+import { Mail, Lock, User as UserIcon, LogIn, UserPlus, Info, Sparkles, CheckCircle, Network, Link2, Unlink, Copy, Check, Shirt, Droplet, Camera, RotateCcw, Upload } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { auth, db } from '../lib/firebase';
+import logoImg from '../assets/images/logo_laughdry_1781839107009.jpg';
 
 const isWebView = () => {
   if (typeof window === 'undefined') return false;
@@ -28,6 +29,69 @@ interface FirebaseGateProps {
 }
 
 export default function FirebaseGate({ onSignedIn }: FirebaseGateProps) {
+  // Custom expandable logo state
+  const [gateLogo, setGateLogo] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('laughdry_gate_logo') || logoImg;
+    }
+    return logoImg;
+  });
+  const [logoScale, setLogoScale] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('laughdry_gate_logo_scale');
+      return saved ? parseFloat(saved) : 1.0;
+    }
+    return 1.0;
+  });
+  const [showLogoControls, setShowLogoControls] = useState<boolean>(false);
+
+  const logoInputRef = useRef<HTMLInputElement>(null);
+
+  const handleLogoUploadClick = () => {
+    logoInputRef.current?.click();
+  };
+
+  const handleScaleChange = (val: number) => {
+    setLogoScale(val);
+    localStorage.setItem('laughdry_gate_logo_scale', val.toString());
+    window.dispatchEvent(new CustomEvent('laughdry_logo_scale_changed', { detail: val }));
+  };
+
+  const handleLogoUploaded = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 2 * 1024 * 1024) {
+      alert("Ukuran gambar logo tidak boleh melebihi 2MB!");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64 = event.target?.result as string;
+      if (base64) {
+        localStorage.setItem('laughdry_gate_logo', base64);
+        setGateLogo(base64);
+        setShowLogoControls(true);
+        window.dispatchEvent(new CustomEvent('laughdry_logo_changed', { detail: base64 }));
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleResetLogo = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (confirm("Reset logo kembali ke bawaan LaughDry?")) {
+      localStorage.removeItem('laughdry_gate_logo');
+      localStorage.removeItem('laughdry_gate_logo_scale');
+      setGateLogo(logoImg);
+      setLogoScale(1.0);
+      setShowLogoControls(false);
+      window.dispatchEvent(new CustomEvent('laughdry_logo_changed', { detail: logoImg }));
+      window.dispatchEvent(new CustomEvent('laughdry_logo_scale_changed', { detail: 1.0 }));
+    }
+  };
+
   const [isRegisterMode, setIsRegisterMode] = useState<boolean>(false);
   const [isForgotPasswordMode, setIsForgotPasswordMode] = useState<boolean>(false);
   const [email, setEmail] = useState<string>('');
@@ -331,15 +395,105 @@ export default function FirebaseGate({ onSignedIn }: FirebaseGateProps) {
         className="w-full max-w-md bg-slate-900 border border-slate-800/80 rounded-3xl p-8 shadow-2xl relative z-10 backdrop-blur-xl"
         id="gate-container"
       >
-        <div className="text-center space-y-2 mb-8">
-          <div className="inline-flex p-3.5 bg-sky-500/10 text-sky-400 rounded-2xl border border-sky-500/20 shadow-lg mb-1" id="gate-logo-badge">
-            <Sparkles className="w-6 h-6 animate-pulse" />
+        <div className="text-center space-y-3 mb-8 flex flex-col items-center">
+          <div className="relative group select-none flex flex-col items-center">
+            {/* Logo Badge Container */}
+            <div 
+              onClick={() => setShowLogoControls(!showLogoControls)}
+              className={`relative flex items-center justify-center w-24 h-24 bg-white/5 border rounded-3xl overflow-hidden shadow-2xl p-1 cursor-pointer transition-all duration-300 transform hover:scale-[1.03] active:scale-[0.98] ${showLogoControls ? 'border-sky-500 bg-sky-500/5 shadow-sky-500/20' : 'border-slate-800 shadow-sky-500/10 hover:border-slate-600'}`}
+              id="gate-logo-badge"
+              title="Klik untuk mengatur atau mengubah logo"
+            >
+              <img 
+                src={gateLogo} 
+                alt="LaughDry App Mascot" 
+                className="w-full h-full object-contain rounded-2xl transition-transform duration-200" 
+                style={{ transform: `scale(${logoScale})` }}
+                referrerPolicy="no-referrer"
+              />
+              
+              {/* Camera Hover Overlay */}
+              <div className="absolute inset-0 bg-slate-950/75 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-opacity duration-200">
+                <Camera className="w-5 h-5 text-sky-450 animate-pulse" />
+                <span className="text-[8px] text-slate-300 font-bold uppercase tracking-wider mt-1 text-center px-1">Atur / Ganti</span>
+              </div>
+              
+              <Sparkles className="w-4.5 h-4.5 absolute -top-1 -right-1 text-amber-300 animate-pulse pointer-events-none" />
+            </div>
+
+            {/* Hidden native input which prompts standard gallery selection or camera captures */}
+            <input 
+              type="file" 
+              ref={logoInputRef} 
+              accept="image/*" 
+              className="hidden" 
+              onChange={handleLogoUploaded} 
+            />
           </div>
-          <h1 className="text-xl font-extrabold text-white tracking-tight flex items-center justify-center gap-1.5" id="gate-main-heading">
-            LaughDry Cloud POS
+
+          {/* Logo Scale and Customization Controls Popover */}
+          {showLogoControls && (
+            <div className="flex flex-col items-center gap-2.5 w-64 mt-2 px-3.5 py-3.5 bg-slate-950/95 border border-slate-800/90 rounded-2xl shadow-2xl animate-fade-in relative z-20">
+              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center border-b border-slate-850 pb-1.5 w-full">
+                Sesuaikan Logo Toko
+              </div>
+
+              {/* Upload Action Button */}
+              <button 
+                type="button" 
+                onClick={(e) => { e.stopPropagation(); handleLogoUploadClick(); }}
+                className="flex items-center justify-center gap-1.5 w-full py-2 px-3 rounded-xl bg-sky-500/10 border border-sky-500/20 text-sky-400 hover:bg-sky-500/20 active:scale-98 transition-all text-xs font-semibold"
+              >
+                <Camera className="w-4 h-4" />
+                <span>Upload Baru / Kamera</span>
+              </button>
+
+              {/* Slider Scale Group */}
+              <div className="w-full flex flex-col gap-1.5 px-0.5 mt-1">
+                <div className="flex items-center justify-between w-full text-[10px] text-slate-450 font-medium">
+                  <span>Skala Foto</span>
+                  <span className="text-sky-400 font-bold">{Math.round(logoScale * 100)}%</span>
+                </div>
+                <input 
+                  type="range"
+                  min="0.4"
+                  max="2.0"
+                  step="0.05"
+                  value={logoScale}
+                  onChange={(e) => handleScaleChange(parseFloat(e.target.value))}
+                  className="w-full h-1 bg-slate-850 rounded-lg appearance-none cursor-pointer accent-sky-400"
+                />
+              </div>
+
+              {/* Bottom Actions Row */}
+              <div className="flex items-center gap-2 w-full mt-1.5 border-t border-slate-850 pt-2.5">
+                {gateLogo !== logoImg && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleResetLogo(e); }}
+                    className="flex items-center justify-center gap-1.5 py-1.5 px-2 bg-rose-500/10 border border-rose-500/20 text-rose-400 hover:bg-rose-500/20 active:scale-95 text-[10px] rounded-lg transition-all font-semibold shrink-0"
+                    title="Kembalikan ke logo bawaan"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Reset</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setShowLogoControls(false); }}
+                  className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-sky-500 hover:bg-sky-600 text-slate-950 font-black text-[10px] rounded-lg uppercase tracking-wider transition-all active:scale-95 shadow-md shadow-sky-500/10"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Selesai</span>
+                </button>
+              </div>
+            </div>
+          )}
+          <h1 className="text-3xl font-black bg-gradient-to-r from-sky-300 via-sky-100 to-white bg-clip-text text-transparent tracking-tight text-center animate-fade-in" id="gate-main-heading">
+            LaughDry
           </h1>
-          <p className="text-xs text-slate-400 font-normal leading-normal px-2" id="gate-main-desc">
-            Sistem Multi-Device Terintegrasi untuk Manajemen Laundry Professional & Real-Time Tracking Pelanggan
+          <p className="text-[11px] text-slate-400">
+            Pusat Laundry Modern & Kasir Digital Pintar
           </p>
         </div>
 
@@ -421,15 +575,6 @@ export default function FirebaseGate({ onSignedIn }: FirebaseGateProps) {
           /* Normal Auth Screen */
           <div className="space-y-4">
             
-            {/* WebView/Device warning notice */}
-            {isWebView() && (
-              <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px] rounded-2xl leading-relaxed font-sans" id="webview-badge-info">
-                <span className="font-extrabold text-amber-400 block mb-0.5">⚠️ Info Google Auth di Aplikasi HP:</span>
-                Sistem mendeteksi Anda menggunakan HP (WebView). Google membatasi login tombol Gmail langsung di aplikasi HP. 
-                Silakan gunakan/daftar dengan **Email & Password** di bawah untuk akses 100% lancar di HP Anda!
-              </div>
-            )}
-
             {/* Google Integration Button */}
             <button
               type="button"
@@ -823,10 +968,6 @@ export default function FirebaseGate({ onSignedIn }: FirebaseGateProps) {
                   {isRegisterMode ? 'Sudah memiliki akun? Masuk disini' : 'Laundry Baru? Daftar & buat database terisolasi gratis'}
                 </button>
               )}
-
-              <p className="text-[10px] text-slate-500 leading-snug text-center px-1" id="gate-info-text">
-                *Database dan pengaturan sinkronisasi antar perangkat (HP Kasir, Tablet Karyawan & Laptop Owner) terisolasi penuh berdasar alamat email Anda.
-              </p>
             </div>
           </div>
         )}
