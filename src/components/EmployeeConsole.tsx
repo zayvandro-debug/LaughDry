@@ -3565,73 +3565,84 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                             (() => {
                               const o = item.order;
                               return (
-                                <div className="bg-white border border-slate-150 rounded-xl shadow-2xs hover:border-emerald-300 transition-all text-slate-755 hover:shadow-xs h-[140px] overflow-hidden">
-                                  <div className="p-3 flex justify-between items-center gap-2 h-full">
-                                    <div className="flex items-start gap-2 min-w-[140px] max-w-[200px]">
-                                      <div className="space-y-0.5 shrink-0">
-                                        <span className="font-mono font-black text-slate-900 text-[11px] bg-slate-100 border border-slate-150 px-1.5 py-0.5 rounded-md block w-fit">
+                                <div className="bg-white border border-slate-150 rounded-xl shadow-2xs hover:border-emerald-300 transition-all text-slate-755 hover:shadow-xs h-[140px] overflow-hidden flex flex-col justify-between p-2.5 sm:p-3">
+                                  {/* Top Row: Invoice, Customer Profile and Action Buttons */}
+                                  <div className="flex justify-between items-start gap-1.5 w-full min-w-0">
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
+                                        <span className="font-mono font-black text-slate-900 text-[10px] sm:text-[11px] bg-slate-100 border border-slate-150 px-1.5 py-0.5 rounded-md shrink-0">
                                           {o.invoiceNumber}
                                         </span>
-                                        <span className="inline-block px-1.5 py-0.25 rounded text-[8px] font-black text-white bg-emerald-600 uppercase tracking-wider">
+                                        <span className="inline-block px-1.5 py-0.5 rounded text-[8px] font-black text-white bg-emerald-600 uppercase tracking-wider shrink-0 select-none">
                                           🏆 Selesai
                                         </span>
-                                      </div>
-                                      <div className="min-w-0">
-                                        <p className="font-bold text-slate-800 text-[11px] truncate">{o.customerName}</p>
-                                        <p className="text-slate-400 font-mono text-[9px] truncate">{o.customerPhone}</p>
-                                      </div>
-                                    </div>
-
-                                    <div className="flex-1 min-w-0 pr-2">
-                                      <p className="text-[10.5px] text-slate-500 font-bold truncate">
-                                        {o.items.map(it => it.serviceName).join(', ')}
-                                      </p>
-                                      <div className="flex items-center gap-1.5 mt-0.5 text-[10px] flex-wrap">
-                                        <span className="font-black text-emerald-600 tracking-tight">
-                                          Rp {o.totalAmount.toLocaleString('id-ID')}
-                                        </span>
-                                        <span className="text-slate-350">|</span>
-                                        <span className="text-slate-400">Bayar: </span>
-                                        <span className="font-bold text-slate-700 bg-slate-100 px-1 rounded">{o.paymentMethod}</span>
                                         {o.clothesCount !== undefined && o.clothesCount > 0 && (
-                                          <span className="text-[8px] font-black bg-indigo-50 text-indigo-700 border border-indigo-150 px-1 py-0.25 rounded-md flex items-center gap-0.5">
+                                          <span className="text-[8px] font-black bg-indigo-50 text-indigo-700 border border-indigo-150 px-1.5 py-0.5 rounded-md shrink-0 flex items-center gap-0.5 select-none">
                                             👕 {o.clothesCount} Pcs
                                           </span>
                                         )}
                                       </div>
-                                      <div className="text-[9px] text-slate-500 mt-1.5 space-y-0.5 bg-slate-50 p-1.5 rounded-lg border border-slate-100 font-sans">
-                                        <div className="flex items-center justify-between gap-1.5">
-                                          <span className="text-slate-400">📥 Masuk:</span>
-                                          <span className="font-semibold text-slate-700">{new Date(o.createdAt).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}</span>
-                                        </div>
-                                        <div className="flex items-center justify-between gap-1.5">
-                                          <span className="text-slate-400">🏆 Selesai Pada:</span>
-                                          <span className="font-black text-emerald-650">{new Date(o.completedAt || o.updatedAt).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}</span>
-                                        </div>
+                                      <div className="mt-1 flex items-baseline gap-1.5 min-w-0">
+                                        <span className="font-black text-slate-800 text-[11px] sm:text-xs truncate max-w-[100px] xs:max-w-[140px] sm:max-w-xs">{o.customerName}</span>
+                                        <span className="text-slate-400 font-mono text-[9px] truncate shrink-0">({o.customerPhone || 'Tanpa WA'})</span>
                                       </div>
                                     </div>
 
-                                    <div className="flex items-center gap-1.5 justify-end shrink-0">
+                                    {/* Small modern button pair */}
+                                    <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 select-none">
                                       <button
                                         type="button"
                                         onClick={() => setShowOrderDetailModal(o)}
-                                        className="p-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 rounded-lg text-xs transition flex items-center justify-center cursor-pointer shadow-2xs"
-                                        title="Detail Order"
+                                        className="p-1 sm:p-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 rounded-lg text-xs transition flex items-center justify-center cursor-pointer shadow-3xs"
+                                        title="Detail Rincian"
                                       >
                                         ℹ️
                                       </button>
-
                                       <button
                                         type="button"
                                         onClick={() => {
                                           setActiveInvoice(o);
                                           setShowInvoiceChoiceModal(true);
                                         }}
-                                        className="p-1.5 bg-white hover:bg-sky-50 border border-slate-200 text-sky-855 rounded-lg text-xs transition flex items-center justify-center cursor-pointer"
+                                        className="p-1 sm:p-1.5 bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-800 rounded-lg text-xs transition flex items-center justify-center cursor-pointer shadow-3xs"
                                         title="Cetak Struk"
                                       >
                                         📄
                                       </button>
+                                    </div>
+                                  </div>
+
+                                  {/* Middle Row: Product/Service Details and Financial Status */}
+                                  <div className="min-w-0 w-full">
+                                    <p className="text-[10px] text-slate-550 font-bold truncate">
+                                      {o.items.map(it => it.serviceName).join(', ')}
+                                    </p>
+                                    <div className="flex items-center gap-1 sm:gap-1.5 mt-0.5 text-[9.5px] sm:text-[10px] flex-wrap">
+                                      <span className="font-black text-emerald-700 tracking-tight">
+                                        Rp {o.totalAmount.toLocaleString('id-ID')}
+                                      </span>
+                                      <span className="text-slate-350 select-none">|</span>
+                                      <span className="text-slate-400 select-none">Metode:</span>
+                                      <span className="font-black text-slate-700 bg-slate-100 border border-slate-200 px-1.5 py-0.2 rounded-md uppercase text-[8.5px] tracking-wide">
+                                        {o.paymentMethod}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {/* Bottom Row: Elegant Compact Date Bar */}
+                                  <div className="flex items-center gap-1.5 text-[8.5px] sm:text-[9.2px] text-slate-400 bg-slate-50 border border-slate-100/80 px-2 py-1 rounded-lg justify-between select-none">
+                                    <div className="flex items-center gap-1 truncate">
+                                      <span className="text-slate-400">📥</span>
+                                      <span className="font-medium truncate">
+                                        Masuk: <span className="font-bold text-slate-600">{new Date(o.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })} {new Date(o.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span>
+                                      </span>
+                                    </div>
+                                    <span className="text-slate-300 font-bold shrink-0">➔</span>
+                                    <div className="flex items-center gap-1 truncate text-right">
+                                      <span className="text-slate-400">🏆</span>
+                                      <span className="font-bold text-emerald-700 truncate">
+                                        Selesai: <span>{new Date(o.completedAt || o.updatedAt || o.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })} {new Date(o.completedAt || o.updatedAt || o.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span>
+                                      </span>
                                     </div>
                                   </div>
                                 </div>
@@ -5640,13 +5651,13 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       {/* ========================================================= */}
       {showOrderDetailModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn" id="order-detail-popup-modal">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full border border-slate-150 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-3xl p-6 max-w-sm sm:max-w-md w-full border border-slate-150 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
-                <span className="font-mono font-black text-slate-900 text-xs bg-slate-100 border border-slate-150 px-2 py-0.5 rounded-md">
-                  {showOrderDetailModal.invoiceNumber}
-                </span>
-                <h4 className="font-extrabold text-slate-900 text-sm mt-1.5 font-sans">Detail Rincian Layanan</h4>
+                <h4 className="font-extrabold text-slate-900 text-sm font-sans flex items-center gap-2">
+                  <span>📋</span> Detail Rincian Layanan
+                </h4>
+                <p className="text-[10px] text-slate-400 mt-0.5">Informasi lengkap transaksi pelanggan</p>
               </div>
               <button
                 type="button"
@@ -5657,82 +5668,100 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
               </button>
             </div>
 
-            <div className="text-xs space-y-3 font-sans">
-              {/* Customer info */}
-              <div className="grid grid-cols-2 gap-2 bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                <div>
-                  <span className="text-slate-400 font-medium block">Nama Pelanggan:</span>
-                  <span className="font-extrabold text-slate-800">{showOrderDetailModal.customerName}</span>
+            <div className="text-xs space-y-4 font-sans">
+              
+              {/* Unified Information Card - Order details grouped together with dates underneath */}
+              <div className="bg-slate-50 border border-slate-150 rounded-2xl p-4 space-y-3.5 shadow-3xs">
+                {/* No. Nota & Status Badge */}
+                <div className="flex justify-between items-start">
+                  <div>
+                    <span className="text-[8.5px] uppercase tracking-wider text-slate-400 font-bold block">Nomor Nota</span>
+                    <span className="font-mono font-black text-slate-950 text-xs bg-slate-205 px-2 py-0.5 rounded-md inline-block mt-0.5 border border-slate-300">
+                      {showOrderDetailModal.invoiceNumber}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[8.5px] uppercase tracking-wider text-slate-400 font-bold block mb-1">Status Cucian</span>
+                    <span className={`inline-block font-black text-[9px] uppercase tracking-wide px-2.5 py-0.5 rounded-full text-white ${
+                      showOrderDetailModal.status === OrderStatus.ANTRI ? 'bg-amber-500' :
+                      showOrderDetailModal.status === OrderStatus.DICUCI ? 'bg-sky-505' :
+                      showOrderDetailModal.status === OrderStatus.DISETRIKA_DILIPAT ? 'bg-violet-600' :
+                      showOrderDetailModal.status === OrderStatus.DIKEMAS ? 'bg-fuchsia-500' :
+                      showOrderDetailModal.status === OrderStatus.SIAP_DIAMBIL ? 'bg-teal-600' :
+                      showOrderDetailModal.status === OrderStatus.SELESAI ? 'bg-emerald-600' : 'bg-rose-600'
+                    }`}>
+                      {showOrderDetailModal.status === OrderStatus.ANTRI ? '🕒 Antri' :
+                       showOrderDetailModal.status === OrderStatus.DICUCI ? '💦 Cuci' :
+                       showOrderDetailModal.status === OrderStatus.DISETRIKA_DILIPAT ? '👔 Setrika' :
+                       showOrderDetailModal.status === OrderStatus.DIKEMAS ? '📦 Kemas' :
+                       showOrderDetailModal.status === OrderStatus.SIAP_DIAMBIL ? '✅ Ready' :
+                       showOrderDetailModal.status === OrderStatus.SELESAI ? '🏆 Selesai' : '❌ Batal'}
+                    </span>
+                  </div>
                 </div>
-                <div>
-                  <span className="text-slate-400 font-medium block">No. Telepon:</span>
-                  <span className="font-mono text-slate-700 font-semibold">{showOrderDetailModal.customerPhone}</span>
-                </div>
-              </div>
 
-              {/* Status and payment details */}
-              <div className="grid grid-cols-2 gap-2">
-                <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-100">
-                  <span className="text-slate-400 font-medium block">Status Alur Cucian:</span>
-                  <span className={`inline-block font-black text-[10px] uppercase tracking-wider mt-0.5 ${
-                    showOrderDetailModal.status === OrderStatus.ANTRI ? 'text-amber-500' :
-                    showOrderDetailModal.status === OrderStatus.DICUCI ? 'text-sky-500' :
-                    showOrderDetailModal.status === OrderStatus.DISETRIKA_DILIPAT ? 'text-violet-600' :
-                    showOrderDetailModal.status === OrderStatus.DIKEMAS ? 'text-fuchsia-500' :
-                    showOrderDetailModal.status === OrderStatus.SIAP_DIAMBIL ? 'text-teal-600' :
-                    showOrderDetailModal.status === OrderStatus.SELESAI ? 'text-emerald-600 font-black' : 'text-rose-600 font-black'
-                  }`}>
-                    {showOrderDetailModal.status === OrderStatus.ANTRI ? '🕒 Antri' :
-                     showOrderDetailModal.status === OrderStatus.DICUCI ? '💦 Cuci' :
-                     showOrderDetailModal.status === OrderStatus.DISETRIKA_DILIPAT ? '👔 Setrika' :
-                     showOrderDetailModal.status === OrderStatus.DIKEMAS ? '📦 Kemas' :
-                     showOrderDetailModal.status === OrderStatus.SIAP_DIAMBIL ? '✅ Siap Ambil' :
-                     showOrderDetailModal.status === OrderStatus.SELESAI ? '🏆 Selesai' : '❌ Dibatalkan'}
-                  </span>
-                </div>
-                <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-100">
-                  <span className="text-slate-400 font-medium block">Status Pembayaran:</span>
-                  <span className={`inline-block font-bold text-[10px] mt-0.5 ${
-                    showOrderDetailModal.paymentStatus === 'Lunas' ? 'text-sky-700 font-bold' : 'text-amber-600 font-bold'
-                  }`}>
-                    {showOrderDetailModal.paymentStatus} ({showOrderDetailModal.paymentMethod})
-                  </span>
-                </div>
-              </div>
+                <div className="border-t border-slate-200/60 my-1"></div>
 
-              {/* Dates & Perfume info */}
-              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 space-y-1">
-                <div className="flex justify-between">
-                  <span className="text-slate-400">📅 Tanggal Masuk:</span>
-                  <span className="font-semibold text-slate-700">{new Date(showOrderDetailModal.createdAt).toLocaleString('id-ID')}</span>
+                {/* Customer Details */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <span className="text-slate-400 font-bold block text-[8.5px] uppercase tracking-wider">Nama Pelanggan</span>
+                    <span className="font-black text-slate-800 text-[11.5px] mt-0.5 block leading-tight">{showOrderDetailModal.customerName}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 font-bold block text-[8.5px] uppercase tracking-wider">No. Telepon / HP</span>
+                    <span className="font-mono text-slate-705 font-black text-[11px] mt-0.5 block leading-tight">{showOrderDetailModal.customerPhone}</span>
+                  </div>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">⏳ Estimasi Selesai:</span>
-                  <span className="font-semibold text-slate-700">{new Date(showOrderDetailModal.estimatedCompletion).toLocaleString('id-ID')}</span>
-                </div>
-                <div className="flex justify-between border-t border-slate-150 pt-1.5 mt-1.5">
-                  <span className="text-slate-400 font-semibold flex items-center gap-1">🌸 Parfum Aroma:</span>
-                  <span className="font-black text-sky-800 uppercase bg-sky-50 px-2 py-0.5 rounded text-[9.5px]">
-                    {showOrderDetailModal.perfume 
-                      ? `${getPerfumeEmoji(showOrderDetailModal.perfume)} ${showOrderDetailModal.perfume}` 
-                      : '❌ Biasa / Tanpa Parfum'}
-                  </span>
+
+                <div className="border-t border-slate-200/60 my-1"></div>
+
+                {/* Date Details placed right beneath */}
+                <div className="grid grid-cols-2 gap-3 bg-white p-2.5 rounded-xl border border-slate-100">
+                  <div>
+                    <span className="text-slate-400 font-medium block text-[8.5px] uppercase tracking-wider flex items-center gap-1">📅 Tanggal Masuk</span>
+                    <span className="font-black text-slate-705 text-[10.5px] mt-0.5 block">
+                      {new Date(showOrderDetailModal.createdAt).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      <span className="text-slate-500 font-normal block font-mono text-[9px] mt-0.5">
+                        Pukul {new Date(showOrderDetailModal.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 font-medium block text-[8.5px] uppercase tracking-wider flex items-center gap-1">⏳ Estimasi Selesai</span>
+                    <span className="font-black text-slate-705 text-[10.5px] mt-0.5 block">
+                      {new Date(showOrderDetailModal.estimatedCompletion).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      <span className="text-slate-500 font-normal block font-mono text-[9px] mt-0.5">
+                        Pukul {new Date(showOrderDetailModal.estimatedCompletion).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </span>
+                  </div>
                 </div>
               </div>
 
               {/* Items List Table */}
               <div className="space-y-1.5">
-                <span className="text-slate-500 font-bold block text-[10px] uppercase tracking-wider">Layanan yang Diambil:</span>
-                <div className="border border-slate-150 rounded-2xl overflow-hidden divide-y divide-slate-100">
+                <span className="text-slate-500 font-bold block text-[9px] uppercase tracking-wider">Layanan yang Diambil:</span>
+                <div className="border border-slate-150 rounded-2xl overflow-hidden divide-y divide-slate-100 max-h-36 overflow-y-auto shadow-3xs">
                   {showOrderDetailModal.items.map((item, idx) => (
                     <div key={idx} className="p-3 bg-white flex justify-between items-center hover:bg-slate-50 transition-all">
                       <div>
                         <span className="font-extrabold text-slate-800 text-[11px] block">✨ {item.serviceName}</span>
-                        <span className="text-slate-400 text-[10px] font-medium block mt-0.5">Rp {item.price.toLocaleString()} x {item.quantity}</span>
+                        <span className="text-slate-400 text-[9.5px] font-medium block mt-0.5">Rp {item.price.toLocaleString('id-ID')} &times; {item.quantity} {item.unit || 'X'}</span>
                       </div>
-                      <span className="font-black text-slate-900 text-xs text-right animate-pulse">Rp {(item.price * item.quantity).toLocaleString()}</span>
+                      <span className="font-black text-slate-900 text-xs text-right">Rp {(item.price * item.quantity).toLocaleString('id-ID')}</span>
                     </div>
                   ))}
+                  
+                  {/* Perfume Aroma indicator inside the list */}
+                  <div className="p-2.5 bg-sky-50/35 flex justify-between items-center text-xs">
+                    <span className="text-slate-505 font-semibold flex items-center gap-1.5 text-[10px]">🌸 Parfum Aroma</span>
+                    <span className="font-black text-sky-850 uppercase bg-sky-100 px-2.5 py-0.5 rounded text-[9px] border border-sky-200">
+                      {showOrderDetailModal.perfume 
+                        ? `${getPerfumeEmoji(showOrderDetailModal.perfume)} ${showOrderDetailModal.perfume}` 
+                        : '❌ Tanpa Parfum'}
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -5744,26 +5773,87 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                 </div>
               )}
 
-              {/* Total Payment & Point info */}
-              <div className="bg-slate-950 text-white p-3.5 rounded-2xl flex items-center justify-between border border-slate-950">
-                <div>
-                  <span className="text-slate-400 text-[9px] block uppercase tracking-wider font-semibold">Total Tagihan</span>
-                  <span className="text-base font-black text-[#56C5FC]">Rp {showOrderDetailModal.totalAmount.toLocaleString()}</span>
+              {/* Financial & Payment Details (More precise) */}
+              <div className="bg-slate-950 text-white rounded-2xl p-4 space-y-3 border border-slate-950 shadow-md">
+                <div className="flex justify-between items-center border-b border-slate-850 pb-2">
+                  <div>
+                    <span className="text-slate-400 text-[8.5px] uppercase tracking-wider font-semibold block">Metode Pembayaran</span>
+                    <span className="font-black text-[#56C5FC] text-[11px] flex items-center gap-1 mt-0.5">
+                      💳 {showOrderDetailModal.paymentMethod}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-slate-400 text-[8.5px] uppercase tracking-wider font-semibold block">Status Pembayaran</span>
+                    <span className={`inline-block font-black text-[9px] uppercase tracking-wider px-2 py-0.5 rounded-md mt-0.5 ${
+                      showOrderDetailModal.paymentStatus === 'Lunas' 
+                        ? 'bg-emerald-500 text-slate-950 shadow-sm' 
+                        : 'bg-rose-500 text-white'
+                    }`}>
+                      {showOrderDetailModal.paymentStatus === 'Lunas' ? '🟢 LUNAS' : '⚠️ BELUM LUNAS'}
+                    </span>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <span className="text-slate-400 text-[9px] block uppercase tracking-wider font-semibold">Poin Diperoleh</span>
-                  <span className="text-xs font-extrabold text-amber-400">+{showOrderDetailModal.pointsEarned} Poin Loyalty</span>
+
+                <div className="flex justify-between items-end">
+                  <div>
+                    <span className="text-slate-400 text-[8.5px] uppercase tracking-wider font-semibold block">Total Biaya Layanan</span>
+                    <span className="text-base font-black text-emerald-400 font-mono mt-0.5 block">
+                      Rp {showOrderDetailModal.totalAmount.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-slate-400 text-[8.5px] uppercase tracking-wider font-semibold block">Poin Loyalty Member</span>
+                    <span className="text-xs font-black text-amber-400 flex items-center justify-end gap-1 mt-0.5">
+                      ⭐ +{showOrderDetailModal.pointsEarned || 0} Poin
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="pt-2">
+            {/* Actions list vertically stacked */}
+            <div className="flex flex-col gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveInvoice(showOrderDetailModal);
+                  setShowThermalReceiptModal(true);
+                  setShowOrderDetailModal(null);
+                }}
+                className="w-full py-2.5 bg-sky-50 border border-sky-200 text-sky-850 hover:bg-sky-100 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+              >
+                🖨️ Cetak Struk POS HP Termal
+              </button>
+              
+              <button
+                type="button"
+                onClick={() => {
+                  redirectToWhatsApp(showOrderDetailModal);
+                }}
+                className="w-full py-2.5 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-200 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+              >
+                📲 Kirim Struk WhatsApp
+              </button>
+
+              {showOrderDetailModal.status !== OrderStatus.SELESAI && showOrderDetailModal.status !== OrderStatus.DIBATALKAN && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleOpenEditOrderModal(showOrderDetailModal);
+                    setShowOrderDetailModal(null);
+                  }}
+                  className="w-full py-2.5 bg-slate-850 hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                >
+                  ✏️ Edit Rincian Jasa
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => setShowOrderDetailModal(null)}
-                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-755 font-black rounded-2xl transition-all cursor-pointer text-center text-xs"
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold rounded-xl text-xs transition cursor-pointer font-bold"
               >
-                Tutup Jendela Detail
+                Tutup Rincian
               </button>
             </div>
           </div>

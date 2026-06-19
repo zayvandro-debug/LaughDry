@@ -236,6 +236,50 @@ const getOrderLocalDate = (oDate: string | undefined): string => {
   return `${y}-${m}-${day}`;
 };
 
+// Helper to check if a touch target is inside a horizontally scrollable element
+const isInsideHorizontalScrollable = (target: EventTarget | null): boolean => {
+  if (!target) return false;
+  let element = target as HTMLElement | null;
+  while (element) {
+    if (element.id === 'owner-dashboard-root' || element === document.body || element === document.documentElement) {
+      break;
+    }
+    
+    // Check classes often used for horizontal scroll
+    if (element.classList && (
+      element.classList.contains('overflow-x-auto') ||
+      element.classList.contains('overflow-x-scroll') ||
+      element.classList.contains('recharts-responsive-container') ||
+      element.classList.contains('recharts-wrapper')
+    )) {
+      return true;
+    }
+
+    // Check CSS computed style overflow
+    try {
+      const style = window.getComputedStyle(element);
+      if (style.overflowX === 'auto' || style.overflowX === 'scroll') {
+        return true;
+      }
+    } catch (err) {
+      // Ignored
+    }
+
+    // Check scrollWidth vs clientWidth (meaning can scroll horizontally)
+    if (element.scrollWidth > element.clientWidth) {
+      return true;
+    }
+
+    // Also check if inside SVG, chart, or any Recharts classes/parents
+    if (element.tagName === 'svg' || (element.closest && element.closest('.recharts-wrapper') !== null)) {
+      return true;
+    }
+
+    element = element.parentElement;
+  }
+  return false;
+};
+
 interface OwnerDashboardProps {
   onLogout?: () => void;
   onSwitchConsole?: (consoleType: any) => void;
@@ -335,8 +379,8 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
   const [activeSubTab, setActiveSubTab] = useState<string>('analytics');
 
   // Custom inner sub-tab controllers
-  const [analyticsInnerTab, setAnalyticsInnerTab] = useState<'financial' | 'monthly' | 'productivity'>('financial');
-  const [trendType, setTrendType] = useState<'day' | 'week' | 'month'>('day');
+  const [analyticsInnerTab, setAnalyticsInnerTab] = useState<'financial' | 'monthly' | 'productivity'>('monthly');
+  const [trendType, setTrendType] = useState<'day' | 'week' | 'month'>('month');
   const [trendTablePage, setTrendTablePage] = useState<number>(1);
   const [servicesInnerTab, setServicesInnerTab] = useState<'rates' | 'perfumes'>('rates');
   const [ratesTab, setRatesTab] = useState<'kiloan' | 'satuan'>('kiloan');
@@ -378,12 +422,24 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
   const SUBTABS = ['analytics', 'services', 'expenses', 'settings', 'cashiers', 'branches', 'attendance'];
 
   const handleTouchStart = (e: React.TouchEvent) => {
+    // Block swipe gesture if touch starts in a horizontally scrollable element (charts, scroll tables)
+    if (isInsideHorizontalScrollable(e.target)) {
+      setTouchStartX(null);
+      setTouchStartY(null);
+      return;
+    }
     setTouchStartX(e.touches[0].clientX);
     setTouchStartY(e.touches[0].clientY);
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
     if (touchStartX === null || touchStartY === null) return;
+    // Block swipe gesture if touch ends in a horizontally scrollable element
+    if (isInsideHorizontalScrollable(e.target)) {
+      setTouchStartX(null);
+      setTouchStartY(null);
+      return;
+    }
     const touchEndX = e.changedTouches[0].clientX;
     const touchEndY = e.changedTouches[0].clientY;
     

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
@@ -7,6 +7,8 @@ import {
   sendEmailVerification,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   sendPasswordResetEmail
 } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
@@ -114,6 +116,53 @@ export default function FirebaseGate({ onSignedIn }: FirebaseGateProps) {
   const [mappingLoading, setMappingLoading] = useState<boolean>(false);
   const [showSharedConfig, setShowSharedConfig] = useState<boolean>(false);
 
+  // Monitor and handle Google Sign-In redirect result on page mount
+  useEffect(() => {
+    let active = true;
+    
+    const handleRedirectResult = async () => {
+      try {
+        const result = await getRedirectResult(auth);
+        if (result && result.user && active) {
+          setLoading(true);
+          console.log("Google Sign-In Redirect success:", result.user);
+          localStorage.removeItem('laughdry_firebase_disabled');
+          localStorage.setItem('laughdry_firebase_uid', result.user.uid);
+          await registerEmailMapping(result.user);
+          setSuccessMsg('Autentikasi Google berhasil! Membuka gerbang utama...');
+          setTimeout(() => {
+            if (active) {
+              onSignedIn(result.user);
+            }
+          }, 1200);
+        }
+      } catch (err: any) {
+        console.error("Google Sign-In Redirect error parsing result:", err);
+        if (active) {
+          let localizedError = 'Gagal memproses masuk Google dari halaman redirect.';
+          if (err.code === 'auth/unauthorized-domain') {
+            localizedError = 'Domain atau alamat situs ini belum diizinkan di Firebase Console -> Authentication -> Authorized Domains Anda. Silakan tambahkan domain ini agar redirect berhasil.';
+          } else if (err.code === 'auth/operation-not-allowed') {
+            localizedError = 'Metode masuk Google/Gmail belum diaktifkan di tab Sign-In Method pada Firebase Console Anda.';
+          } else if (err.code === 'auth/popup-blocked') {
+            localizedError = 'Popup diblokir oleh browser Anda. Silakan beri izin pop-up / redirect.';
+          } else if (err.message && err.message.includes('network-request-failed')) {
+            localizedError = 'Koneksi internet bermasalah. Pastikan perangkat Anda terhubung.';
+          }
+          setAuthError(localizedError);
+          setAuthErrorCode(err.code || null);
+          setLoading(false);
+        }
+      }
+    };
+
+    handleRedirectResult();
+    
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // Helper to register mapping from email to user uid
   const registerEmailMapping = async (user: User) => {
     if (user && user.email) {
@@ -189,31 +238,59 @@ export default function FirebaseGate({ onSignedIn }: FirebaseGateProps) {
     setAuthError(null);
     setAuthErrorCode(null);
     setSuccessMsg(null);
+    
+    // Check if on a mobile browser or WebView
+    const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const useRedirectMode = isMobileDevice || isWebView();
+
     try {
       const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
       
-      localStorage.removeItem('laughdry_firebase_disabled');
-      localStorage.setItem('laughdry_firebase_uid', result.user.uid);
-      await registerEmailMapping(result.user);
-      setSuccessMsg('Autentikasi akun Gmail berhasil! Membuka gerbang utama...');
-      setTimeout(() => {
-        onSignedIn(result.user);
-      }, 1200);
+      if (useRedirectMode) {
+        console.log("Mobile/WebView detected, using signInWithRedirect for Google Auth...");
+        setSuccessMsg('Mengalihkan Anda ke halaman login resmi Google (Akun Gmail)...');
+        await signInWithRedirect(auth, provider);
+      } else {
+        console.log("Desktop detected, attempting signInWithPopup for Google Auth...");
+        const result = await signInWithPopup(auth, provider);
+        
+        localStorage.removeItem('laughdry_firebase_disabled');
+        localStorage.setItem('laughdry_firebase_uid', result.user.uid);
+        await registerEmailMapping(result.user);
+        setSuccessMsg('Autentikasi akun Gmail berhasil! Membuka gerbang utama...');
+        setTimeout(() => {
+          onSignedIn(result.user);
+        }, 1200);
+      }
     } catch (err: any) {
-      console.warn("Google sign in error (non-fatal info):", err);
+      console.warn("Google Sign-In failed/blocked:", err);
+      
+      // Fallback to Redirect automatically if popup failed or wasn't supported
+      if (
+        err.code === 'auth/popup-blocked' || 
+        err.code === 'auth/popup-closed-by-user' ||
+        err.code === 'auth/operation-not-supported-in-this-environment'
+      ) {
+        try {
+          console.log("Popup was blocked or unsupported. Falling back to signInWithRedirect...");
+          setSuccessMsg('Popup terblokir atau bermasalah. Mengalihkan Anda secara otomatis ke halaman login resmi Google...');
+          const provider = new GoogleAuthProvider();
+          await signInWithRedirect(auth, provider);
+          return;
+        } catch (redirErr: any) {
+          console.error("Redirect fallback failed:", redirErr);
+        }
+      }
+
       let localizedError = 'Gagal masuk menggunakan akun Gmail. Silakan coba lagi.';
       if (err.code === 'auth/popup-closed-by-user') {
-        localizedError = 'Popup masuk Google ditutup atau diblokir. Jika Anda sedang melihat pratinjau di dalam iframe, silakan buka aplikasi di tab baru (tombol panah di kanan atas) atau gunakan Mode Lokal.';
+        localizedError = 'Popup masuk Google ditutup oleh pengguna. Jika Anda sedang melihat pratinjau di dalam iframe, silakan buka aplikasi di tab baru (tombol panah di kanan atas) atau gunakan Mode Lokal.';
       } else if (err.code === 'auth/cancelled-popup-request') {
         localizedError = 'Permintaan popup masuk dibatalkan atau terblokir. Silakan coba lagi.';
-      } else if (
-        err.code === 'auth/operation-not-supported-in-this-environment' || 
-        err.code === 'auth/invalid-action' || 
-        (err.message && err.message.includes('requested action is invalid')) || 
-        isWebView()
-      ) {
-        localizedError = 'Aplikasi mendeteksi Anda menggunakan HP (WebView) atau Google Sign-In dibatalkan karena kebijakan keamanan Google. Solusi termudah: Silakan daftar / login menggunakan form Email & Password di bawah untuk akses HP yang 100% lancar.';
+      } else if (err.code === 'auth/unauthorized-domain') {
+        localizedError = `Domain situs ini (${window.location.hostname}) belum diizinkan untuk login Google di Firebase Console Anda. Silakan daftarkan domain ini di Firebase Console -> Authentication -> Settings -> Authorized Domains.`;
+      } else if (isWebView()) {
+        localizedError = 'Aplikasi mendeteksi Anda menggunakan HP (WebView) atau Google Sign-In dibatalkan karena kebijakan keamanan Google. Solusi termudah: Silakan masuk menggunakan form Email & Password di bawah untuk akses HP yang 100% lancar.';
       }
       setAuthError(localizedError);
       setAuthErrorCode(err.code || null);
