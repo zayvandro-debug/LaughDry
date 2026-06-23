@@ -5628,6 +5628,96 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
           </div>
           )}
 
+          {/* INFORMASI KONTAK BRANCH & LOGO UTAMA */}
+          {settingsInnerTab === 'general' && (
+          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4 font-sans text-xs animate-scaleIn" id="branch-info-logo-panel">
+            <h4 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+              <Phone className="w-4 h-4 text-sky-500" />
+              Informasi Kontak Branch & Logo Toko Utama
+            </h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-slate-600 block font-semibold">Nomor Telp/HP Branch (Outlet):</label>
+                <input
+                  type="text"
+                  value={settings.branchPhone || ''}
+                  onChange={(e) => handleSettingsChange('branchPhone', e.target.value)}
+                  placeholder="Contoh: 0812-3456-7890"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:outline-none focus:border-sky-500 text-xs font-semibold"
+                />
+                <p className="text-[10px] text-slate-400 font-medium">Nomor telp branch yang akan tertulis di struk print POS.</p>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-slate-600 block font-semibold">Status Munculkan Telp di Struk:</label>
+                <div className="flex items-center gap-2 mt-2">
+                  <input
+                    type="checkbox"
+                    checked={settings.showBranchPhone !== false}
+                    onChange={(e) => handleSettingsChange('showBranchPhone', e.target.checked)}
+                    className="w-4 h-4 text-sky-500"
+                    id="chk-show-branch-phone"
+                  />
+                  <label htmlFor="chk-show-branch-phone" className="text-slate-700 font-bold cursor-pointer">
+                    Tampilkan Nomor HP Branch di Struk POS
+                  </label>
+                </div>
+              </div>
+
+              <div className="space-y-1 col-span-1 md:col-span-2 border-t border-slate-100 pt-3">
+                <label className="text-slate-600 block font-semibold">Logo Utama LaughDry:</label>
+                <div className="flex items-center gap-3 mt-2">
+                  {settings.logoUrl ? (
+                    <div className="relative group shrink-0">
+                      <img
+                        src={settings.logoUrl}
+                        alt="Logo Utama"
+                        className="w-16 h-16 rounded-xl border border-slate-250 object-contain bg-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleSettingsChange('logoUrl', '')}
+                        className="absolute -top-1.5 -right-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold p-0.5 rounded-full text-[8px] h-4 w-4 flex items-center justify-center cursor-pointer shadow"
+                        title="Hapus logo utama"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="w-16 h-16 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-350 shrink-0">
+                      <span className="text-xl">📷</span>
+                    </div>
+                  )}
+
+                  <label className="flex-1 max-w-xs">
+                    <span className="p-2.5 px-4 bg-sky-500 hover:bg-sky-600 hover:shadow text-xs font-extrabold text-white rounded-xl cursor-pointer transition flex items-center justify-center gap-1.5">
+                      📂 Ganti Logo Utama...
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          const reader = new FileReader();
+                          reader.onload = (event) => {
+                            if (event.target?.result) {
+                              handleSettingsChange('logoUrl', event.target.result as string);
+                            }
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      }}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+                <p className="text-[10px] text-slate-400 font-medium">Logo utama sistem kasir (juga digunakan sebagai header utama jika logo header struk kosong).</p>
+              </div>
+            </div>
+          </div>
+          )}
+
           {/* QRIS INTEGRATION & ID MERCHANT */}
           {settingsInnerTab === 'general' && (
           <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4 font-sans text-xs animate-scaleIn">
@@ -6010,6 +6100,20 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                                   </div>
                                 </label>
 
+                                {/* Is Visible in Core Print Toggle (isVisibleInti) */}
+                                <label className="flex items-center gap-2 cursor-pointer bg-white p-2.5 border border-slate-200 rounded-xl">
+                                  <input
+                                    type="checkbox"
+                                    checked={el.isVisibleInti !== false}
+                                    onChange={(e) => updateElementOption(el.id, 'isVisibleInti', e.target.checked)}
+                                    className="rounded text-rose-500 focus:ring-rose-500 w-4 h-4 cursor-pointer"
+                                  />
+                                  <div>
+                                    <span className="font-extrabold text-slate-850 block text-[10.5px]">Tampilkan di Struk Inti (Core)</span>
+                                    <span className="text-[8.5px] text-slate-450 leading-tight block mt-0.5">Aktifkan agar elemen ini tetap tercetak saat kasir/karyawan mencetak menggunakan opsi "Print Inti".</span>
+                                  </div>
+                                </label>
+
                                 {/* Fine-grain size slider */}
                                 <div className="bg-white p-2.5 border border-slate-200 rounded-xl sm:col-span-2 space-y-1">
                                   <div className="flex justify-between items-center text-[10.5px]">
@@ -6254,7 +6358,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
 
                         {settings.showBranchPhone && (
                           <div className="font-bold text-slate-700 text-center text-[8px] mb-1">
-                            TELP BRANCH: 0812-3456-7890
+                            TELP BRANCH: {settings.branchPhone || '0812-3456-7890'}
                           </div>
                         )}
 
@@ -6548,6 +6652,8 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                           </>
                         )}
 
+
+
                         {/* QRIS PAYMENT AUTOPRINT ON RECEIPT */}
                         {settings.qrisType && settings.qrisType !== 'none' && (
                           <div className="border-t border-dashed border-slate-400 my-2 pt-2 flex flex-col items-center animate-fade-in">
@@ -6779,7 +6885,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
 
                         {settings.showBranchPhone && (
                           <div className="font-bold text-slate-700 text-center text-[8px] mb-1">
-                            TELP BRANCH: 0812-3456-7890
+                            TELP BRANCH: {settings.branchPhone || '0812-3456-7890'}
                           </div>
                         )}
 
@@ -6933,6 +7039,8 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                             </div>
                           </div>
                         )}
+
+
 
                         {/* QRIS section */}
                         {settings.qrisType && settings.qrisType !== 'none' && (

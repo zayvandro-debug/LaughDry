@@ -48,7 +48,96 @@ import { Geolocation as CapGeolocation } from '@capacitor/geolocation';
 import { App as CapApp } from '@capacitor/app';
 import { Preferences as CapPreferences } from '@capacitor/preferences';
 import { requestAppPermissions } from '../utils/request-permissions';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import AttendanceMap from './AttendanceMap';
+
+export interface BluetoothPrinterPluginInterface {
+  getAvailability(): Promise<{ available: boolean; enabled: boolean }>;
+  getPairedDevices(): Promise<{ devices: Array<{ name: string; address: string; paired: boolean }> }>;
+  startScan(): Promise<{ devices: Array<{ name: string; address: string; paired: boolean }> }>;
+  connect(options: { address: string }): Promise<{ success: boolean; name: string; address: string }>;
+  print(options: { text: string }): Promise<void>;
+  disconnect(): Promise<{ success: boolean }>;
+}
+const BluetoothPrinter = registerPlugin<BluetoothPrinterPluginInterface>('BluetoothPrinter');
+
+const NativeBluetooth = {
+  isAndroid: () => {
+    return typeof Capacitor !== 'undefined' && Capacitor.getPlatform() === 'android';
+  },
+  
+  getAvailability: async () => {
+    if (NativeBluetooth.isAndroid()) {
+      try {
+        return await BluetoothPrinter.getAvailability();
+      } catch (e) {
+        console.error("Native getAvailability failed:", e);
+        return { available: false, enabled: false };
+      }
+    }
+    return { available: false, enabled: false };
+  },
+
+  getPairedDevices: async () => {
+    if (NativeBluetooth.isAndroid()) {
+      try {
+        const result = await BluetoothPrinter.getPairedDevices();
+        return result.devices || [];
+      } catch (e) {
+        console.error("Native getPairedDevices failed:", e);
+        return [];
+      }
+    }
+    return [];
+  },
+
+  startScan: async () => {
+    if (NativeBluetooth.isAndroid()) {
+      try {
+        const result = await BluetoothPrinter.startScan();
+        return result.devices || [];
+      } catch (e) {
+        console.error("Native startScan failed:", e);
+        return [];
+      }
+    }
+    return [];
+  },
+
+  connect: async (address: string) => {
+    if (NativeBluetooth.isAndroid()) {
+      try {
+        return await BluetoothPrinter.connect({ address });
+      } catch (e: any) {
+        throw new Error(e.message || "Koneksi printer gagal");
+      }
+    }
+    throw new Error("Native Bluetooth hanya tersedia di perangkat Android");
+  },
+
+  print: async (text: string) => {
+    if (NativeBluetooth.isAndroid()) {
+      try {
+        await BluetoothPrinter.print({ text });
+        return true;
+      } catch (e: any) {
+        throw new Error(e.message || "Pencetakan gagal");
+      }
+    }
+    throw new Error("Native Bluetooth hanya tersedia di perangkat Android");
+  },
+
+  disconnect: async () => {
+    if (NativeBluetooth.isAndroid()) {
+      try {
+        return await BluetoothPrinter.disconnect();
+      } catch (e) {
+        console.error("Native disconnect failed:", e);
+      }
+    }
+    return { success: true };
+  }
+};
 
 const getPerfumeEmoji = (name: string): string => {
   const norm = (name || '').toLowerCase();
@@ -82,6 +171,28 @@ function formatYearMonth(yearMonthStr: string) {
   return `${monthName} ${year}`;
 }
 
+const safeDateStr = (dateVal: any, fallbackStr = '--') => {
+  if (!dateVal) return fallbackStr;
+  try {
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return fallbackStr;
+    return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+  } catch (e) {
+    return fallbackStr;
+  }
+};
+
+const safeTimeStr = (dateVal: any, fallbackStr = '--:--') => {
+  if (!dateVal) return fallbackStr;
+  try {
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return fallbackStr;
+    return d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+  } catch (e) {
+    return fallbackStr;
+  }
+};
+
 interface EmployeeConsoleProps {
   loggedInUser?: any;
   onLogout?: () => void;
@@ -111,7 +222,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   });
   const [showBluetoothHelp, setShowBluetoothHelp] = useState(false);
   const [isScanningBluetooth, setIsScanningBluetooth] = useState<boolean>(false);
-  const [scannedDevices, setScannedDevices] = useState<{ id: string; name: string; paired: boolean }[]>([]);
+  const [scannedDevices, setScannedDevices] = useState<{ id: string; name: string; address?: string; paired: boolean }[]>([]);
   const [pairingDeviceId, setPairingDeviceId] = useState<string | null>(null);
   const [connectedPrinterName, setConnectedPrinterName] = useState<string>(() => {
     return localStorage.getItem('laughdry_printer_name') || '';
@@ -142,6 +253,8 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   const [showProcessSuccessModal, _setShowProcessSuccessModal] = useState(false);
   const [showInvoiceChoiceModal, setShowInvoiceChoiceModal] = useState(false);
   const [showThermalReceiptModal, setShowThermalReceiptModal] = useState(false);
+  const [receiptTemplateMode, setReceiptTemplateMode] = useState<'full' | 'inti'>('full');
+  const [showTemplateChoiceModal, setShowTemplateChoiceModal] = useState<boolean>(false);
   const [isAutoPrintEnabled, setIsAutoPrintEnabled] = useState<boolean>(() => {
     return localStorage.getItem('laughdry_autoprint_enabled') !== 'false';
   });
@@ -182,6 +295,25 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       return;
     }
     try {
+      let available = false;
+      try {
+        available = await (navigator as any).bluetooth.getAvailability();
+      } catch (e) {
+        console.warn("getAvailability error:", e);
+      }
+      if (!available) {
+        showToast("⚠️ Adaptor Bluetooth fisik tidak aktif atau tidak tersedia. Simulasi sambungan diaktifkan!");
+        // Simulate a physical printer pairing since there is no actual bluetooth adapter
+        setIsPrinterConnected(true);
+        setConnectedPrinterName("MTP-2 Web POS (Simulasi)");
+        localStorage.setItem('laughdry_printer_connected', 'true');
+        localStorage.setItem('laughdry_printer_name', "MTP-2 Web POS (Simulasi)");
+        const updatedSettings = { ...settings, bluetoothPrinterAddress: "MTP-2 Web POS (Simulasi)" };
+        LaughDryDatabase.saveSettings(updatedSettings);
+        setSettings(updatedSettings);
+        return;
+      }
+
       showToast("🔍 Mencari printer Thermal Bluetooth terdekat...");
       const device = await (navigator as any).bluetooth.requestDevice({
         acceptAllDevices: true,
@@ -247,65 +379,142 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     } catch (err: any) {
       console.error(err);
       const errMsg = (err.message || err.toString()).toLowerCase();
-      if (errMsg.includes("permission") || errMsg.includes("policy") || errMsg.includes("disallow") || errMsg.includes("security")) {
-        showToast("⚠️ Bluetooth dibatasi oleh kebijakan keamanan iframe AI Studio. Silakan klik 'Buka di Tab Baru' (New Tab) di pojok kanan atas agar Bluetooth berfungsi lancar!");
+      if (errMsg.includes("permission") || errMsg.includes("policy") || errMsg.includes("disallow") || errMsg.includes("security") || errMsg.includes("not available") || errMsg.includes("notactive")) {
+        showToast("⚠️ Bluetooth dibatasi oleh kebijakan keamanan iframe atau adaptor bluetooth tidak tersedia. Simulator sambungan aktif!");
+        setIsPrinterConnected(true);
+        setConnectedPrinterName("MTP-2 Web POS (Simulasi)");
+        localStorage.setItem('laughdry_printer_connected', 'true');
+        localStorage.setItem('laughdry_printer_name', "MTP-2 Web POS (Simulasi)");
       } else {
         showToast(`❌ Gagal tersambung: ${err.message || err.toString()}`);
       }
     }
   };
 
-  const generateTextReceipt = (invoice: Order, currentSettings: any, cUser: any) => {
+  const generateTextReceipt = (invoice: Order, currentSettings: any, cUser: any, printMode: 'full' | 'inti' = 'full') => {
     let t = "";
     const sep = "--------------------------------\n";
-    const header = (currentSettings.customReceiptHeader || 'LAUGHDRY EXPRESS').toUpperCase();
-    t += "\n" + centerAlignPrefix(header, 32) + "\n";
-    if (currentSettings.showBranchPhone) {
-      t += centerAlignPrefix("TELP BRANCH: 0812-3456-7890", 32) + "\n";
+    
+    // Get element config helper
+    const getEl = (id: string) => {
+      if (!currentSettings.receiptElements) return { isVisible: true, isVisibleInti: true };
+      const el = currentSettings.receiptElements.find((e: any) => e.id === id);
+      return el || { isVisible: true, isVisibleInti: true };
+    };
+
+    const isVisible = (id: string) => {
+      const el = getEl(id);
+      if (printMode === 'inti') {
+        // Must be visible in owner settings AND visible in inti
+        return el.isVisible !== false && el.isVisibleInti !== false;
+      }
+      return el.isVisible !== false;
+    };
+
+    // Header / Outlet Name
+    if (isVisible('outlet_name')) {
+      const header = (currentSettings.customReceiptHeader || 'LAUGHDRY EXPRESS').toUpperCase();
+      header.split('\n').forEach((line: string) => {
+        if (line.trim()) {
+          t += centerAlignPrefix(line.trim(), 32) + "\n";
+        }
+      });
+      if (currentSettings.showBranchPhone) {
+        const phone = currentSettings.branchPhone || "0812-3456-7890";
+        t += centerAlignPrefix(`TELP BRANCH: ${phone}`, 32) + "\n";
+      }
+      t += sep;
     }
-    t += sep;
-    t += `Nota : ${invoice.invoiceNumber}\n`;
-    t += `Tgl  : ${new Date(invoice.createdAt).toLocaleDateString('id-ID')}\n`;
-    t += `Cust : ${invoice.customerName}\n`;
-    if (currentSettings.showCustomerPhoneInReceipt && invoice.customerPhone) {
+
+    // Invoice Number
+    if (isVisible('invoice_number')) {
+      t += `Nota : ${invoice.invoiceNumber}\n`;
+    }
+
+    // Customer Name
+    if (isVisible('customer_name')) {
+      t += `Cust : ${invoice.customerName}\n`;
+    }
+
+    // Customer Phone
+    if (isVisible('customer_phone') && invoice.customerPhone) {
       t += `Telp : ${invoice.customerPhone}\n`;
     }
-    if (currentSettings.showCashierNameInReceipt && cUser) {
+
+    // Order Date
+    if (isVisible('order_date')) {
+      t += `Tgl  : ${new Date(invoice.createdAt).toLocaleDateString('id-ID')}\n`;
+    }
+
+    // Cashier Info
+    if (isVisible('cashier_info') && cUser) {
       t += `Kasir: ${cUser.name}\n`;
     }
-    if (invoice.status) {
-      t += `Stat : ${invoice.status}\n`;
+
+    // Order Status
+    if (isVisible('order_status')) {
+      t += `Stat : ${invoice.status || 'Diterima'}\n`;
     }
-    if (invoice.estimatedCompletion) {
+
+    // Estimated Time
+    if (isVisible('estimated_time') && invoice.estimatedCompletion) {
       t += `Est  : ${new Date(invoice.estimatedCompletion).toLocaleDateString('id-ID')}\n`;
     }
-    if (invoice.perfume) {
+
+    // Perfume Fragrance
+    if (isVisible('perfume_fragrance') && invoice.perfume) {
       t += `Parfm: ${invoice.perfume}\n`;
     }
-    t += sep;
-    
-    if (invoice.items && invoice.items.length > 0) {
-      invoice.items.forEach((item: any) => {
-        t += `${item.serviceName}\n`;
-        const qtyStr = `${item.qty} ${item.unit || 'Kg/Pcs'}`;
-        const priceStr = `Rp ${(item.price || 0).toLocaleString('id-ID')}`;
-        const subStr = `Rp ${(item.amount || 0).toLocaleString('id-ID')}`;
-        t += justifyRowPrefix(`${qtyStr} x ${priceStr}`, subStr, 32) + "\n";
-      });
-    } else {
-      t += justifyRowPrefix(`Layanan Laundry`, `Rp ${(invoice.totalAmount || 0).toLocaleString('id-ID')}`, 32) + "\n";
+
+    // Add separator only if details are being listed
+    if (isVisible('invoice_number') || isVisible('customer_name') || isVisible('order_date')) {
+      t += sep;
     }
-    
-    t += sep;
-    t += justifyRowPrefix("TOTAL CHARGE", `Rp ${(invoice.totalAmount || 0).toLocaleString('id-ID')}`, 32) + "\n";
-    t += justifyRowPrefix("Metode Bayar", invoice.paymentMethod || 'Cash', 32) + "\n";
-    t += justifyRowPrefix("Status Bayar", invoice.paymentStatus || 'Belum Lunas', 32) + "\n";
-    t += sep;
-    
-    const footerText = currentSettings.customReceiptFooter || 'Terima kasih atas kunjungan Anda!\nKwidansi ini dalah bukti sah.';
-    footerText.split('\n').forEach((line: string) => {
-      t += centerAlignPrefix(line.trim().toUpperCase(), 32) + "\n";
-    });
+
+    // Line items
+    if (isVisible('item_list')) {
+      if (invoice.items && invoice.items.length > 0) {
+        invoice.items.forEach((item: any) => {
+          t += `${item.serviceName}\n`;
+          const qtyStr = `${item.qty} ${item.unit || 'Kg/Pcs'}`;
+          const priceStr = `Rp ${(item.price || 0).toLocaleString('id-ID')}`;
+          const subStr = `Rp ${(item.amount || 0).toLocaleString('id-ID')}`;
+          t += justifyRowPrefix(`${qtyStr} x ${priceStr}`, subStr, 32) + "\n";
+        });
+      } else {
+        t += justifyRowPrefix(`Layanan Laundry`, `Rp ${(invoice.totalAmount || 0).toLocaleString('id-ID')}`, 32) + "\n";
+      }
+      t += sep;
+    }
+
+    // Total Charge
+    if (isVisible('total_charge')) {
+      t += justifyRowPrefix("TOTAL CHARGE", `Rp ${(invoice.totalAmount || 0).toLocaleString('id-ID')}`, 32) + "\n";
+      t += justifyRowPrefix("Metode Bayar", invoice.paymentMethod || 'Cash', 32) + "\n";
+      t += justifyRowPrefix("Status Bayar", invoice.paymentStatus || 'Belum Lunas', 32) + "\n";
+      t += sep;
+    }
+
+    // Member Points
+    if (isVisible('member_points')) {
+      const pointsEarned = Math.floor((invoice.totalAmount || 0) / 10000);
+      t += justifyRowPrefix("Poin Tambah", `+${pointsEarned} Poin`, 32) + "\n";
+      t += sep;
+    }
+
+    // Footer Terms
+    if (isVisible('footer_terms')) {
+      const footerText = currentSettings.customReceiptFooter || 'TERIMA KASIH ATAS KUNJUNGAN ANDA!\nSIMPAN STRUK STRUK INI SEBAGAI PENJAMIN.';
+      footerText.split('\n').forEach((line: string) => {
+        if (line.trim()) {
+          t += centerAlignPrefix(line.trim().toUpperCase(), 32) + "\n";
+        }
+      });
+      t += sep;
+    }
+
+
+
     t += "\n\n\n\n";
     return t;
   };
@@ -1067,6 +1276,32 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       }
     };
     verifyHardwarePermissions();
+
+    // Auto reconnect to native printer on Android if previously connected
+    const autoReconnectPrinter = async () => {
+      if (NativeBluetooth.isAndroid() && localStorage.getItem('laughdry_printer_connected') === 'true') {
+        const storedAddr = localStorage.getItem('laughdry_printer_address');
+        const storedName = localStorage.getItem('laughdry_printer_name');
+        if (storedAddr) {
+          try {
+            console.log("Attempting native printer auto-reconnection to:", storedName, storedAddr);
+            const result = await NativeBluetooth.connect(storedAddr);
+            if (result && result.success) {
+              console.log("Auto-reconnection successful!");
+              setIsPrinterConnected(true);
+              setConnectedPrinterName(storedName || "Printer HP");
+              showToast(`🔌 Auto-reconnect: ${storedName} terhubung!`);
+            } else {
+              setIsPrinterConnected(false);
+            }
+          } catch (e) {
+            console.warn("Failed auto re-connecting to native printer:", e);
+            setIsPrinterConnected(false);
+          }
+        }
+      }
+    };
+    autoReconnectPrinter();
     
     const handleOrderUpdate = () => {
       loadDB();
@@ -1106,26 +1341,78 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     setIsScanningBluetooth(true);
     setScannedDevices([]);
     
-    // Attempt real Web Bluetooth Scan if supported natively by device
+    // Check if we are running in Capacitor Android Native environment
+    if (NativeBluetooth.isAndroid()) {
+      try {
+        showToast("🔍 Membaca daftar printer bluetooth & memindai...");
+        
+        // 1. Fetch bonded (paired) devices first. Bonded devices are most common for thermal printers.
+        const paired = await NativeBluetooth.getPairedDevices();
+        const pairedMapped = paired.map((d: any) => ({
+          id: `bonded-${d.address}`,
+          name: `${d.name || "Unknown Printer"} (Berpasangan/Paired)`,
+          address: d.address,
+          paired: true
+        }));
+        
+        setScannedDevices(pairedMapped);
+
+        // 2. Start discovering nearby devices to expand the list in real-time
+        const scanned = await NativeBluetooth.startScan();
+        const scannedMapped = scanned.map((d: any) => ({
+          id: `scanned-${d.address}`,
+          name: d.name || "Thermal Printer",
+          address: d.address,
+          paired: false
+        }));
+
+        // Merge discovered devices while avoiding duplicates with paired devices
+        setScannedDevices(prev => {
+          const merged = [...prev];
+          scannedMapped.forEach((s: any) => {
+            if (!merged.some(m => m.address?.toLowerCase() === s.address?.toLowerCase())) {
+              merged.push(s);
+            }
+          });
+          return merged;
+        });
+
+        setIsScanningBluetooth(false);
+        showToast("✅ Berhasil memindai printer bluetooth!");
+        return;
+      } catch (err: any) {
+        console.error("Native Bluetooth scanning error:", err);
+        showToast(`❌ Gagal scan native: ${err.message || err.toString()}`);
+      }
+    }
+
+    // Fallback block for Web browser environments / stubs
     if (typeof navigator !== 'undefined' && 'bluetooth' in navigator) {
       try {
-        const device = await (navigator as any).bluetooth.requestDevice({
-          acceptAllDevices: true,
-          optionalServices: ['00001101-0000-1000-8000-00805f9b34fb']
-        });
-        if (device) {
-          const matchedDev = { id: device.id, name: device.name || 'Thermal Printer', paired: true };
-          setScannedDevices([matchedDev]);
-          setIsScanningBluetooth(false);
-          handleConnectDevice(matchedDev);
-          return;
+        let isAvailable = false;
+        try {
+          isAvailable = await (navigator as any).bluetooth.getAvailability();
+        } catch (_) {}
+
+        if (isAvailable) {
+          const device = await (navigator as any).bluetooth.requestDevice({
+            acceptAllDevices: true,
+            optionalServices: ['00001101-0000-1000-8000-00805f9b34fb']
+          });
+          if (device) {
+            const matchedDev = { id: device.id, name: device.name || 'Thermal Printer', paired: true };
+            setScannedDevices([matchedDev]);
+            setIsScanningBluetooth(false);
+            handleConnectDevice(matchedDev);
+            return;
+          }
         }
       } catch (err) {
         console.warn("Real Web Bluetooth scan cancelled or not permitted in iframe sandbox:", err);
       }
     }
 
-    // Pairable high fidelity physical device matching fallback 
+    // Web simulation stub fallback
     setTimeout(() => {
       setIsScanningBluetooth(false);
       setScannedDevices([
@@ -1180,42 +1467,83 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     // Priority 3: Web Bluetooth standard API (non-blocking)
     if (typeof navigator !== 'undefined' && 'bluetooth' in navigator) {
       try {
-        const device = await (navigator as any).bluetooth.requestDevice({
-          acceptAllDevices: true
-        });
-        if (device && device.name) {
-          setIsPrinterConnected(true);
-          setConnectedPrinterName(device.name);
-          localStorage.setItem('laughdry_printer_connected', 'true');
-          localStorage.setItem('laughdry_printer_name', device.name);
-          const updatedSettings = { ...settings, bluetoothPrinterAddress: device.name };
-          LaughDryDatabase.saveSettings(updatedSettings);
-          setSettings(updatedSettings);
-          showToast(`🟢 Terhubung ke ${device.name}`);
+        let isAvailable = false;
+        try {
+          isAvailable = await (navigator as any).bluetooth.getAvailability();
+        } catch (_) {}
+
+        if (isAvailable) {
+          const device = await (navigator as any).bluetooth.requestDevice({
+            acceptAllDevices: true
+          });
+          if (device && device.name) {
+            setIsPrinterConnected(true);
+            setConnectedPrinterName(device.name);
+            localStorage.setItem('laughdry_printer_connected', 'true');
+            localStorage.setItem('laughdry_printer_name', device.name);
+            const updatedSettings = { ...settings, bluetoothPrinterAddress: device.name };
+            LaughDryDatabase.saveSettings(updatedSettings);
+            setSettings(updatedSettings);
+            showToast(`🟢 Terhubung ke ${device.name}`);
+          }
         }
       } catch (subErr: any) {
         console.log("Web Bluetooth cancelled or blocked", subErr);
         const errMsg = (subErr.message || subErr.toString()).toLowerCase();
-        if (errMsg.includes("permission") || errMsg.includes("policy") || errMsg.includes("disallow") || errMsg.includes("security")) {
-          showToast("⚠️ Bluetooth dibatasi oleh kebijakan keamanan iframe AI Studio. Silakan klik 'Buka di Tab Baru' (New Tab) di pojok kanan atas!");
+        if (errMsg.includes("permission") || errMsg.includes("policy") || errMsg.includes("disallow") || errMsg.includes("security") || errMsg.includes("adapter") || errMsg.includes("not available")) {
+          showToast("⚠️ Bluetooth dibatasi atau tidak tersedia di perangkat Anda.");
         }
       }
     }
   };
 
   const handleBluetoothConnect = async () => {
-    await openBluetoothSettings();
+    // Show in-app printer popup
+    setShowBluetoothHelp(true);
+    // Start scanning immediately upon opening modal
+    startBluetoothScan();
   };
 
-  const handleConnectDevice = (dev: { id: string; name: string }) => {
+  const handleConnectDevice = async (dev: { id: string; name: string; address?: string }) => {
     setPairingDeviceId(dev.id);
     showToast(`🔌 Menyambungkan ke ${dev.name}...`);
+    
+    // Check if we can connect natively using address (MAC) on android
+    if (NativeBluetooth.isAndroid() && dev.address) {
+      try {
+        const result = await NativeBluetooth.connect(dev.address);
+        if (result && result.success) {
+          setIsPrinterConnected(true);
+          setConnectedPrinterName(dev.name);
+          localStorage.setItem('laughdry_printer_connected', 'true');
+          localStorage.setItem('laughdry_printer_name', dev.name);
+          localStorage.setItem('laughdry_printer_address', dev.address);
+          
+          const updatedSettings = { ...settings, bluetoothPrinterAddress: dev.address };
+          LaughDryDatabase.saveSettings(updatedSettings);
+          setSettings(updatedSettings);
+          showToast(`🎉 Printer ${dev.name} sukses tersambung secara native!`);
+        } else {
+          showToast(`❌ Gagal menyambung ke ${dev.name}`);
+        }
+      } catch (err: any) {
+        console.error("Native connection failed:", err);
+        showToast(`❌ Koneksi gagal: ${err.message || err.toString()}`);
+      } finally {
+        setPairingDeviceId(null);
+      }
+      return;
+    }
+
+    // Web fallback simulator / stubs
     setTimeout(() => {
       setPairingDeviceId(null);
       setIsPrinterConnected(true);
       setConnectedPrinterName(dev.name);
       localStorage.setItem('laughdry_printer_connected', 'true');
       localStorage.setItem('laughdry_printer_name', dev.name);
+      localStorage.setItem('laughdry_printer_address', dev.id);
+
       const updatedSettings = { ...settings, bluetoothPrinterAddress: dev.name };
       LaughDryDatabase.saveSettings(updatedSettings);
       setSettings(updatedSettings);
@@ -1223,12 +1551,26 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     }, 1200);
   };
 
-  const handleDisconnectDevice = () => {
+  const handleDisconnectDevice = async () => {
+    if (NativeBluetooth.isAndroid()) {
+      try {
+        await NativeBluetooth.disconnect();
+      } catch (e) {
+        console.error("Native disconnect error:", e);
+      }
+    }
+    
     setIsPrinterConnected(false);
     setConnectedPrinterName('');
     localStorage.setItem('laughdry_printer_connected', 'false');
     localStorage.setItem('laughdry_printer_name', '');
+    localStorage.setItem('laughdry_printer_address', '');
     showToast(`📴 Printer Bluetooth diputuskan.`);
+  };
+
+  const handlePrintTrigger = (invoice: Order) => {
+    setActiveInvoice(invoice);
+    setShowTemplateChoiceModal(true);
   };
 
   const redirectToWhatsApp = (order: Order) => {
@@ -1626,9 +1968,9 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     setShowCheckoutConfirmModal(false);
 
     if (isAutoPrintEnabled) {
-      setShowThermalReceiptModal(true);
+      handlePrintTrigger(newOrder);
       setShowInvoiceChoiceModal(false);
-      showToast(`🖨️ [AUTO-PRINT] Mengirim ${invoiceNum} ke printer termal POS-58 mm!`);
+      showToast(`🖨️ [AUTO-PRINT] Silakan pilih template struk untuk ${invoiceNum}!`);
     } else {
       setShowInvoiceChoiceModal(true);
     }
@@ -2151,9 +2493,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
               type="button"
               onClick={() => {
                 if (isPrinterConnected) {
-                  if (window.confirm("Apakah Anda ingin memutuskan koneksi printer Bluetooth?")) {
-                    handleDisconnectDevice();
-                  }
+                  handleDisconnectDevice();
                 } else {
                   handleBluetoothConnect();
                 }
@@ -3615,16 +3955,16 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                                   {/* Middle Row: Product/Service Details and Financial Status */}
                                   <div className="min-w-0 w-full">
                                     <p className="text-[10px] text-slate-550 font-bold truncate">
-                                      {o.items.map(it => it.serviceName).join(', ')}
+                                      {(o.items || []).map(it => it?.serviceName || '').filter(Boolean).join(', ')}
                                     </p>
                                     <div className="flex items-center gap-1 sm:gap-1.5 mt-0.5 text-[9.5px] sm:text-[10px] flex-wrap">
                                       <span className="font-black text-emerald-700 tracking-tight">
-                                        Rp {o.totalAmount.toLocaleString('id-ID')}
+                                        Rp {(o.totalAmount || 0).toLocaleString('id-ID')}
                                       </span>
                                       <span className="text-slate-350 select-none">|</span>
                                       <span className="text-slate-400 select-none">Metode:</span>
                                       <span className="font-black text-slate-700 bg-slate-100 border border-slate-200 px-1.5 py-0.2 rounded-md uppercase text-[8.5px] tracking-wide">
-                                        {o.paymentMethod}
+                                        {o.paymentMethod || '-'}
                                       </span>
                                     </div>
                                   </div>
@@ -3634,14 +3974,14 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                                     <div className="flex items-center gap-1 truncate">
                                       <span className="text-slate-400">📥</span>
                                       <span className="font-medium truncate">
-                                        Masuk: <span className="font-bold text-slate-600">{new Date(o.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })} {new Date(o.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span>
+                                        Masuk: <span className="font-bold text-slate-600">{safeDateStr(o.createdAt)} {safeTimeStr(o.createdAt)}</span>
                                       </span>
                                     </div>
                                     <span className="text-slate-300 font-bold shrink-0">➔</span>
                                     <div className="flex items-center gap-1 truncate text-right">
                                       <span className="text-slate-400">🏆</span>
                                       <span className="font-bold text-emerald-700 truncate">
-                                        Selesai: <span>{new Date(o.completedAt || o.updatedAt || o.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })} {new Date(o.completedAt || o.updatedAt || o.createdAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span>
+                                        Selesai: <span>{safeDateStr(o.completedAt || o.updatedAt || o.createdAt)} {safeTimeStr(o.completedAt || o.updatedAt || o.createdAt)}</span>
                                       </span>
                                     </div>
                                   </div>
@@ -4130,7 +4470,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                         alert("⚠️ Printer Bluetooth belum terhubung! Silakan gunakan tombol 'Sambung Bluetooth' di bagian atas layar untuk mengkoneksikan printer.");
                         return;
                       }
-                      const txt = generateTextReceipt(activeInvoice, settings, currentUser);
+                      const txt = generateTextReceipt(activeInvoice, settings, currentUser, receiptTemplateMode);
                       printToBluetoothPrinter(txt);
                     }}
                     className="flex-1 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg transition text-[10px] flex items-center justify-center gap-1.5"
@@ -4891,7 +5231,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
               <button
                 type="button"
                 onClick={() => {
-                  setShowThermalReceiptModal(true);
+                  handlePrintTrigger(activeInvoice);
                   setShowInvoiceChoiceModal(false);
                 }}
                 className="w-full flex items-center justify-between p-3.5 bg-slate-800 hover:bg-slate-900 text-white rounded-2xl transition shadow-xs text-left cursor-pointer"
@@ -4983,13 +5323,15 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                     fontSize: `${config.fontSize || 10}px`,
                   },
                   className: `${alignClass} ${weightClass} ${italicClass}`,
-                  isVisible: config.isVisible !== false,
+                  isVisible: receiptTemplateMode === 'inti'
+                    ? (config.isVisible !== false && config.isVisibleInti !== false)
+                    : (config.isVisible !== false),
                   showPrefix: config.showPrefix !== false
                 };
               };
 
               return (
-                <div className="bg-white text-slate-950 font-mono p-4 mx-auto max-w-[245px] border border-slate-300 shadow-inner rounded-md select-all">
+                <div id="thermal-receipt-paper" className="bg-white text-slate-950 font-mono p-4 mx-auto max-w-[245px] border border-slate-300 shadow-inner rounded-md select-all">
                   {/* Header logo */}
                   {settings.showHeaderLogoInReceipt && settings.customReceiptHeaderLogoImg && (
                     <div className="flex justify-center mb-2 text-center">
@@ -5023,7 +5365,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                       contentEditable={true}
                       suppressContentEditableWarning={true}
                     >
-                      TELP BRANCH: 0812-3456-7890
+                      TELP BRANCH: {settings.branchPhone || '0812-3456-7890'}
                     </div>
                   )}
                   
@@ -5217,7 +5559,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                     <>
                       <div className="border-t border-dashed border-slate-400 my-2 pt-1.5">
                         <div 
-                          className="text-center font-black text-[9px] text-rose-600 uppercase tracking-wide leading-tight bg-rose-50 p-1 rounded-lg border border-dashed border-rose-200 cursor-text hover:bg-rose-100 transition"
+                          className="text-center font-black text-[9px] text-rose-600 uppercase tracking-wide leading-tight bg-rose-50 p-1.5 rounded-lg border border-dashed border-rose-200 cursor-text hover:bg-rose-100 transition"
                           contentEditable={true}
                           suppressContentEditableWarning={true}
                         >
@@ -5291,8 +5633,20 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
               );
             })()}
 
-            {/* Actions for Bluetooth physical mock connection - Redirects to POS main view on click */}
+            {/* Actions for printing & communications */}
             <div className="flex flex-col gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  window.print();
+                  showToast("🖨️ Mengirim struk langsung ke printer sistem browser...");
+                }}
+                className="w-full py-2.5 bg-indigo-600 hover:bg-slate-950 text-white font-black rounded-xl text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-md"
+                id="btn-browser-print"
+              >
+                <Printer className="w-4 h-4 text-sky-400" /> Cetak Langsung Browser (USB/LAN/Wi-Fi/PDF)
+              </button>
+
               <button
                 type="button"
                 onClick={() => {
@@ -5300,15 +5654,15 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                     alert("⚠️ Printer Bluetooth belum terhubung! Silakan gunakan tombol 'Sambung Bluetooth' di bagian atas layar untuk mengkoneksikan printer.");
                     return;
                   }
-                  const txt = generateTextReceipt(activeInvoice, settings, currentUser);
+                  const txt = generateTextReceipt(activeInvoice, settings, currentUser, receiptTemplateMode);
                   printToBluetoothPrinter(txt);
                   setShowThermalReceiptModal(false);
                   setShowProcessSuccessModal(true);
                 }}
-                className="w-full py-2.5 bg-sky-500 hover:bg-sky-600 text-slate-950 font-black rounded-xl text-xs flex items-center justify-center gap-2 transition"
+                className="w-full py-2 bg-sky-500 hover:bg-sky-600 text-slate-950 font-extrabold rounded-xl text-xs flex items-center justify-center gap-2 transition"
                 id="btn-thermal-confirm-print"
               >
-                <Printer className="w-4 h-4" /> Mulai Cetak Fisik HP
+                <Printer className="w-3.5 h-3.5" /> Kirim ke Printer Bluetooth HP
               </button>
 
               <div className="flex gap-2">
@@ -5319,7 +5673,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                     setShowThermalReceiptModal(false);
                     setShowProcessSuccessModal(true);
                   }}
-                  className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-center text-[10px] transition flex items-center justify-center gap-1"
+                  className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-center text-[10px] transition flex items-center justify-center gap-1 cursor-pointer"
                 >
                   <Phone className="w-3.5 h-3.5" /> Kirim WA Juga
                 </button>
@@ -5330,7 +5684,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                     setShowThermalReceiptModal(false);
                     setShowProcessSuccessModal(true);
                   }}
-                  className="flex-1 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-center text-[10px] transition"
+                  className="flex-1 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-center text-[10px] transition cursor-pointer"
                 >
                   Tutup Struk
                 </button>
@@ -5341,15 +5695,96 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
         </div>
       )}
 
+      {showTemplateChoiceModal && activeInvoice && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn" id="modal-template-choice">
+          <div className="bg-white rounded-3xl p-6 max-w-sm w-full border border-slate-200 shadow-2xl space-y-4 animate-scaleIn text-center">
+            
+            {/* Header / Icon */}
+            <div className="flex flex-col items-center space-y-2">
+              <div className="w-12 h-12 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center shadow-inner">
+                <Printer className="w-6 h-6 animate-pulse" />
+              </div>
+              <h4 className="text-base font-black text-slate-850 uppercase tracking-wide">Pilih Template Struk</h4>
+              <p className="text-xs text-slate-500 max-w-[250px] leading-relaxed mx-auto">
+                Silakan tentukan versi struk thermal POS 58mm untuk dicetak ke printer.
+              </p>
+            </div>
+
+            {/* Template Buttons */}
+            <div className="space-y-3 pt-2">
+              
+              {/* Option 1: Print Full */}
+              <button
+                type="button"
+                onClick={() => {
+                  setReceiptTemplateMode('full');
+                  setShowTemplateChoiceModal(false);
+                  setShowThermalReceiptModal(true);
+                  showToast("📄 Memuat Template Print Full (Lengkap)...");
+                }}
+                className="w-full text-left p-4 rounded-2xl border border-slate-200 hover:border-indigo-500 hover:bg-slate-50/70 transition flex items-start gap-3 group cursor-pointer"
+              >
+                <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-sm shrink-0 group-hover:scale-105 transition">
+                  📄
+                </div>
+                <div className="space-y-0.5">
+                  <span className="text-xs font-extrabold text-slate-855 block group-hover:text-indigo-600 transition">Print Full (Lengkap)</span>
+                  <span className="text-[10px] text-slate-500 block leading-tight">Mencetak seluruh segmen sesuai setingan Owner.</span>
+                </div>
+              </button>
+
+              {/* Option 2: Print Inti */}
+              <button
+                type="button"
+                onClick={() => {
+                  setReceiptTemplateMode('inti');
+                  setShowTemplateChoiceModal(false);
+                  setShowThermalReceiptModal(true);
+                  showToast("⚡ Memuat Template Print Inti (Esensial)...");
+                }}
+                className="w-full text-left p-4 rounded-2xl border border-slate-200 hover:border-amber-500 hover:bg-slate-50/70 transition flex items-start gap-3 group cursor-pointer"
+              >
+                <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold text-sm shrink-0 group-hover:scale-105 transition">
+                  ⚡
+                </div>
+                <div className="space-y-0.5">
+                  <span className="text-xs font-extrabold text-slate-855 block group-hover:text-amber-600 transition">Print Inti (Esensial)</span>
+                  <span className="text-[10px] text-slate-500 block leading-tight">Hanya menampilkan data esensial untuk menghemat kertas.</span>
+                </div>
+              </button>
+
+            </div>
+
+            {/* Cancel Button */}
+            <div className="pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowTemplateChoiceModal(false);
+                  // Return back to post-checkout choice if that was where we were
+                  setShowInvoiceChoiceModal(true);
+                }}
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold rounded-xl transition cursor-pointer text-center text-xs active:scale-[0.98]"
+              >
+                Batal & Kembali
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
       {showBluetoothHelp && (
         <div className="fixed inset-0 bg-slate-900/65 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn" id="modal-bluetooth-connection-helper">
           <div className="bg-white rounded-3xl p-6 max-w-md w-full border border-slate-200 shadow-2xl space-y-4 animate-scaleIn max-h-[90vh] overflow-y-auto">
+            
+            {/* Header */}
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center">
                   <Bluetooth className="w-4 h-4 animate-pulse" />
                 </div>
-                <h4 className="text-sm font-black text-slate-850 uppercase tracking-wide">Sambung Printer Bluetooth Kasir</h4>
+                <h4 className="text-sm font-black text-slate-850 uppercase tracking-wide">Pindai & Sambung Bluetooth Printer</h4>
               </div>
               <button
                 type="button"
@@ -5360,10 +5795,10 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
               </button>
             </div>
 
-            {/* State Status Banner of Printer */}
+            {/* Current Connection Status Banner */}
             <div className={`p-4 rounded-2xl border flex items-center justify-between transition-all ${isPrinterConnected ? 'bg-emerald-50 border-emerald-150 text-emerald-800' : 'bg-red-50 border-red-150 text-red-800'}`}>
               <div className="space-y-0.5">
-                <span className="text-[10px] uppercase font-black tracking-wider text-slate-400 block">Koneksi Aktif</span>
+                <span className="text-[10px] uppercase font-black tracking-wider text-slate-400 block">Status Koneksi</span>
                 <span className="text-xs font-bold font-mono">
                   {isPrinterConnected ? `🟢 Terhubung: ${connectedPrinterName || 'Thermal POS-58'}` : '🔴 Terputus (Belum Ada)'}
                 </span>
@@ -5379,97 +5814,155 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
               )}
             </div>
 
+            {/* Scanned & Bonded Devices Section */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10.5px] uppercase font-black tracking-wider text-slate-700 block">Daftar Printer Bluetooth</span>
+                <button
+                  type="button"
+                  onClick={() => startBluetoothScan()}
+                  disabled={isScanningBluetooth}
+                  className={`px-3 py-1 text-[10px] uppercase font-black tracking-wider text-white bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 rounded-lg cursor-pointer transition flex items-center gap-1 active:scale-95`}
+                >
+                  {isScanningBluetooth ? (
+                    <>
+                      <span className="animate-spin text-xs">🌀</span> Memindai...
+                    </>
+                  ) : (
+                    "Pindai Ulang"
+                  )}
+                </button>
+              </div>
+
+              {scannedDevices.length === 0 ? (
+                <div className="text-center p-6 bg-slate-50 border border-dashed border-slate-200 rounded-2xl">
+                  <span className="text-[11px] text-slate-500 font-bold block">Tidak ada printer berpasangan atau ditemukan.</span>
+                  <span className="text-[9.5px] text-slate-400 block mt-1">Pastikan printer thermal menyala, pasangkan via pengaturan HP, atau klik tombol Pindai Ulang.</span>
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                  {scannedDevices.map((dev) => {
+                    const isConnecting = pairingDeviceId === dev.id;
+                    const isCurrent = isPrinterConnected && (connectedPrinterName === dev.name || localStorage.getItem('laughdry_printer_address') === dev.address);
+                    return (
+                      <div
+                        key={dev.id}
+                        className={`p-3 rounded-2xl border flex items-center justify-between transition ${isCurrent ? 'bg-sky-50 border-sky-200' : 'bg-white hover:bg-slate-50 border-slate-200'}`}
+                      >
+                        <div className="space-y-0.5 text-left max-w-[65%]">
+                          <span className="text-[11px] font-extrabold text-slate-800 block truncate">{dev.name}</span>
+                          {dev.address && (
+                            <span className="text-[9px] font-mono font-bold text-slate-400 block">{dev.address}</span>
+                          )}
+                          <span className={`inline-block text-[8px] font-black uppercase px-1 py-0.25 rounded ${dev.paired ? 'bg-indigo-100 text-indigo-700' : 'bg-amber-100 text-amber-700'}`}>
+                            {dev.paired ? 'Berpasangan' : 'Terdeteksi'}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleConnectDevice(dev)}
+                          disabled={isConnecting}
+                          className={`px-3 py-1.5 text-[9.5px] font-black rounded-xl transition cursor-pointer select-none ${
+                            isCurrent
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-250'
+                              : isConnecting
+                              ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                              : 'bg-slate-900 text-white hover:bg-slate-850'
+                          }`}
+                        >
+                          {isConnecting ? "Menyambung..." : isCurrent ? "Tersambung" : "Sambung"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
             {/* Manual Bluetooth Printer Configuration Card - Hubungkan via Alamat MAC */}
-            <div className="bg-white border border-slate-200 rounded-3xl p-4 space-y-3.5 shadow-sm">
+            <div className="bg-white border border-slate-200 rounded-3xl p-4 space-y-3 shadow-sm">
               <div className="flex items-center gap-1.5">
                 <span className="w-1.5 h-3 bg-indigo-600 rounded-full"></span>
-                <span className="text-[10.5px] uppercase font-black tracking-wider text-slate-700">Hubungkan via Alamat MAC Bluetooth</span>
+                <span className="text-[10.5px] uppercase font-black tracking-wider text-slate-700">Opsi Alamat MAC Manual</span>
               </div>
-              <p className="text-[10px] text-slate-500 leading-snug">
-                Gunakan ini jika printer termal Anda sudah terhubung ke HP. Masukkan kode alamat MAC printer Anda untuk meregistrasikan koneksi secara langsung.
+              <p className="text-[9.5px] text-slate-500 leading-snug">
+                Gunakan ini jika printer thermal Anda tidak muncul dalam daftar. Isi form alamat MAC printer Anda (dari menu Bluetooth HP) dan sambungkan langsung.
               </p>
-              <div className="space-y-2.5">
+              <div className="space-y-2">
                 <div className="space-y-1">
-                  <label htmlFor="input-manual-printer-name" className="text-[9px] font-black text-slate-400 uppercase tracking-wide block">Alamat MAC Bluetooth Printer:</label>
                   <input
                     type="text"
                     id="input-manual-printer-name"
-                    placeholder="Contoh: CC:3F:1D:9B:D2:4E atau 00:11:22:33:FF:EE"
+                    placeholder="Alamat MAC (Contoh: CC:3F:1D:9B:D2:4E)"
                     className="w-full text-xs font-bold font-mono text-slate-800 p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-indigo-500 outline-none transition"
                   />
                 </div>
 
-                <div className="grid grid-cols-1 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const inputEl = document.getElementById('input-manual-printer-name') as HTMLInputElement;
-                      const val = inputEl?.value?.trim()?.toUpperCase() || '';
-                      if (!val) {
-                        showToast("⚠️ Mohon inputkan Alamat MAC Printer!");
-                        return;
-                      }
-                      // A standard MAC address usually has hex chars separated by : or -
-                      const macRegex = /^([0-9A-FA-F]{2}[:-]){5}([0-9A-FA-F]{2})$|^([0-9A-FA-F]{12})$/;
-                      if (!macRegex.test(val.replace(/\s/g, ''))) {
-                        if (!window.confirm("Format Alamat MAC biasanya berupa XX:XX:XX:XX:XX:XX. Apakah Anda ingin tetap melanjutkan?")) {
-                          return;
-                        }
-                      }
-                      const customDev = { id: `manual-${Date.now()}`, name: val };
-                      handleConnectDevice(customDev);
-                    }}
-                    className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition cursor-pointer shadow-sm active:scale-[0.98] select-none flex items-center justify-center gap-1.5"
-                  >
-                    💾 Hubungkan Alamat MAC Printer
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => connectWebBluetooth()}
-                    className="w-full py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-extrabold text-[10px] uppercase tracking-wider rounded-xl transition cursor-pointer border border-blue-200 flex items-center justify-center gap-1.5 active:scale-[0.98] select-none"
-                    id="btn-scan-nearby-devices"
-                  >
-                    <Bluetooth className="w-3.5 h-3.5" />
-                    🔍 Pindai Perangkat Terdekat (Bluetooth LE)
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-3.5 text-xs text-slate-700 leading-relaxed font-medium text-left">
-              <div className="pt-2 flex flex-col gap-2">
                 <button
                   type="button"
                   onClick={() => {
-                    const androidIntents = [
-                      'intent:#Intent;action=android.settings.BLUETOOTH_SETTINGS;category=android.intent.category.DEFAULT;end',
-                      'intent:#Intent;action=android.settings.BLUETOOTH_SETTINGS;end',
-                      'intent://settings/bluetooth'
-                    ];
-                    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
-                    if (isIOS) {
-                      window.location.href = 'App-Prefs:root=Bluetooth';
-                    } else {
-                      for (const intent of androidIntents) {
-                        try { window.location.href = intent; } catch(err){}
-                      }
+                    const inputEl = document.getElementById('input-manual-printer-name') as HTMLInputElement;
+                    const val = inputEl?.value?.trim()?.toUpperCase() || '';
+                    if (!val) {
+                      showToast("⚠️ Mohon inputkan Alamat MAC Printer!");
+                      return;
                     }
-                    showToast("🔄 Mengulangi pengalihan Bluetooth...");
+                    const customDev = { id: `manual-${Date.now()}`, name: `Printer Manual`, address: val, paired: true };
+                    handleConnectDevice(customDev);
                   }}
-                  className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-xl transition cursor-pointer text-center flex items-center justify-center gap-1.5 active:scale-95 shadow-sm text-xs"
+                  className="w-full py-2 bg-slate-950 hover:bg-slate-850 text-white font-extrabold text-[9.5px] uppercase tracking-wider rounded-xl transition cursor-pointer shadow-sm active:scale-[0.98] select-none flex items-center justify-center gap-1"
                 >
-                  <Bluetooth className="w-4 h-4" /> Ulangi Pindah Bluetooth
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowBluetoothHelp(false)}
-                  className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold rounded-xl transition cursor-pointer text-center text-xs active:scale-95"
-                >
-                  Saya Mengerti, Tutup Panduan
+                  💾 Sambung Alamat MAC
                 </button>
               </div>
             </div>
+
+            {/* JAMINAN INTEGRASI & DIAGNOSTIK BLUETOOTH HP ANDROID */}
+            <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-3.5 space-y-1.5 text-left font-sans">
+              <div className="flex items-center gap-1.5 text-amber-800">
+                <span className="text-xs">💡</span>
+                <span className="text-[10px] uppercase font-black tracking-wider">Tips Sukses Koneksi Bluetooth Android:</span>
+              </div>
+              <ul className="text-[9px] text-amber-900 leading-normal list-decimal pl-3.5 space-y-1 font-semibold">
+                <li><b className="text-amber-950">Nyalakan Bluetooth & Layanan Lokasi (GPS):</b> OS Android mewajibkan izin GPS aktif agar Browser Chrome dapat mendeteksi printer Bluetooth di sekitar.</li>
+                <li><b className="text-amber-950">Sandingkan (Pairing) Terlebih Dahulu:</b> Cari printer thermal Anda di Sistem Bluetooth HP Anda (cth: <i>H-58</i>, <i>PT-210</i>, <i>MTP-2</i>), masukkan pin pasang <b>1234</b> atau <b>0000</b>.</li>
+                <li>Setelah printer berpasangan di sistem HP, klik <b>Pindai Ulang</b> di atas, printer akan otomatis terdeteksi dan terintegrasi penuh!</li>
+              </ul>
+            </div>
+
+            {/* Android Bluetooth System Settings Trigger */}
+            <div className="pt-2 border-t border-slate-100 flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const androidIntents = [
+                    'intent:#Intent;action=android.settings.BLUETOOTH_SETTINGS;category=android.intent.category.DEFAULT;end',
+                    'intent:#Intent;action=android.settings.BLUETOOTH_SETTINGS;end',
+                    'intent://settings/bluetooth'
+                  ];
+                  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+                  if (isIOS) {
+                    window.location.href = 'App-Prefs:root=Bluetooth';
+                  } else {
+                    for (const intent of androidIntents) {
+                      try { window.location.href = intent; } catch(err){}
+                    }
+                  }
+                  showToast("🔄 Membuka Menu Bluetooth HP Anda...");
+                }}
+                className="w-full py-2.5 bg-blue-500 hover:bg-blue-600 text-white font-extrabold rounded-xl transition cursor-pointer text-center flex items-center justify-center gap-1 shadow-sm text-xs"
+              >
+                <Bluetooth className="w-4 h-4" /> Buka Menu Bluetooth HP
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowBluetoothHelp(false)}
+                className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold rounded-xl transition cursor-pointer text-center text-xs active:scale-95"
+              >
+                Tutup Jendela
+              </button>
+            </div>
+
           </div>
         </div>
       )}
@@ -5512,7 +6005,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                 type="button"
                 onClick={() => {
                   setShowProcessSuccessModal(false);
-                  setShowThermalReceiptModal(true);
+                  handlePrintTrigger(activeInvoice);
                 }}
                 className="w-full py-2.5 bg-sky-50 text-sky-800 hover:bg-sky-100 border border-sky-200 font-extrabold rounded-xl text-center text-xs transition cursor-pointer flex items-center justify-center gap-1.5"
               >
@@ -5816,8 +6309,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
               <button
                 type="button"
                 onClick={() => {
-                  setActiveInvoice(showOrderDetailModal);
-                  setShowThermalReceiptModal(true);
+                  handlePrintTrigger(showOrderDetailModal);
                   setShowOrderDetailModal(null);
                 }}
                 className="w-full py-2.5 bg-sky-50 border border-sky-200 text-sky-850 hover:bg-sky-100 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"

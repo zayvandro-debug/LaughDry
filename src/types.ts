@@ -162,6 +162,7 @@ export interface SystemSettings {
   pointsMultiplier: number; // e.g., 1 point per 10,005 IDR spent
   pointsValue: number; // e.g., 1 point = 100 IDR discount contribution
   bluetoothPrinterAddress: string;
+  branchPhone?: string;
   showNotesInReceipt?: boolean;
   showPointsInReceipt?: boolean;
   showBranchPhone?: boolean;
@@ -204,6 +205,7 @@ export interface ReceiptElementStyle {
   isVisible: boolean;
   showPrefix?: boolean; // True by default. If false, prefix (e.g. "Cust:") is hidden
   isItalic?: boolean;   // Support italic stylized font modifier
+  isVisibleInti?: boolean; // True if printed in "Print Inti" template option
 }
 
 export interface AttendanceRecord {
