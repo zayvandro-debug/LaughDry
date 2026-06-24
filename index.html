@@ -7,6 +7,46 @@
     <link rel="manifest" href="/manifest.json" />
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3003/3003984.png" />
 
+    <script>
+      // Global error handlers to silence cross-origin "Script error." and other benign warnings early
+      window.onerror = function (message, source, lineno, colno, error) {
+        var msg = String(message || '').toLowerCase();
+        if (
+          msg === 'script error.' ||
+          msg.includes('script error') ||
+          msg.includes('resizeobserver') ||
+          msg.includes('loop completed') ||
+          msg.includes('loop limit exceeded') ||
+          msg.includes('quota') ||
+          msg.includes('resource-exhausted') ||
+          msg.includes('limit exceeded') ||
+          msg.includes('exhausted')
+        ) {
+          console.warn("Silenced benign error via window.onerror:", message);
+          return true; // Prevents the error from propagating further
+        }
+      };
+
+      window.addEventListener('unhandledrejection', function (e) {
+        var reason = e.reason;
+        var msg = String(reason && reason.message ? reason.message : (reason || '')).toLowerCase();
+        if (
+          msg === 'script error.' ||
+          msg.includes('script error') ||
+          msg.includes('quota') ||
+          msg.includes('resource-exhausted') ||
+          msg.includes('limit exceeded') ||
+          msg.includes('exhausted')
+        ) {
+          try {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+          } catch (err) {}
+          console.warn("Silenced benign unhandled rejection:", msg);
+        }
+      }, true);
+    </script>
+
     <title>LaughDry - Cloud POS & Laundry Tracker</title>
   </head>
   <body>

@@ -193,6 +193,197 @@ const safeTimeStr = (dateVal: any, fallbackStr = '--:--') => {
   }
 };
 
+const cleanAndMapTextForThermal = (text: string): string => {
+  if (!text) return "";
+  const mapping: { [key: string]: string } = {
+    "✨": "+",
+    "🌸": "*",
+    "⭐": "*",
+    "🌟": "*",
+    "💫": "*",
+    "🍀": "~",
+    "🌿": "~",
+    "🌱": "~",
+    "🔥": "!",
+    "📢": "PROMO: ",
+    "💧": "@",
+    "🫧": "o",
+    "❤️": "<3",
+    "💖": "<3",
+    "☕": "#",
+    "🍬": "+",
+    "🍊": "o",
+    "🍋": "o",
+    "🍓": "*",
+    "🍏": "o",
+    "🍎": "o",
+    "🍇": "o",
+    "🍉": "o",
+    "🍍": "#",
+    "🥥": "o",
+    "🥝": "o",
+    "🧁": "+",
+    "🍯": "+",
+    "🍼": "i",
+    "🧸": "x",
+    "🎈": "o",
+    "🎉": "*",
+    "🎊": "*",
+    "🎁": "[ ]",
+    "🛒": "[ ]",
+    "🧼": "o",
+    "🧴": "i",
+    "🪥": "/",
+    "🧹": "/",
+    "🧺": "[ ]",
+    "👚": "Y",
+    "👕": "T",
+    "👖": "H",
+    "👔": "T",
+    "👗": "A",
+    "👘": "X",
+    "🧥": "A",
+    "🥼": "H",
+    "🧦": "J",
+    "🧤": "W",
+    "🧣": "S",
+    "👒": "O",
+    "🎩": "U",
+    "👑": "M",
+    "🎒": "H",
+    "💼": "[ ]",
+    "👝": "[ ]",
+    "👛": "[ ]",
+    "👜": "[ ]",
+    "🕶️": "X",
+    "👓": "X",
+    "👢": "L",
+    "👞": "L",
+    "👟": "L",
+    "🥿": "L",
+    "👠": "L",
+    "👡": "L",
+    "💵": "$",
+    "💴": "$",
+    "💶": "$",
+    "💷": "$",
+    "💸": "$",
+    "🪙": "o",
+    "💰": "$",
+    "💳": "[ ]",
+    "💎": "v",
+    "🔔": "o",
+    "🔕": "x",
+    "🎵": "o",
+    "🎶": "o",
+    "🎙️": "o",
+    "🎚️": "=",
+    "🎛️": "o",
+    "🎤": "o",
+    "🎧": "H",
+    "📻": "[ ]",
+    "🎷": "J",
+    "🪗": "#",
+    "🎸": "/",
+    "🎹": "#",
+    "🎺": "C",
+    "violin": "/",
+    "🪕": "/",
+    "🥁": "O",
+    "🪘": "O",
+    "📱": "[ ]",
+    "📲": "[ ]",
+    "☎️": "T",
+    "📞": "T",
+    "📟": "T",
+    "📠": "T",
+    "🔋": "[ ]",
+    "🪫": "[ ]",
+    "🔌": "Y",
+    "💻": "[ ]",
+    "🖥️": "[ ]",
+    "🖨️": "[ ]",
+    "keyboard": "[ ]",
+    "mouse": "o",
+    "🖲️": "o",
+    "🗜️": "H",
+    "💽": "[ ]",
+    "💾": "[ ]",
+    "💿": "O",
+    "DVD": "O",
+    "🧮": "#"
+  };
+
+  let cleaned = text;
+  Object.keys(mapping).forEach(emoji => {
+    cleaned = cleaned.replaceAll(emoji, mapping[emoji]);
+  });
+  return cleaned.replace(/[^\x00-\x7F]/g, "");
+};
+
+const convertBase64LogoToEscPos = (dataUrl: string): Promise<Uint8Array | null> => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const width = img.width;
+      const height = img.height;
+      
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(null);
+        return;
+      }
+      
+      ctx.drawImage(img, 0, 0, width, height);
+      const imgData = ctx.getImageData(0, 0, width, height);
+      const data = imgData.data;
+      
+      const widthBytes = Math.ceil(width / 8);
+      const escposData: number[] = [];
+      
+      // GS v 0 m xL xH yL yH
+      escposData.push(29, 118, 48, 0);
+      escposData.push(widthBytes % 256, Math.floor(widthBytes / 256));
+      escposData.push(height % 256, Math.floor(height / 256));
+      
+      for (let y = 0; y < height; y++) {
+        for (let xByte = 0; xByte < widthBytes; xByte++) {
+          let byteVal = 0;
+          for (let bit = 0; bit < 8; bit++) {
+            const x = xByte * 8 + bit;
+            if (x < width) {
+              const idx = (y * width + x) * 4;
+              const r = data[idx];
+              const g = data[idx + 1];
+              const b = data[idx + 2];
+              const a = data[idx + 3];
+              
+              if (a < 128) {
+                // transparent -> white
+              } else {
+                const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
+                if (luminance < 128) {
+                  byteVal |= (1 << (7 - bit));
+                }
+              }
+            }
+          }
+          escposData.push(byteVal);
+        }
+      }
+      
+      resolve(new Uint8Array(escposData));
+    };
+    img.onerror = () => {
+      resolve(null);
+    };
+    img.src = dataUrl;
+  });
+};
+
 interface EmployeeConsoleProps {
   loggedInUser?: any;
   onLogout?: () => void;
@@ -254,6 +445,8 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   const [showInvoiceChoiceModal, setShowInvoiceChoiceModal] = useState(false);
   const [showThermalReceiptModal, setShowThermalReceiptModal] = useState(false);
   const [receiptTemplateMode, setReceiptTemplateMode] = useState<'full' | 'inti'>('full');
+  const [tempSpacing, setTempSpacing] = useState<number>(8);
+
   const [showTemplateChoiceModal, setShowTemplateChoiceModal] = useState<boolean>(false);
   const [isAutoPrintEnabled, setIsAutoPrintEnabled] = useState<boolean>(() => {
     return localStorage.getItem('laughdry_autoprint_enabled') !== 'false';
@@ -532,15 +725,49 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   };
 
   const printToBluetoothPrinter = async (receiptText: string) => {
-    if (bluetoothCharacteristicRef.current) {
-      try {
+    try {
+      // 1. Clean the text using our ASCII mapping & sanitizer
+      const cleanedText = cleanAndMapTextForThermal(receiptText);
+      
+      // 2. Prepare the payload buffer
+      let logoBytes: Uint8Array | null = null;
+      if (settings.showHeaderLogoInReceipt && settings.customReceiptHeaderLogoImg) {
+        logoBytes = await convertBase64LogoToEscPos(settings.customReceiptHeaderLogoImg);
+      }
+      
+      const encoder = new TextEncoder();
+      const textBytes = encoder.encode(cleanedText);
+      
+      // Init command (ESC @): 27, 64
+      const initBytes = new Uint8Array([27, 64]);
+      
+      // Paper cut/feed command (GS V 66 0): 29, 86, 66, 0 (adds some space and cuts)
+      const feedBytes = new Uint8Array([10, 10, 10, 29, 86, 66, 0]);
+      
+      let finalBytes: Uint8Array;
+      if (logoBytes) {
+        const totalLen = initBytes.length + logoBytes.length + 1 + textBytes.length + feedBytes.length;
+        finalBytes = new Uint8Array(totalLen);
+        let offset = 0;
+        finalBytes.set(initBytes, offset); offset += initBytes.length;
+        finalBytes.set(logoBytes, offset); offset += logoBytes.length;
+        finalBytes[offset] = 10; offset += 1;
+        finalBytes.set(textBytes, offset); offset += textBytes.length;
+        finalBytes.set(feedBytes, offset);
+      } else {
+        const totalLen = initBytes.length + textBytes.length + feedBytes.length;
+        finalBytes = new Uint8Array(totalLen);
+        let offset = 0;
+        finalBytes.set(initBytes, offset); offset += initBytes.length;
+        finalBytes.set(textBytes, offset); offset += textBytes.length;
+        finalBytes.set(feedBytes, offset);
+      }
+
+      if (bluetoothCharacteristicRef.current) {
         showToast("📤 Mengirim data cetak thermal ke printer...");
-        const encoder = new TextEncoder();
-        const data = encoder.encode(receiptText);
-        
         const CHUNK_SIZE = 512;
-        for (let i = 0; i < data.length; i += CHUNK_SIZE) {
-          const chunk = data.slice(i, i + CHUNK_SIZE);
+        for (let i = 0; i < finalBytes.length; i += CHUNK_SIZE) {
+          const chunk = finalBytes.slice(i, i + CHUNK_SIZE);
           if (bluetoothCharacteristicRef.current.writeValueWithoutResponse) {
             await bluetoothCharacteristicRef.current.writeValueWithoutResponse(chunk);
           } else {
@@ -548,14 +775,24 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
           }
         }
         showToast("✅ Struk fisik berhasil dicetak!");
-      } catch (err: any) {
-        console.error("Gagal mengirim data cetak:", err);
-        showToast(`⚠️ Kegagalan printer fisik: ${err.message || 'Error RFCOMM Bluetooth'}. Disimulasikan.`);
-        alert(`🖨️ [Simulasi Cetak POS-58] Mengirim data cetak ke ${connectedPrinterName}:\n\n${receiptText}`);
+      } else {
+        showToast("🖨️ Mencetak struk ke printer Bluetooth (Tersimulasi)...");
+        let simulationHeader = "";
+        if (settings.showHeaderLogoInReceipt && settings.customReceiptHeaderLogoImg) {
+          simulationHeader = "[LOGO TERCETAK ( THERMAL RESOLUTION 160px )]\n";
+        }
+        alert(`🖨️ [Simulasi Cetak POS-58] Mengirim data ke ${connectedPrinterName || 'Thermal Printer'}:\n\n${simulationHeader}${cleanedText}`);
       }
-    } else {
-      showToast("🖨️ Mencetak struk ke printer Bluetooth (Tersimulasi)...");
-      alert(`🖨️ [Simulasi Cetak POS-58] Mengirim data cetak ke ${connectedPrinterName || 'Thermal Printer'}:\n\n${receiptText}`);
+    } catch (err: any) {
+      console.error("Gagal mengirim data cetak:", err);
+      showToast(`⚠️ Kegagalan printer fisik: ${err.message || 'Error RFCOMM Bluetooth'}. Disimulasikan.`);
+      
+      const cleanedText = cleanAndMapTextForThermal(receiptText);
+      let simulationHeader = "";
+      if (settings.showHeaderLogoInReceipt && settings.customReceiptHeaderLogoImg) {
+        simulationHeader = "[LOGO TERCETAK ( THERMAL RESOLUTION 160px )]\n";
+      }
+      alert(`🖨️ [Simulasi Cetak POS-58] Mengirim data cetak ke ${connectedPrinterName}:\n\n${simulationHeader}${cleanedText}`);
     }
   };
 
@@ -760,6 +997,12 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   const [editingOrderItemsQty, setEditingOrderItemsQty] = useState<{[itemId: string]: number}>({});
   const [editingOrderItems, setEditingOrderItems] = useState<OrderItem[]>([]);
   const [settings, setSettings] = useState<any>(LaughDryDatabase.getSettings());
+
+  useEffect(() => {
+    if (settings?.elementSpacing !== undefined) {
+      setTempSpacing(settings.elementSpacing);
+    }
+  }, [settings?.elementSpacing, showThermalReceiptModal]);
 
   // Delete & Transition Confirm Modals
   const [showDeleteConfirmOrderModal, setShowDeleteConfirmOrderModal] = useState(false);
@@ -1412,16 +1655,10 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       }
     }
 
-    // Web simulation stub fallback
+    // Non-native environment scan finish (Real scanning is done on actual hardware)
     setTimeout(() => {
       setIsScanningBluetooth(false);
-      setScannedDevices([
-        { id: 'dev-1', name: 'PT-210 Mobile Thermal Printer', paired: true },
-        { id: 'dev-2', name: 'MTP-2 Mini Thermal Printer 58mm', paired: true },
-        { id: 'dev-3', name: 'RPP02N Bluetooth Printer', paired: true },
-        { id: 'dev-4', name: 'POS-58 Printer Thermal', paired: true }
-      ]);
-    }, 1200);
+    }, 1000);
   };
 
   const openBluetoothSettings = async () => {
@@ -1535,7 +1772,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       return;
     }
 
-    // Web fallback simulator / stubs
+    // Web fallback (Saves configuration manually)
     setTimeout(() => {
       setPairingDeviceId(null);
       setIsPrinterConnected(true);
@@ -1544,11 +1781,11 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       localStorage.setItem('laughdry_printer_name', dev.name);
       localStorage.setItem('laughdry_printer_address', dev.id);
 
-      const updatedSettings = { ...settings, bluetoothPrinterAddress: dev.name };
+      const updatedSettings = { ...settings, bluetoothPrinterAddress: dev.id };
       LaughDryDatabase.saveSettings(updatedSettings);
       setSettings(updatedSettings);
-      showToast(`🖨️ Printer ${dev.name} berhasil terhubung!`);
-    }, 1200);
+      showToast(`🖨️ Alamat printer ${dev.name} berhasil disimpan!`);
+    }, 1000);
   };
 
   const handleDisconnectDevice = async () => {
@@ -2401,8 +2638,9 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     const currentBranch = branches.find(b => b.id === order.branchId) || branches[0];
 
     const systemSettings = LaughDryDatabase.getSettings();
-    const vercelBase = (systemSettings.vercelTrackingUrl || 'https://laughdry.vercel.app').replace(/\/$/, '');
-    const finalTrackingUrl = `${vercelBase}/?phone=${encodeURIComponent(order.customerPhone)}&invoice=${encodeURIComponent(order.invoiceNumber)}`;
+    const vercelBase = (systemSettings.vercelTrackingUrl && systemSettings.vercelTrackingUrl !== 'https://laughdry.vercel.app' ? systemSettings.vercelTrackingUrl : window.location.origin).replace(/\/$/, '');
+    const ownerUid = localStorage.getItem('laughdry_firebase_uid') || '';
+    const finalTrackingUrl = `${vercelBase}/?phone=${encodeURIComponent(order.customerPhone)}&invoice=${encodeURIComponent(order.invoiceNumber)}${ownerUid ? `&owner=${encodeURIComponent(ownerUid)}` : ''}`;
 
     return defaultTemplate.body
       .replace(/\{\{customer_name\}\}/g, order.customerName)
@@ -5285,13 +5523,48 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
             </div>
 
             {/* Interactive editing instruction banner */}
-            <div className="bg-slate-800/80 border border-amber-500/30 rounded-2xl p-3 space-y-1">
-              <span className="text-[9.5px] uppercase tracking-wider font-black text-amber-400 flex items-center gap-1">
-                ✍️ Mode Ketik & Edit Aktif
-              </span>
+            <div className="bg-slate-800/80 border border-amber-500/30 rounded-2xl p-3 space-y-2">
+              <div className="flex items-center gap-1">
+                <span className="text-[9.5px] uppercase tracking-wider font-black text-amber-400">
+                  ✍️ Mode Ketik & Edit Aktif
+                </span>
+              </div>
               <p className="text-[10px] text-slate-300 leading-normal font-semibold">
                 Anda bisa mengetik atau mengubah langsung teks apa saja di dalam kwitansi putih di bawah sebelum melakukan pencetakan fisik!
               </p>
+              
+              {/* Spacing Control Slider */}
+              <div className="border-t border-slate-700/60 pt-2.5 mt-1 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[9.5px] uppercase tracking-wider font-black text-sky-400 flex items-center gap-1">
+                    📏 Jarak Antar Elemen:
+                  </span>
+                  <span className="text-[9.5px] text-slate-300 font-mono font-bold bg-slate-950 px-1.5 py-0.5 rounded">{tempSpacing}px</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min="0"
+                    max="24"
+                    step="1"
+                    value={tempSpacing}
+                    onChange={(e) => setTempSpacing(Number(e.target.value))}
+                    className="flex-1 accent-sky-400 cursor-pointer h-1 bg-slate-700 rounded-lg appearance-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updated = { ...settings, elementSpacing: tempSpacing };
+                      LaughDryDatabase.saveSettings(updated);
+                      setSettings(updated);
+                      showToast("💾 Jarak elemen disimpan sebagai template kustom!");
+                    }}
+                    className="bg-sky-500 hover:bg-sky-450 text-slate-950 font-black text-[9px] px-2 py-1 rounded transition whitespace-nowrap active:scale-95"
+                  >
+                    💾 Simpan Template
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* Realistic 58mm POS physical viewport simulation */}
@@ -5350,7 +5623,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                     return (
                       <div 
                         style={s.style} 
-                        className={`uppercase tracking-tight whitespace-pre-line mb-1.5 border border-transparent hover:border-slate-300 hover:bg-slate-50 p-0.5 rounded cursor-text ${s.className}`}
+                        className={`uppercase tracking-tight whitespace-pre-line border border-transparent hover:border-slate-300 hover:bg-slate-50 p-0.5 rounded cursor-text ${s.className}`}
                         contentEditable={true}
                         suppressContentEditableWarning={true}
                       >
@@ -5361,7 +5634,8 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
 
                   {settings.showBranchPhone && (
                     <div 
-                      className="font-bold text-slate-700 text-center text-[8.5px] mb-1 border border-transparent hover:border-slate-300 hover:bg-slate-50 p-0.5 rounded cursor-text"
+                      className="font-bold text-slate-700 text-center text-[8.5px] border border-transparent hover:border-slate-300 hover:bg-slate-50 p-0.5 rounded cursor-text"
+                      style={{ marginTop: `${tempSpacing / 2}px` }}
                       contentEditable={true}
                       suppressContentEditableWarning={true}
                     >
@@ -5369,7 +5643,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                     </div>
                   )}
                   
-                  <div className="border-t border-dashed border-slate-400 my-2"></div>
+                  <div className="border-t border-dashed border-slate-400" style={{ marginTop: `${tempSpacing}px`, marginBottom: `${tempSpacing}px` }}></div>
                   
                   {/* Transaction info block - Fully Editable */}
                   <div 
@@ -5464,7 +5738,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                     if (!s.isVisible) return null;
                     return (
                       <>
-                        <div className="border-t border-dashed border-slate-400 my-2"></div>
+                        <div className="border-t border-dashed border-slate-400" style={{ marginTop: `${tempSpacing}px`, marginBottom: `${tempSpacing}px` }}></div>
                         <div 
                           style={s.style} 
                           className={`space-y-2 border border-transparent hover:border-slate-300 hover:bg-slate-50 p-0.5 rounded cursor-text ${s.className}`}
@@ -5491,7 +5765,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                     if (!s.isVisible) return null;
                     return (
                       <>
-                        <div className="border-t border-dashed border-slate-400 my-2"></div>
+                        <div className="border-t border-dashed border-slate-400" style={{ marginTop: `${tempSpacing}px`, marginBottom: `${tempSpacing}px` }}></div>
                         <div 
                           style={s.style} 
                           className={`space-y-1 text-slate-950 border border-transparent hover:border-slate-300 hover:bg-slate-50 p-0.5 rounded cursor-text ${s.className}`}
@@ -5538,7 +5812,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                     if (!s.isVisible || !settings.showTermsInReceipt) return null;
                     return (
                       <>
-                        <div className="border-t border-dashed border-slate-400 my-2"></div>
+                        <div className="border-t border-dashed border-slate-450" style={{ marginTop: `${tempSpacing}px`, marginBottom: `${tempSpacing}px` }}></div>
                         <div 
                           style={s.style} 
                           className={`whitespace-pre-line leading-tight text-slate-750 border border-transparent hover:border-slate-300 hover:bg-slate-50 p-0.5 rounded cursor-text ${s.className}`}
@@ -5557,7 +5831,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                   {/* CUSTOM RECEIPT PROMOTIONAL FOOTER BLOCK */}
                   {settings.customReceiptPromo && (
                     <>
-                      <div className="border-t border-dashed border-slate-400 my-2 pt-1.5">
+                      <div className="border-t border-dashed border-slate-400" style={{ marginTop: `${tempSpacing}px`, paddingTop: '6px' }}>
                         <div 
                           className="text-center font-black text-[9px] text-rose-600 uppercase tracking-wide leading-tight bg-rose-50 p-1.5 rounded-lg border border-dashed border-rose-200 cursor-text hover:bg-rose-100 transition"
                           contentEditable={true}
@@ -5571,7 +5845,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
 
                   {/* QRIS PAYMENT AUTOPRINT ON RECEIPT */}
                   {settings.qrisType && settings.qrisType !== 'none' && (
-                    <div className="border-t border-dashed border-slate-400 my-2 pt-2 flex flex-col items-center">
+                    <div className="border-t border-dashed border-slate-400 pt-2 flex flex-col items-center" style={{ marginTop: `${tempSpacing}px` }}>
                       <span className="text-[7.5px] font-black text-slate-850 tracking-wider">
                         {settings.qrisType === 'static' ? 'SCAN QRIS STATIS' : 'SCAN QRIS DINAMIS'}
                       </span>

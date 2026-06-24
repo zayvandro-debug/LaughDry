@@ -11,10 +11,9 @@ import {
   getRedirectResult,
   sendPasswordResetEmail
 } from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { Mail, Lock, User as UserIcon, LogIn, UserPlus, Info, Sparkles, CheckCircle, Network, Link2, Unlink, Copy, Check, Shirt, Droplet, Camera, RotateCcw, Upload } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { auth, db } from '../lib/firebase';
+import { auth, db, isFirebaseQuotaExceeded, setFirebaseQuotaExceeded, doc, setDoc, getDoc } from '../lib/firebase';
 import logoImg from '../assets/images/logo_laughdry_1781839107009.jpg';
 
 const isWebView = () => {
@@ -165,13 +164,21 @@ export default function FirebaseGate({ onSignedIn }: FirebaseGateProps) {
 
   // Helper to register mapping from email to user uid
   const registerEmailMapping = async (user: User) => {
+    if (isFirebaseQuotaExceeded()) {
+      console.warn("Firebase quota exceeded, skipping registerEmailMapping.");
+      return;
+    }
     if (user && user.email) {
       try {
         const emailClean = user.email.toLowerCase().trim();
         await setDoc(doc(db, 'email_mappings', emailClean), { uid: user.uid }, { merge: true });
         console.log("Email mapping registered successfully:", emailClean, "->", user.uid);
-      } catch (e) {
+      } catch (e: any) {
         console.warn("Failed to register email mapping (non-fatal info):", e);
+        const errMsg = (e?.message || '').toLowerCase();
+        if (errMsg.includes('quota') || errMsg.includes('resource-exhausted') || errMsg.includes('exhausted') || errMsg.includes('limit exceeded')) {
+          setFirebaseQuotaExceeded();
+        }
       }
     }
   };
@@ -200,6 +207,9 @@ export default function FirebaseGate({ onSignedIn }: FirebaseGateProps) {
     }
 
     try {
+      if (isFirebaseQuotaExceeded()) {
+        throw new Error('Firebase quota limit exceeded. Silakan gunakan ID database langsung!');
+      }
       const mappingRef = doc(db, 'email_mappings', emailInput);
       const mappingSnap = await getDoc(mappingRef);
       if (mappingSnap.exists()) {
@@ -217,7 +227,13 @@ export default function FirebaseGate({ onSignedIn }: FirebaseGateProps) {
       }
     } catch (err: any) {
       console.warn("Mapping fetch error (non-fatal info):", err);
-      setMappingError('Gagal memeriksa database cloud. Pastikan Anda terhubung ke internet.');
+      const errMsg = (err?.message || '').toLowerCase();
+      if (errMsg.includes('quota') || errMsg.includes('resource-exhausted') || errMsg.includes('exhausted') || errMsg.includes('limit exceeded')) {
+        setFirebaseQuotaExceeded();
+        setMappingError('Koneksi database atau kuota harian cloud server penuh/terlampaui. Silakan gunakan ID database (UID) di atas secara langsung.');
+      } else {
+        setMappingError('Gagal memeriksa database cloud. Pastikan Anda terhubung ke internet.');
+      }
     } finally {
       setMappingLoading(false);
     }

@@ -21,8 +21,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { Capacitor } from '@capacitor/core';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
-import { auth, db } from './lib/firebase';
+import { auth, db, isFirebaseQuotaExceeded, setFirebaseQuotaExceeded, doc, setDoc } from './lib/firebase';
 import FirebaseGate from './components/FirebaseGate';
 import OwnerDashboard from './components/OwnerDashboard';
 import EmployeeConsole from './components/EmployeeConsole';
@@ -34,6 +33,10 @@ import { LaughDryDatabase } from './data/mockDatabase';
 export default function App() {
   const [isAndroidApp] = useState<boolean>(() => {
     return Capacitor.isNativePlatform() || window.location.search.includes('platform=android');
+  });
+  const [isCustomerOnly] = useState<boolean>(() => {
+    const queryParams = new URLSearchParams(window.location.search);
+    return queryParams.has('phone') || queryParams.has('invoice');
   });
   const [activeConsole, setActiveConsole] = useState<'owner' | 'karyawan' | 'pelanggan'>(() => {
     const queryParams = new URLSearchParams(window.location.search);
@@ -114,37 +117,59 @@ export default function App() {
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setFirebaseUser(user);
-      if (user) {
-        localStorage.setItem('laughdry_firebase_uid', user.uid);
-        // Automatically save email mappings so other devices are linked easily via owner's Gmail
-        if (user.email) {
-          try {
-            const emailClean = user.email.toLowerCase().trim();
-            await setDoc(doc(db, 'email_mappings', emailClean), { uid: user.uid }, { merge: true });
-          } catch (e) {
-            console.warn("Failed mapping write on state change (non-fatal info):", e);
-          }
-        }
-        // If login registers a brand new owner name, inject it as owner's display name
-        const customName = localStorage.getItem('laughdry_owner_name_registered');
-        if (customName) {
-          const users = LaughDryDatabase.getUsers();
-          const ownerObj = users.find(u => u.role === 'owner');
-          if (ownerObj) {
-            ownerObj.name = customName;
-            LaughDryDatabase.saveUsers(users);
-          }
-          localStorage.removeItem('laughdry_owner_name_registered');
+      
+      const queryParams = new URLSearchParams(window.location.search);
+      const ownerParam = queryParams.get('owner');
+      
+      if (user || ownerParam) {
+        if (ownerParam) {
+          localStorage.setItem('laughdry_firebase_uid', ownerParam);
+        } else if (user) {
+          localStorage.setItem('laughdry_firebase_uid', user.uid);
         }
         
-        setIsSyncing(true);
-        await LaughDryDatabase.syncFromFirestore();
-        LaughDryDatabase.startRealtimeListeners();
-        setIsSyncing(false);
-        setSettings(LaughDryDatabase.getSettings());
+        // Run auth setup and background sync asynchronously to keep UI fast and interactive
+        (async () => {
+          try {
+            // Automatically save email mappings so other devices are linked easily via owner's Gmail
+            if (user && user.email && !isFirebaseQuotaExceeded()) {
+              try {
+                const emailClean = user.email.toLowerCase().trim();
+                await setDoc(doc(db, 'email_mappings', emailClean), { uid: user.uid }, { merge: true });
+              } catch (e: any) {
+                console.warn("Failed mapping write on state change (non-fatal info):", e);
+                const errMsg = (e?.message || '').toLowerCase();
+                if (errMsg.includes('quota') || errMsg.includes('resource-exhausted') || errMsg.includes('exhausted') || errMsg.includes('limit exceeded')) {
+                  setFirebaseQuotaExceeded();
+                }
+              }
+            }
+            // If login registers a brand new owner name, inject it as owner's display name
+            const customName = localStorage.getItem('laughdry_owner_name_registered');
+            if (customName) {
+              const users = LaughDryDatabase.getUsers();
+              const ownerObj = users.find(u => u.role === 'owner');
+              if (ownerObj) {
+                ownerObj.name = customName;
+                LaughDryDatabase.saveUsers(users);
+              }
+              localStorage.removeItem('laughdry_owner_name_registered');
+            }
+            
+            setIsSyncing(true);
+            await LaughDryDatabase.syncFromFirestore();
+            LaughDryDatabase.startRealtimeListeners();
+            setSettings(LaughDryDatabase.getSettings());
+          } catch (err) {
+            console.error("Gagal sinkronasi latar belakang:", err);
+          } finally {
+            setIsSyncing(false);
+          }
+        })();
       } else {
         localStorage.removeItem('laughdry_firebase_uid');
         LaughDryDatabase.stopRealtimeListeners();
+        setIsSyncing(false);
       }
       setIsAuthLoading(false);
     });
@@ -500,115 +525,167 @@ export default function App() {
           )}
         </div>
       )}
-         {/* Universal Workspace Header bar */}
-      <header className="bg-[#0F172A] text-white border-b border-slate-800 sticky top-0 z-40 px-3 md:px-8 py-1.5 md:py-4 shadow-sm">
-        <div className="max-w-7xl mx-auto flex flex-row items-center justify-between gap-1.5 md:gap-4">
-          
-          {/* Logo & Slogan */}
-          <div className="flex items-center gap-1.5 md:gap-3">
-            <input 
-              type="file" 
-              ref={logoInputRef} 
-              onChange={handleLogoChange} 
-              accept="image/*" 
-              className="hidden" 
-            />
-            {settings.customReceiptHeaderLogoImg && !settings.customReceiptHeaderLogoImg.includes('unsplash.com') ? (
-              <div 
-                onClick={handleLogoClick}
-                className="w-[60px] h-[60px] rounded-lg md:rounded-xl overflow-hidden cursor-pointer shadow-lg hover:ring-1 hover:ring-sky-400 active:scale-95 transition-all flex items-center justify-center bg-slate-900 border border-slate-800 shrink-0 p-0.5"
-                title="Klik untuk mengedit atau mengubah gambar logo ini"
-              >
-                <img 
-                  src={settings.customReceiptHeaderLogoImg} 
-                  alt="Logo" 
-                  className="w-full h-full object-contain transition-transform duration-200"
-                  style={{ transform: `scale(${logoScale})` }}
-                  referrerPolicy="no-referrer"
-                />
-              </div>
-            ) : (
-              <div 
-                onClick={handleLogoClick}
-                className="w-[60px] h-[60px] rounded-lg md:rounded-xl overflow-hidden cursor-pointer shadow-lg hover:ring-1 hover:ring-sky-450 active:scale-95 transition-all flex items-center justify-center bg-slate-900 border border-slate-800 shrink-0 p-0.5"
-                title="Klik untuk mengupload logo kustom"
-              >
-                <img 
-                  src={logoImg} 
-                  alt="LaughDry App Mascot" 
-                  className="w-full h-full object-contain rounded-lg transition-transform duration-250"
-                  style={{ transform: `scale(${logoScale})` }}
-                  referrerPolicy="no-referrer"
-                />
-              </div>
-            )}
-            <div>
-              <div className="flex items-center gap-1 md:gap-1.5">
-                <span className="font-extrabold text-[11px] md:text-lg tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-200 bg-clip-text text-transparent">
-                  LaughDry
+          {/* Universal Workspace Header bar */}
+      {isCustomerOnly ? (
+        <header className="bg-[#0F172A] text-white border-b border-slate-800 sticky top-0 z-40 px-4 md:px-8 py-2 md:py-4 shadow-sm select-none">
+          <div className="max-w-7xl mx-auto flex flex-row items-center justify-between gap-1.5 md:gap-4">
+            <div className="flex items-center gap-1.5 md:gap-3">
+              {settings.customReceiptHeaderLogoImg && !settings.customReceiptHeaderLogoImg.includes('unsplash.com') ? (
+                <div className="w-[50px] h-[50px] md:w-[60px] md:h-[60px] rounded-lg md:rounded-xl overflow-hidden shadow-lg bg-slate-900 border border-slate-800 shrink-0 p-0.5">
+                  <img 
+                    src={settings.customReceiptHeaderLogoImg} 
+                    alt="Logo" 
+                    className="w-full h-full object-contain"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+              ) : (
+                <div className="w-[50px] h-[50px] md:w-[60px] md:h-[60px] rounded-lg md:rounded-xl overflow-hidden shadow-lg bg-slate-900 border border-slate-800 shrink-0 p-0.5">
+                  <img 
+                    src={logoImg} 
+                    alt="LaughDry App Mascot" 
+                    className="w-full h-full object-contain rounded-lg"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+              )}
+              <div>
+                <span className="font-extrabold text-[13px] md:text-lg tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-200 bg-clip-text text-transparent block">
+                  LaughDry Customer Portal
                 </span>
-                <span className="text-[7.5px] md:text-[10px] bg-slate-500/20 text-[#38BDF8] font-bold px-0.75 md:px-1.5 py-0.2 md:py-0.5 rounded uppercase border border-slate-500/30">
-                  {isAndroidApp ? 'Android' : 'v2'}
-                </span>
+                <p className="text-[9.5px] md:text-[11px] text-slate-400 font-medium">
+                  Status Pelacakan Pesanan & Detail Nota Real-Time
+                </p>
               </div>
-              <p className="text-[10px] text-slate-400 font-medium hidden md:block">
-                {isAndroidApp ? 'Aplikasi POS Layanan & Absensi Toko' : 'Sistem POS & Analitik Laundry Kelas Dunia'}
-              </p>
             </div>
-          </div>
 
-          {/* Real-time system log details */}
-          <div className="flex items-center gap-1.5 md:gap-5 text-xs text-slate-400">
-
-            <div className="hidden lg:flex items-center gap-1.5 font-mono">
-              <span className={`w-2 h-2 rounded-full ${isSyncing ? 'bg-amber-400 animate-pulse' : 'bg-green-400'}`}></span>
-              <span className="text-[11px] font-bold uppercase text-slate-200">
-                {isSyncing ? 'Firestore: Menyelaraskan...' : 'Firestore: Aktif & Sinkron'}
+            <div className="flex items-center gap-1.5 md:gap-3">
+              <span className="hidden sm:inline-block text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1 rounded-full font-bold">
+                🔒 Koneksi Enkripsi Aman
               </span>
-            </div>
-
-            <div className="flex items-center gap-1 bg-slate-800 px-2 py-1 md:px-3 md:py-1.5 rounded-lg md:rounded-xl border border-slate-700/50">
-              <Clock className="w-3 h-3 md:w-3.5 md:h-3.5 text-sky-400" />
-              <span className="font-mono text-[9px] md:text-[10.5px] font-bold text-white tracking-normal md:tracking-widest">{currentTime}</span>
-            </div>
-
-            {/* Sign Out Button */}
-            {firebaseUser && (
               <button
-                onClick={() => setShowSignOutConfirmModal(true)}
-                className="flex items-center gap-1 bg-red-500/11 hover:bg-red-500/20 text-rose-400 font-extrabold text-[9px] md:text-[10px] px-2.5 py-1.5 rounded-xl border border-rose-500/15 cursor-pointer transition select-none"
-                title="Keluar dari Akun Firebase"
-                id="signout-cloud-button"
+                onClick={() => setTheme(prev => prev === 'light' ? 'dark' : 'light')}
+                className="p-1 md:p-2 rounded-lg md:rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700/50 transition-all text-[#38BDF8] hover:bg-slate-700 cursor-pointer flex items-center justify-center w-7 h-7 md:w-9 md:h-9"
+                title={theme === 'light' ? 'Ganti ke Mode Gelap' : 'Ganti ke Mode Terang'}
+                id="theme-toggler"
               >
-                <span>Keluar Cloud</span>
+                {theme === 'light' ? <Moon className="w-3 md:w-4 h-3 md:h-4" /> : <Sun className="w-3.5 h-3.5" />}
               </button>
-            )}
-
-            {/* Theme Toggle Button */}
-            <button
-              onClick={() => setTheme(prev => prev === 'light' ? 'dark' : 'light')}
-              className="p-1 md:p-2 rounded-lg md:rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700/50 transition-all text-[#38BDF8] hover:bg-slate-700 cursor-pointer flex items-center justify-center w-7 h-7 md:w-9 md:h-9"
-              title={theme === 'light' ? 'Ganti ke Mode Gelap' : 'Ganti ke Mode Terang'}
-              id="theme-toggler"
-            >
-              {theme === 'light' ? <Moon className="w-3 md:w-4 h-3 md:h-4" /> : <Sun className="w-3.5 h-3.5" />}
-            </button>
+            </div>
           </div>
+        </header>
+      ) : (
+        <header className="bg-[#0F172A] text-white border-b border-slate-800 sticky top-0 z-40 px-3 md:px-8 py-1.5 md:py-4 shadow-sm">
+          <div className="max-w-7xl mx-auto flex flex-row items-center justify-between gap-1.5 md:gap-4">
+            
+            {/* Logo & Slogan */}
+            <div className="flex items-center gap-1.5 md:gap-3">
+              <input 
+                type="file" 
+                ref={logoInputRef} 
+                onChange={handleLogoChange} 
+                accept="image/*" 
+                className="hidden" 
+              />
+              {settings.customReceiptHeaderLogoImg && !settings.customReceiptHeaderLogoImg.includes('unsplash.com') ? (
+                <div 
+                  onClick={handleLogoClick}
+                  className="w-[60px] h-[60px] rounded-lg md:rounded-xl overflow-hidden cursor-pointer shadow-lg hover:ring-1 hover:ring-sky-400 active:scale-95 transition-all flex items-center justify-center bg-slate-900 border border-slate-800 shrink-0 p-0.5"
+                  title="Klik untuk mengedit atau mengubah gambar logo ini"
+                >
+                  <img 
+                    src={settings.customReceiptHeaderLogoImg} 
+                    alt="Logo" 
+                    className="w-full h-full object-contain transition-transform duration-200"
+                    style={{ transform: `scale(${logoScale})` }}
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+              ) : (
+                <div 
+                  onClick={handleLogoClick}
+                  className="w-[60px] h-[60px] rounded-lg md:rounded-xl overflow-hidden cursor-pointer shadow-lg hover:ring-1 hover:ring-sky-450 active:scale-95 transition-all flex items-center justify-center bg-slate-900 border border-slate-800 shrink-0 p-0.5"
+                  title="Klik untuk mengupload logo kustom"
+                >
+                  <img 
+                    src={logoImg} 
+                    alt="LaughDry App Mascot" 
+                    className="w-full h-full object-contain rounded-lg transition-transform duration-250"
+                    style={{ transform: `scale(${logoScale})` }}
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+              )}
+              <div>
+                <div className="flex items-center gap-1 md:gap-1.5">
+                  <span className="font-extrabold text-[11px] md:text-lg tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-200 bg-clip-text text-transparent">
+                    LaughDry
+                  </span>
+                  <span className="text-[7.5px] md:text-[10px] bg-slate-500/20 text-[#38BDF8] font-bold px-0.75 md:px-1.5 py-0.2 md:py-0.5 rounded uppercase border border-slate-500/30">
+                    {isAndroidApp ? 'Android' : 'v2'}
+                  </span>
+                </div>
+                <p className="text-[10px] text-slate-400 font-medium hidden md:block">
+                  {isAndroidApp ? 'Aplikasi POS Layanan & Absensi Toko' : 'Sistem POS & Analitik Laundry Kelas Dunia'}
+                </p>
+              </div>
+            </div>
 
-        </div>
-      </header>
+            {/* Real-time system log details */}
+            <div className="flex items-center gap-1.5 md:gap-5 text-xs text-slate-400">
+
+              <div className="hidden lg:flex items-center gap-1.5 font-mono">
+                <span className={`w-2 h-2 rounded-full ${isSyncing ? 'bg-amber-400 animate-pulse' : 'bg-green-400'}`}></span>
+                <span className="text-[11px] font-bold uppercase text-slate-200">
+                  {isSyncing ? 'Firestore: Menyelaraskan...' : 'Firestore: Aktif & Sinkron'}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-1 bg-slate-800 px-2 py-1 md:px-3 md:py-1.5 rounded-lg md:rounded-xl border border-slate-700/50">
+                <Clock className="w-3 h-3 md:w-3.5 md:h-3.5 text-sky-400" />
+                <span className="font-mono text-[9px] md:text-[10.5px] font-bold text-white tracking-normal md:tracking-widest">{currentTime}</span>
+              </div>
+
+              {/* Sign Out Button */}
+              {firebaseUser && (
+                <button
+                  onClick={() => setShowSignOutConfirmModal(true)}
+                  className="flex items-center gap-1 bg-red-500/11 hover:bg-red-500/20 text-rose-400 font-extrabold text-[9px] md:text-[10px] px-2.5 py-1.5 rounded-xl border border-rose-500/15 cursor-pointer transition select-none"
+                  title="Keluar dari Akun Firebase"
+                  id="signout-cloud-button"
+                >
+                  <span>Keluar Cloud</span>
+                </button>
+              )}
+
+              {/* Theme Toggle Button */}
+              <button
+                onClick={() => setTheme(prev => prev === 'light' ? 'dark' : 'light')}
+                className="p-1 md:p-2 rounded-lg md:rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700/50 transition-all text-[#38BDF8] hover:bg-slate-700 cursor-pointer flex items-center justify-center w-7 h-7 md:w-9 md:h-9"
+                title={theme === 'light' ? 'Ganti ke Mode Gelap' : 'Ganti ke Mode Terang'}
+                id="theme-toggler"
+              >
+                {theme === 'light' ? <Moon className="w-3 md:w-4 h-3 md:h-4" /> : <Sun className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+
+          </div>
+        </header>
+      )}
 
       {/* Navigation Portal Switcher Strip */}
-      <div className="bg-white border-b border-slate-200 py-1.5 md:py-3.5 px-3 md:px-8 shadow-sm">
-        <div className="max-w-7xl mx-auto flex flex-row items-center justify-between gap-2 md:gap-4">
-          <div className="space-y-0.5">
-            <strong className="text-slate-800 text-[10px] md:text-xs font-black uppercase tracking-wider block">Pilih Portal:</strong>
-            <p className="text-[11px] text-slate-400 select-none hidden sm:block">
-              {isAndroidApp 
-                ? 'Portal Android aktif.'
-                : 'Pilih menu layanan di bawah.'}
-            </p>
-          </div>
+      {!isCustomerOnly && (
+        <div className="bg-white border-b border-slate-200 py-1.5 md:py-3.5 px-3 md:px-8 shadow-sm">
+          <div className="max-w-7xl mx-auto flex flex-row items-center justify-between gap-2 md:gap-4">
+            <div className="space-y-0.5">
+              <strong className="text-slate-800 text-[10px] md:text-xs font-black uppercase tracking-wider block">Pilih Portal:</strong>
+              <p className="text-[11px] text-slate-400 select-none hidden sm:block">
+                {isAndroidApp 
+                  ? 'Portal Android aktif.'
+                  : 'Pilih menu layanan di bawah.'}
+              </p>
+            </div>
+
 
           {/* Action Selector Grid Tab */}
           <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
@@ -661,13 +738,14 @@ export default function App() {
           </div>
         </div>
       </div>
+      )}
 
       {/* Main Container Viewport */}
       <main className="flex-1 w-full max-w-7xl mx-auto px-4 md:px-8 pt-2 pb-6">
 
         {/* Dynamic viewport renderer switch */}
         <AnimatePresence mode="wait">
-          {activeConsole === 'owner' && (
+          {activeConsole === 'owner' && !isCustomerOnly && (
             <motion.div
               key="owner-console"
               initial={{ opacity: 0, y: 15 }}
@@ -794,7 +872,7 @@ export default function App() {
             </motion.div>
           )}
 
-          {activeConsole === 'karyawan' && (
+          {activeConsole === 'karyawan' && !isCustomerOnly && (
             <motion.div
               key="karyawan-console"
               initial={{ opacity: 0, y: 15 }}

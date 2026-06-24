@@ -1,83 +1,23 @@
 import { 
-  collection as originalCollection, 
-  doc as originalDoc, 
-  setDoc as originalSetDoc, 
-  getDoc as originalGetDoc, 
-  getDocs as originalGetDocs, 
-  updateDoc as originalUpdateDoc, 
-  deleteDoc as originalDeleteDoc, 
-  query as originalQuery, 
-  where as originalWhere, 
-  orderBy as originalOrderBy,
-  onSnapshot as originalOnSnapshot
-} from 'firebase/firestore';
-import { db, auth, handleFirestoreError, OperationType, sanitizeFirestoreData } from '../lib/firebase';
+  db, 
+  auth, 
+  handleFirestoreError, 
+  OperationType, 
+  sanitizeFirestoreData, 
+  setFirebaseQuotaExceeded,
+  collection,
+  doc,
+  setDoc,
+  getDoc,
+  getDocs,
+  updateDoc,
+  deleteDoc,
+  query,
+  where,
+  orderBy,
+  onSnapshot
+} from '../lib/firebase';
 import { Order, OrderStatus, Customer, Service, Expense, Branch, SystemSettings, AttendanceRecord, User, PushNotification } from '../types';
-
-const isOffline = () => {
-  if (typeof window === 'undefined') return true;
-  if (localStorage.getItem('laughdry_firebase_disabled') === 'true') return true;
-  const uid = auth.currentUser?.uid || localStorage.getItem('laughdry_firebase_uid') || 'default';
-  if (uid === 'default') return true;
-  return false;
-};
-
-const collection = (...args: any[]) => {
-  if (isOffline()) return {} as any;
-  return (originalCollection as any)(...args);
-};
-
-const doc = (...args: any[]) => {
-  if (isOffline()) return {} as any;
-  return (originalDoc as any)(...args);
-};
-
-const query = (...args: any[]) => {
-  if (isOffline()) return {} as any;
-  return (originalQuery as any)(...args);
-};
-
-const where = (...args: any[]) => {
-  if (isOffline()) return {} as any;
-  return (originalWhere as any)(...args);
-};
-
-const orderBy = (...args: any[]) => {
-  if (isOffline()) return {} as any;
-  return (originalOrderBy as any)(...args);
-};
-
-const setDoc = async (...args: any[]) => {
-  if (isOffline()) return;
-  return (originalSetDoc as any)(...args);
-};
-
-const getDoc = async (...args: any[]) => {
-  if (isOffline()) return { exists: () => false, data: () => null } as any;
-  return (originalGetDoc as any)(...args);
-};
-
-const getDocs = async (...args: any[]) => {
-  if (isOffline()) return { forEach: () => {} } as any;
-  return (originalGetDocs as any)(...args);
-};
-
-const updateDoc = async (...args: any[]) => {
-  if (isOffline()) return;
-  return (originalUpdateDoc as any)(...args);
-};
-
-const deleteDoc = async (...args: any[]) => {
-  if (isOffline()) return;
-  return (originalDeleteDoc as any)(...args);
-};
-
-const onSnapshot = (...args: any[]) => {
-  if (isOffline()) {
-    return () => {};
-  }
-  return (originalOnSnapshot as any)(...args);
-};
 
 function getUserIdPath(): string {
   const sharedDbId = localStorage.getItem('laughdry_shared_database_id');
@@ -592,6 +532,10 @@ export class LaundryService {
       callback(notifs);
     }, (error) => {
       console.error("Error listening to push notifications:", error);
+      const errMsg = (error?.message || '').toLowerCase();
+      if (errMsg.includes('quota') || errMsg.includes('resource-exhausted') || errMsg.includes('exhausted') || errMsg.includes('limit exceeded')) {
+        setFirebaseQuotaExceeded();
+      }
     });
   }
 

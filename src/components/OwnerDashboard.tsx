@@ -46,8 +46,7 @@ import {
   UserCheck,
   Star
 } from 'lucide-react';
-import { auth, db } from '../lib/firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import { auth, db, doc, getDoc } from '../lib/firebase';
 import { Network, Link2, Unlink, Copy } from 'lucide-react';
 import { LaughDryDatabase } from '../data/mockDatabase';
 import { LaundryService } from '../services/laundryService';
@@ -280,6 +279,42 @@ const isInsideHorizontalScrollable = (target: EventTarget | null): boolean => {
   return false;
 };
 
+const resizeLogoForThermalPrinter = (dataUrl: string, maxWidth: number = 160): Promise<string> => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      let width = img.width;
+      let height = img.height;
+      
+      if (width > maxWidth) {
+        height = Math.round((maxWidth / width) * height);
+        width = maxWidth;
+      }
+      
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(dataUrl);
+        return;
+      }
+      
+      // Clear with white background for thermal printer contrast
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+      
+      const resizedDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      resolve(resizedDataUrl);
+    };
+    img.onerror = () => {
+      resolve(dataUrl);
+    };
+    img.src = dataUrl;
+  });
+};
+
 interface OwnerDashboardProps {
   onLogout?: () => void;
   onSwitchConsole?: (consoleType: any) => void;
@@ -323,6 +358,16 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
   const [newVersionNote, setNewVersionNote] = useState<string>('');
   const [expandedElementId, setExpandedElementId] = useState<string | null>(null);
   const [showReceiptPreviewPopup, setShowReceiptPreviewPopup] = useState(false);
+  const [tempSpacing, setTempSpacing] = useState<number>(() => {
+    const s = LaughDryDatabase.getSettings();
+    return s.elementSpacing !== undefined ? s.elementSpacing : 1;
+  });
+
+  useEffect(() => {
+    if (settings?.elementSpacing !== undefined) {
+      setTempSpacing(settings.elementSpacing);
+    }
+  }, [settings?.elementSpacing]);
   const [showTour, setShowTour] = useState(false);
 
   // Confirm states
@@ -5834,7 +5879,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
               {/* Left Column: Form Controls & Element Row Options */}
-              <div className="lg:col-span-12 space-y-5">
+              <div className="lg:col-span-7 xl:col-span-8 space-y-5">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
                   {/* UPLOADER LOGO HEADER */}
@@ -5893,9 +5938,14 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                                 const file = e.target.files?.[0];
                                 if (file) {
                                   const reader = new FileReader();
-                                  reader.onload = (event) => {
+                                  reader.onload = async (event) => {
                                     if (event.target?.result) {
-                                      handleSettingsChange('customReceiptHeaderLogoImg', event.target.result as string);
+                                      try {
+                                        const resized = await resizeLogoForThermalPrinter(event.target.result as string);
+                                        handleSettingsChange('customReceiptHeaderLogoImg', resized);
+                                      } catch (err) {
+                                        handleSettingsChange('customReceiptHeaderLogoImg', event.target.result as string);
+                                      }
                                     }
                                   };
                                   reader.readAsDataURL(file);
@@ -5937,7 +5987,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                       { id: 'total_charge', label: 'Total Tagihan Biaya', fontSize: 12, alignment: 'right', isBold: true, isVisible: true, showPrefix: true, isItalic: false },
                       { id: 'member_points', label: 'Poin Member', fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false },
                       { id: 'footer_terms', label: 'Catatan & Ucapan Terima Kasih', fontSize: 9, alignment: 'center', isBold: false, isVisible: true, showPrefix: true, isItalic: false }
-                    ]).map((el: any) => {
+                    ]).map((el: any, idx: number) => {
                       const updateElementOption = (id: string, key: string, val: any) => {
                         const currentElements = settings.receiptElements || [
                           { id: 'outlet_name', label: 'Nama Outlet / Cabang', fontSize: 13, alignment: 'center', isBold: true, isVisible: true, showPrefix: true, isItalic: false },
@@ -5956,6 +6006,32 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                         ];
                         const updated = currentElements.map((item: any) => item.id === id ? { ...item, [key]: val } : item);
                         handleSettingsChange('receiptElements', updated);
+                      };
+
+                      const moveElement = (index: number, direction: 'up' | 'down') => {
+                        const currentElements = [...(settings.receiptElements || [
+                          { id: 'outlet_name', label: 'Nama Outlet / Cabang', fontSize: 13, alignment: 'center', isBold: true, isVisible: true, showPrefix: true, isItalic: false },
+                          { id: 'invoice_number', label: 'Nomor Nota Transaksi', fontSize: 11, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false },
+                          { id: 'customer_name', label: 'Nama Lengkap Pelanggan', fontSize: 13, alignment: 'left', isBold: true, isVisible: true, showPrefix: true, isItalic: false },
+                          { id: 'customer_phone', label: 'Nomor HP Pelanggan', fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false },
+                          { id: 'order_date', label: 'Tanggal Transaksi', fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false },
+                          { id: 'cashier_info', label: 'Informasi Kasir', fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false },
+                          { id: 'order_status', label: 'Status Pembayaran', fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false },
+                          { id: 'estimated_time', label: 'Estimasi Ambil Cucian', fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false },
+                          { id: 'perfume_fragrance', label: 'Aroma Parfum Terpilih', fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false },
+                          { id: 'item_list', label: 'Daftar Cucian & Harga', fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false },
+                          { id: 'total_charge', label: 'Total Tagihan Biaya', fontSize: 12, alignment: 'right', isBold: true, isVisible: true, showPrefix: true, isItalic: false },
+                          { id: 'member_points', label: 'Poin Member', fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false },
+                          { id: 'footer_terms', label: 'Catatan & Ucapan Terima Kasih', fontSize: 9, alignment: 'center', isBold: false, isVisible: true, showPrefix: true, isItalic: false }
+                        ])];
+                        const targetIndex = direction === 'up' ? index - 1 : index + 1;
+                        const totalCount = currentElements.length;
+                        if (targetIndex >= 0 && targetIndex < totalCount) {
+                          const temp = currentElements[index];
+                          currentElements[index] = currentElements[targetIndex];
+                          currentElements[targetIndex] = temp;
+                          handleSettingsChange('receiptElements', currentElements);
+                        }
                       };
 
                       const isExpanded = expandedElementId === el.id;
@@ -6002,6 +6078,34 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                               >
                                 {el.isVisible ? '👁️ Muncul' : '🙈 Sembunyi'}
                               </button>
+
+                              <span className="w-px h-5 bg-slate-200"></span>
+
+                              {/* Position adjustment (Naik / Turun) */}
+                              <div className="flex items-center gap-0.5 bg-white rounded-lg p-0.5 border border-slate-200 shadow-xs">
+                                <button
+                                  type="button"
+                                  onClick={() => moveElement(idx, 'up')}
+                                  disabled={idx === 0}
+                                  className={`p-1 px-2 rounded font-black text-[10px] cursor-pointer transition-all ${
+                                    idx === 0 ? 'text-slate-300 bg-slate-50 opacity-40 cursor-not-allowed' : 'text-slate-800 hover:bg-slate-100 active:scale-95'
+                                  }`}
+                                  title="Naikkan Posisi Element (Up)"
+                                >
+                                  ▲ Naik
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => moveElement(idx, 'down')}
+                                  disabled={idx === (settings.receiptElements || []).length - 1}
+                                  className={`p-1 px-2 rounded font-black text-[10px] cursor-pointer transition-all ${
+                                    idx === (settings.receiptElements || []).length - 1 ? 'text-slate-300 bg-slate-50 opacity-40 cursor-not-allowed' : 'text-slate-800 hover:bg-slate-100 active:scale-95'
+                                  }`}
+                                  title="Turunkan Posisi Element (Down)"
+                                >
+                                  ▼ Turun
+                                </button>
+                              </div>
 
                               <span className="w-px h-5 bg-slate-200"></span>
 
@@ -6070,8 +6174,44 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                                 <span>⚙️ Editor Presisi Element: {el.label}</span>
                               </div>
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                {el.id === 'outlet_name' && (
+                                  <div className="col-span-1 sm:col-span-2 bg-rose-50/50 p-3 rounded-2xl border border-dashed border-rose-300 space-y-3">
+                                    <div className="font-extrabold text-[10.5px] text-rose-700 flex items-center gap-1.5 uppercase">
+                                      <span>📞 Atur Nomor HP Branch / Cabang:</span>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-1.5">
+                                      <div className="space-y-1">
+                                        <label className="text-slate-600 block font-bold text-[10px]">Nomor HP Branch:</label>
+                                        <input
+                                          type="text"
+                                          value={settings.branchPhone || ''}
+                                          onChange={(e) => handleSettingsChange('branchPhone', e.target.value)}
+                                          placeholder="Contoh: 0812-3456-7890"
+                                          className="w-full bg-white border border-slate-200 rounded-lg p-2.5 focus:outline-none focus:border-rose-500 text-xs font-semibold"
+                                        />
+                                        <p className="text-[9px] text-slate-450">Nomor telp branch yang akan tertulis tepat di bawah nama outlet.</p>
+                                      </div>
+                                      <div className="space-y-1">
+                                        <label className="text-slate-600 block font-bold text-[10px]">Status Tampilkan:</label>
+                                        <label className="flex items-center gap-2 cursor-pointer bg-white p-2.5 border border-slate-200 rounded-xl mt-0.5">
+                                          <input
+                                            type="checkbox"
+                                            checked={settings.showBranchPhone !== false}
+                                            onChange={(e) => handleSettingsChange('showBranchPhone', e.target.checked)}
+                                            className="rounded text-rose-500 focus:ring-rose-500 w-4 h-4 cursor-pointer"
+                                          />
+                                          <div>
+                                            <span className="font-extrabold text-slate-850 block text-[10px]">Tampilkan HP di Struk</span>
+                                            <span className="text-[8.5px] text-slate-400 block">Centang agar nomor HP aktif di struk.</span>
+                                          </div>
+                                        </label>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+
                                 {/* Hide Prefix Option */}
-                                {['customer_name', 'invoice_number', 'order_date', 'perfume_fragrance'].includes(el.id) && (
+                                {true && (
                                   <label className="flex items-center gap-2 cursor-pointer bg-white p-2.5 border border-slate-200 rounded-xl">
                                     <input
                                       type="checkbox"
@@ -6129,6 +6269,23 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                                     className="w-full accent-rose-600 cursor-pointer"
                                   />
                                   <p className="text-[8.5px] text-slate-400">Atur ukuran elemen ini (misal ingin nama pelanggan berukuran font 15 agar rata tengah dan menonjol).</p>
+                                </div>
+
+                                {/* Fine-grain top spacing slider */}
+                                <div className="bg-white p-2.5 border border-slate-200 rounded-xl sm:col-span-2 space-y-1">
+                                  <div className="flex justify-between items-center text-[10.5px]">
+                                    <span className="font-extrabold text-slate-850">Jarak Atas Elemen (Top Spacing)</span>
+                                    <span className="font-black text-rose-600 bg-rose-50 px-2 py-0.5 rounded font-mono text-xs">{(el.spacing !== undefined ? el.spacing : 4)}px</span>
+                                  </div>
+                                  <input
+                                    type="range"
+                                    min="0"
+                                    max="30"
+                                    value={el.spacing !== undefined ? el.spacing : 4}
+                                    onChange={(e) => updateElementOption(el.id, 'spacing', parseInt(e.target.value))}
+                                    className="w-full accent-rose-600 cursor-pointer"
+                                  />
+                                  <p className="text-[8.5px] text-slate-400">Atur jarak pixel kosong di atas elemen ini secara spesifik agar tata letak struk kustom Anda lebih seimbang.</p>
                                 </div>
                               </div>
                             </div>
@@ -6264,8 +6421,8 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                   </div>
                 </div>
 
-              {/* Hiden Right Column structure to keep compilation pristine */}
-              <div style={{ display: 'none' }} className="hidden">
+              {/* Right Column: Sticky Live Preview Panel for Desktop */}
+              <div className="lg:col-span-5 xl:col-span-4 lg:sticky lg:top-24 space-y-4 flex flex-col items-center bg-slate-50 p-5 rounded-2xl border border-slate-150 shadow-inner max-h-[calc(100vh-140px)] overflow-y-auto hidden lg:flex">
                 <div className="absolute top-0 inset-x-0 h-2 bg-slate-400/25 backdrop-blur-xs"></div>
                 
                 <div className="w-full text-center pb-2.5 border-b border-rose-100 mb-4">
@@ -6320,7 +6477,8 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                         },
                         className: `${alignClass} ${weightClass} ${italicClass}`,
                         isVisible: config.isVisible !== false,
-                        showPrefix: config.showPrefix !== false
+                        showPrefix: config.showPrefix !== false,
+                        spacing: config.spacing !== undefined ? config.spacing : 4
                       };
                     };
 
@@ -6337,316 +6495,282 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                           </div>
                         )}
 
-                        {/* Outlet name / header */}
-                        {(() => {
-                          const s = getElementStyle('outlet_name');
+                        {/* Dynamics */}
+                        {(settings.receiptElements || [
+                          { id: 'outlet_name', label: 'Nama Outlet / Cabang', fontSize: 13, alignment: 'center', isBold: true, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                          { id: 'invoice_number', label: 'Nomor Nota Transaksi', fontSize: 11, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                          { id: 'customer_name', label: 'Nama Lengkap Pelanggan', fontSize: 13, alignment: 'left', isBold: true, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                          { id: 'customer_phone', label: 'Nomor HP Pelanggan', fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                          { id: 'order_date', label: 'Tanggal Transaksi', fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                          { id: 'cashier_info', label: 'Informasi Kasir', fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                          { id: 'order_status', label: 'Status Pembayaran', fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                          { id: 'estimated_time', label: 'Estimasi Ambil Cucian', fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                          { id: 'perfume_fragrance', label: 'Aroma Parfum Terpilih', fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                          { id: 'item_list', label: 'Daftar Cucian & Harga', fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                          { id: 'total_charge', label: 'Total Tagihan Biaya', fontSize: 12, alignment: 'right', isBold: true, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                          { id: 'member_points', label: 'Poin Member', fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                          { id: 'footer_terms', label: 'Catatan & Ucapan Terima Kasih', fontSize: 9, alignment: 'center', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 }
+                        ]).map((elementConfig: any, elementIdx: number) => {
+                          const s = getElementStyle(elementConfig.id);
                           if (!s.isVisible) return null;
-                          const active = expandedElementId === 'outlet_name';
-                          return (
-                            <div 
-                              style={s.style} 
-                              onClick={() => setExpandedElementId('outlet_name')}
-                              className={`uppercase tracking-tight whitespace-pre-line mb-1.5 leading-tight p-1 cursor-pointer transition-all duration-150 rounded ${s.className} ${
-                                active ? 'ring-2 ring-rose-500 bg-rose-50/30' : 'hover:bg-slate-100/80 hover:ring-1 hover:ring-rose-350'
-                              }`}
-                              title="Klik untuk rubah nama header / nama outlet"
-                            >
-                              {settings.customReceiptHeader || 'LAUGHDRY EXPRESS'}
-                            </div>
-                          );
-                        })()}
 
-                        {settings.showBranchPhone && (
-                          <div className="font-bold text-slate-700 text-center text-[8px] mb-1">
-                            TELP BRANCH: {settings.branchPhone || '0812-3456-7890'}
-                          </div>
-                        )}
+                          const spacingStyle = elementIdx > 0 ? { marginTop: `${s.spacing}px` } : {};
+                          const active = expandedElementId === elementConfig.id;
+                          const activeClass = active ? 'ring-2 ring-rose-500 bg-rose-50/30' : 'hover:bg-slate-100/80 hover:ring-1 hover:ring-rose-350';
 
-                        <div className="border-t border-dashed border-slate-400 my-2"></div>
-
-                        {/* Invoice & order meta information */}
-                        <div className="space-y-0.5 text-slate-800">
-                          {(() => {
-                            const s = getElementStyle('invoice_number');
-                            if (!s.isVisible) return null;
-                            const active = expandedElementId === 'invoice_number';
-                            return (
-                              <div 
-                                style={s.style} 
-                                onClick={() => setExpandedElementId('invoice_number')}
-                                className={`p-0.5 cursor-pointer transition-all duration-150 rounded ${s.className} ${
-                                  active ? 'ring-2 ring-rose-500 bg-rose-50/30' : 'hover:bg-slate-100/80 hover:ring-1 hover:ring-rose-350'
-                                }`}
-                                title="Klik untuk edit no nota"
-                              >
-                                {s.showPrefix ? 'Nota  : LD-20260604-0012' : 'LD-20260604-0012'}
-                              </div>
-                            );
-                          })()}
-
-                          {(() => {
-                            const s = getElementStyle('order_date');
-                            if (!s.isVisible) return null;
-                            const active = expandedElementId === 'order_date';
-                            return (
-                              <div 
-                                style={s.style} 
-                                onClick={() => setExpandedElementId('order_date')}
-                                className={`p-0.5 cursor-pointer transition-all duration-150 rounded ${s.className} ${
-                                  active ? 'ring-2 ring-rose-500 bg-rose-50/30' : 'hover:bg-slate-100/80 hover:ring-1 hover:ring-rose-350'
-                                }`}
-                                title="Klik untuk edit tanggal"
-                              >
-                                {s.showPrefix ? `Tgl   : ${new Date().toLocaleDateString('id-ID')}` : new Date().toLocaleDateString('id-ID')}
-                              </div>
-                            );
-                          })()}
-
-                          {(() => {
-                            const s = getElementStyle('customer_name');
-                            if (!s.isVisible) return null;
-                            const active = expandedElementId === 'customer_name';
-                            return (
-                              <div 
-                                style={s.style} 
-                                onClick={() => setExpandedElementId('customer_name')}
-                                className={`p-0.5 cursor-pointer transition-all duration-150 rounded ${s.className} ${
-                                  active ? 'ring-2 ring-rose-500 bg-rose-50/30' : 'hover:bg-slate-100/80 hover:ring-1 hover:ring-rose-350'
-                                }`}
-                                title="Klik untuk edit nama pelanggan"
-                              >
-                                {s.showPrefix ? 'Cust  : Budi Hartono' : 'Budi Hartono'}
-                              </div>
-                            );
-                          })()}
-
-                          {(() => {
-                            const s = getElementStyle('customer_phone');
-                            if (!s.isVisible || !settings.showCustomerPhoneInReceipt) return null;
-                            const active = expandedElementId === 'customer_phone';
-                            return (
-                              <div 
-                                style={s.style} 
-                                onClick={() => setExpandedElementId('customer_phone')}
-                                className={`p-0.5 cursor-pointer transition-all duration-150 rounded ${s.className} ${
-                                  active ? 'ring-2 ring-rose-500 bg-rose-50/30' : 'hover:bg-slate-100/80 hover:ring-1 hover:ring-rose-350'
-                                }`}
-                                title="Klik untuk edit bagian nama/kontak pelanggan"
-                              >
-                                {s.showPrefix ? 'Telp  : 0812-7788-9900' : '0812-7788-9900'}
-                              </div>
-                            );
-                          })()}
-
-                          {(() => {
-                            const s = getElementStyle('cashier_info');
-                            if (!s.isVisible || !settings.showCashierNameInReceipt) return null;
-                            const active = expandedElementId === 'cashier_info';
-                            return (
-                              <div 
-                                style={s.style}
-                                onClick={() => setExpandedElementId('cashier_info')}
-                                className={`p-0.5 cursor-pointer transition-all duration-150 rounded ${s.className} ${
-                                  active ? 'ring-2 ring-rose-500 bg-rose-50/30' : 'hover:bg-slate-100/80 hover:ring-1 hover:ring-rose-350'
-                                }`}
-                                title="Klik untuk edit info kasir"
-                              >
-                                {s.showPrefix ? 'Kasir : Amanda Kasir (POS)' : 'Amanda Kasir (POS)'}
-                              </div>
-                            );
-                          })()}
-
-                          {(() => {
-                            const s = getElementStyle('order_status');
-                            if (!s.isVisible) return null;
-                            const active = expandedElementId === 'order_status';
-                            return (
-                              <div 
-                                style={s.style}
-                                onClick={() => setExpandedElementId('order_status')}
-                                className={`p-0.5 cursor-pointer transition-all duration-150 rounded ${s.className} ${
-                                  active ? 'ring-2 ring-rose-500 bg-rose-50/30' : 'hover:bg-slate-100/80 hover:ring-1 hover:ring-rose-350'
-                                }`}
-                                title="Klik untuk edit status"
-                              >
-                                {s.showPrefix ? 'Status: LUNAS via QRIS' : 'LUNAS via QRIS'}
-                              </div>
-                            );
-                          })()}
-
-                          {(() => {
-                            const s = getElementStyle('estimated_time');
-                            if (!s.isVisible || !settings.showEstimatedCompletion) return null;
-                            const active = expandedElementId === 'estimated_time';
-                            return (
-                              <div 
-                                style={s.style}
-                                onClick={() => setExpandedElementId('estimated_time')}
-                                className={`p-0.5 cursor-pointer transition-all duration-150 rounded ${s.className} ${
-                                  active ? 'ring-2 ring-rose-500 bg-rose-50/30' : 'hover:bg-slate-100/80 hover:ring-1 hover:ring-rose-350'
-                                }`}
-                                title="Klik untuk edit estimasi"
-                              >
-                                {s.showPrefix ? 'Estim : 07/06/2026, 15:00' : '07/06/2026, 15:00'}
-                              </div>
-                            );
-                          })()}
-
-                          {(() => {
-                            const s = getElementStyle('perfume_fragrance');
-                            if (!s.isVisible) return null;
-                            const active = expandedElementId === 'perfume_fragrance';
-                            return (
-                              <div 
-                                style={s.style} 
-                                onClick={() => setExpandedElementId('perfume_fragrance')}
-                                className={`p-0.5 cursor-pointer transition-all duration-150 rounded ${s.className} ${
-                                  active ? 'ring-2 ring-rose-500 bg-rose-50/30' : 'hover:bg-slate-100/80 hover:ring-1 hover:ring-rose-350'
-                                }`}
-                                title="Klik untuk edit aroma parfum"
-                              >
-                                {s.showPrefix ? 'Aroma : ✨ SWEET CANDY EXOTIC' : '✨ SWEET CANDY EXOTIC'}
-                              </div>
-                            );
-                          })()}
-                        </div>
-
-                        {/* Items list */}
-                        {(() => {
-                          const s = getElementStyle('item_list');
-                          if (!s.isVisible) return null;
-                          const active = expandedElementId === 'item_list';
-                          return (
-                            <div 
-                              onClick={() => setExpandedElementId('item_list')}
-                              className={`cursor-pointer transition-all duration-150 rounded ${
-                                active ? 'ring-2 ring-rose-500 bg-rose-50/30 p-1' : 'hover:bg-slate-100/80 hover:ring-1 hover:ring-rose-350 p-0.5'
-                              }`}
-                              title="Klik untuk edit daftar item"
-                            >
-                              <div className="border-t border-dashed border-slate-400 my-2"></div>
-                              <div style={s.style} className={`space-y-2 ${s.className}`}>
-                                <div className="space-y-0.5 text-left">
-                                  <div className="font-extrabold text-slate-950 leading-tight">Cuci Setrika Reguler - Kiloan</div>
-                                  <div className="flex justify-between text-slate-600 text-[8.5px]">
-                                    <span>3 KG x @Rp 8.000</span>
-                                    <span className="font-black text-slate-950">Rp 24.000</span>
+                          switch (elementConfig.id) {
+                            case 'outlet_name':
+                              return (
+                                <div key={elementConfig.id} style={{ ...spacingStyle }} className="space-y-1">
+                                  <div 
+                                    style={s.style} 
+                                    onClick={() => setExpandedElementId('outlet_name')}
+                                    className={`uppercase tracking-tight whitespace-pre-line leading-tight p-1 cursor-pointer transition-all duration-150 rounded ${s.className} ${activeClass}`}
+                                    title="Klik untuk rubah nama header / nama outlet"
+                                  >
+                                    {settings.customReceiptHeader || 'LAUGHDRY EXPRESS'}
                                   </div>
-                                </div>
-                                <div className="space-y-0.5 text-left">
-                                  <div className="font-extrabold text-slate-950 leading-tight">Bedcover Large - Satuan</div>
-                                  <div className="flex justify-between text-slate-600 text-[8.5px]">
-                                    <span>1 PCS x @Rp 35.000</span>
-                                    <span className="font-black text-slate-950">Rp 35.000</span>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })()}
-
-                        {/* Charges calculation */}
-                        {(() => {
-                          const s = getElementStyle('total_charge');
-                          if (!s.isVisible) return null;
-                          const active = expandedElementId === 'total_charge';
-                          return (
-                            <div 
-                              onClick={() => setExpandedElementId('total_charge')}
-                              className={`cursor-pointer transition-all duration-150 rounded ${
-                                active ? 'ring-2 ring-rose-500 bg-rose-50/30 p-1' : 'hover:bg-slate-100/80 hover:ring-1 hover:ring-rose-350 p-0.5'
-                              }`}
-                              title="Klik untuk edit total biaya"
-                            >
-                              <div className="border-t border-dashed border-slate-400 my-2"></div>
-                              <div style={s.style} className={`space-y-1 text-slate-950 ${s.className}`}>
-                                <div className="flex justify-between font-black">
-                                  {s.showPrefix ? (
-                                    <>
-                                      <span>TOTAL BIAYA:</span>
-                                      <span>Rp 59.000</span>
-                                    </>
-                                  ) : (
-                                    <span className="w-full text-center block">Rp 59.000</span>
+                                  {settings.showBranchPhone && (
+                                    <div className="font-bold text-slate-700 text-center text-[8px] mb-1">
+                                      TELP BRANCH: {settings.branchPhone || '0812-3456-7890'}
+                                    </div>
                                   )}
                                 </div>
-                                <div className="flex justify-between text-[8px] text-slate-700">
-                                  {s.showPrefix ? (
-                                    <>
-                                      <span>PAID STATE:</span>
-                                      <span>LUNAS (Rp 0)</span>
-                                    </>
-                                  ) : (
-                                    <span className="w-full text-center block">LUNAS (Rp 0)</span>
-                                  )}
+                              );
+
+                            case 'invoice_number':
+                              return (
+                                <div 
+                                  key={elementConfig.id}
+                                  style={{ ...s.style, ...spacingStyle }} 
+                                  onClick={() => setExpandedElementId('invoice_number')}
+                                  className={`p-0.5 cursor-pointer transition-all duration-150 rounded ${s.className} ${activeClass}`}
+                                  title="Klik untuk edit no nota"
+                                >
+                                  {s.showPrefix ? 'Nota  : LD-20260604-0012' : 'LD-20260604-0012'}
                                 </div>
-                                {settings.showPointsInReceipt && (() => {
-                                  const pm = getElementStyle('member_points');
-                                  if (!pm.isVisible) return null;
-                                  const pmActive = expandedElementId === 'member_points';
-                                  return (
-                                    <div 
-                                      style={pm.style} 
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setExpandedElementId('member_points');
-                                      }}
-                                      className={`flex justify-between font-bold cursor-pointer transition-all duration-150 rounded p-0.5 mt-1 ${pm.className} ${
-                                        pmActive ? 'ring-2 ring-rose-500 bg-rose-50/30' : 'hover:bg-slate-100/80 hover:ring-1 hover:ring-rose-350'
-                                      }`}
-                                      title="Klik untuk rubah poin member"
-                                    >
-                                      {pm.showPrefix ? (
-                                        <>
-                                          <span>POIN MEMBER:</span>
-                                          <span>+1 Poin (+1 Stamp)</span>
-                                        </>
-                                      ) : (
-                                        <span className="w-full text-center block">+1 Poin (+1 Stamp)</span>
+                              );
+
+                            case 'order_date':
+                              return (
+                                <div 
+                                  key={elementConfig.id}
+                                  style={{ ...s.style, ...spacingStyle }} 
+                                  onClick={() => setExpandedElementId('order_date')}
+                                  className={`p-0.5 cursor-pointer transition-all duration-150 rounded ${s.className} ${activeClass}`}
+                                  title="Klik untuk edit tanggal"
+                                >
+                                  {s.showPrefix ? `Tgl   : ${new Date().toLocaleDateString('id-ID')}` : new Date().toLocaleDateString('id-ID')}
+                                </div>
+                              );
+
+                            case 'customer_name':
+                              return (
+                                <div 
+                                  key={elementConfig.id}
+                                  style={{ ...s.style, ...spacingStyle }} 
+                                  onClick={() => setExpandedElementId('customer_name')}
+                                  className={`p-0.5 cursor-pointer transition-all duration-150 rounded ${s.className} ${activeClass}`}
+                                  title="Klik untuk edit nama pelanggan"
+                                >
+                                  {s.showPrefix ? 'Cust  : Budi Hartono' : 'Budi Hartono'}
+                                </div>
+                              );
+
+                            case 'customer_phone':
+                              if (!settings.showCustomerPhoneInReceipt) return null;
+                              return (
+                                <div 
+                                  key={elementConfig.id}
+                                  style={{ ...s.style, ...spacingStyle }} 
+                                  onClick={() => setExpandedElementId('customer_phone')}
+                                  className={`p-0.5 cursor-pointer transition-all duration-150 rounded ${s.className} ${activeClass}`}
+                                  title="Klik untuk edit bagian nama/kontak pelanggan"
+                                >
+                                  {s.showPrefix ? 'Telp  : 0812-7788-9900' : '0812-7788-9900'}
+                                </div>
+                              );
+
+                            case 'cashier_info':
+                              if (!settings.showCashierNameInReceipt) return null;
+                              return (
+                                <div 
+                                  key={elementConfig.id}
+                                  style={{ ...s.style, ...spacingStyle }} 
+                                  onClick={() => setExpandedElementId('cashier_info')}
+                                  className={`p-0.5 cursor-pointer transition-all duration-150 rounded ${s.className} ${activeClass}`}
+                                  title="Klik untuk edit info kasir"
+                                >
+                                  {s.showPrefix ? 'Kasir : Amanda Kasir (POS)' : 'Amanda Kasir (POS)'}
+                                </div>
+                              );
+
+                            case 'order_status':
+                              return (
+                                <div 
+                                  key={elementConfig.id}
+                                  style={{ ...s.style, ...spacingStyle }} 
+                                  onClick={() => setExpandedElementId('order_status')}
+                                  className={`p-0.5 cursor-pointer transition-all duration-150 rounded ${s.className} ${activeClass}`}
+                                  title="Klik untuk edit status"
+                                >
+                                  {s.showPrefix ? 'Status: LUNAS via QRIS' : 'LUNAS via QRIS'}
+                                </div>
+                              );
+
+                            case 'estimated_time':
+                              if (!settings.showEstimatedCompletion) return null;
+                              return (
+                                <div 
+                                  key={elementConfig.id}
+                                  style={{ ...s.style, ...spacingStyle }} 
+                                  onClick={() => setExpandedElementId('estimated_time')}
+                                  className={`p-0.5 cursor-pointer transition-all duration-150 rounded ${s.className} ${activeClass}`}
+                                  title="Klik untuk edit estimasi"
+                                >
+                                  {s.showPrefix ? 'Estim : 07/06/2026, 15:00' : '07/06/2026, 15:00'}
+                                </div>
+                              );
+
+                            case 'perfume_fragrance':
+                              return (
+                                <div 
+                                  key={elementConfig.id}
+                                  style={{ ...s.style, ...spacingStyle }} 
+                                  onClick={() => setExpandedElementId('perfume_fragrance')}
+                                  className={`p-0.5 cursor-pointer transition-all duration-150 rounded ${s.className} ${activeClass}`}
+                                  title="Klik untuk edit aroma parfum"
+                                >
+                                  {s.showPrefix ? 'Aroma : + SWEET CANDY EXOTIC' : '+ SWEET CANDY EXOTIC'}
+                                </div>
+                              );
+
+                            case 'item_list':
+                              return (
+                                <div key={elementConfig.id} style={{ ...spacingStyle }} className="w-full">
+                                  <div className="border-t border-dashed border-slate-400 my-2"></div>
+                                  <div 
+                                    style={s.style} 
+                                    onClick={() => setExpandedElementId('item_list')}
+                                    className={`cursor-pointer transition-all duration-150 rounded ${activeClass}`}
+                                    title="Klik untuk edit daftar item"
+                                  >
+                                    <div className={`space-y-2 ${s.className}`}>
+                                      <div className="space-y-0.5 text-left">
+                                        <div className="font-extrabold text-slate-950 leading-tight">Cuci Setrika Reguler - Kiloan</div>
+                                        <div className="flex justify-between text-slate-600 text-[8.5px]">
+                                          <span>{s.showPrefix ? 'Qty: ' : ''}3 KG x @Rp 8.000</span>
+                                          <span className="font-black text-slate-950">Rp 24.000</span>
+                                        </div>
+                                      </div>
+                                      <div className="space-y-0.5 text-left">
+                                        <div className="font-extrabold text-slate-950 leading-tight">Bedcover Large - Satuan</div>
+                                        <div className="flex justify-between text-slate-600 text-[8.5px]">
+                                          <span>{s.showPrefix ? 'Qty: ' : ''}1 PCS x @Rp 35.000</span>
+                                          <span className="font-black text-slate-950">Rp 35.000</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+
+                            case 'total_charge':
+                              return (
+                                <div key={elementConfig.id} style={{ ...spacingStyle }} className="w-full">
+                                  <div className="border-t border-dashed border-slate-400 my-2"></div>
+                                  <div 
+                                    onClick={() => setExpandedElementId('total_charge')}
+                                    className={`cursor-pointer transition-all duration-150 rounded ${activeClass}`}
+                                    title="Klik untuk edit total biaya"
+                                  >
+                                    <div style={s.style} className={`space-y-1 text-slate-950 ${s.className}`}>
+                                      <div className="flex justify-between font-black">
+                                        {s.showPrefix ? (
+                                          <>
+                                            <span>TOTAL BIAYA:</span>
+                                            <span>Rp 59.000</span>
+                                          </>
+                                        ) : (
+                                          <span className="w-full text-center block">Rp 59.000</span>
+                                        )}
+                                      </div>
+                                      <div className="flex justify-between text-[8px] text-slate-700">
+                                        {s.showPrefix ? (
+                                          <>
+                                            <span>PAID STATE:</span>
+                                            <span>LUNAS (Rp 0)</span>
+                                          </>
+                                        ) : (
+                                          <span className="w-full text-center block">LUNAS (Rp 0)</span>
+                                        )}
+                                      </div>
+                                      {settings.showNotesInReceipt && (
+                                        <div className="text-slate-650 italic text-[8.2px] mt-1 border-t border-slate-100 pt-1 text-left">
+                                          Notes: "Wanginya dibanyakin ya kak, trims"
+                                        </div>
                                       )}
                                     </div>
-                                  );
-                                })()}
-                                {settings.showNotesInReceipt && (
-                                  <div className="text-slate-650 italic text-[8.2px] mt-1 border-t border-slate-100 pt-1 text-left">
-                                    Notes: "Wanginya dibanyakin ya kak, trims"
                                   </div>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })()}
+                                </div>
+                              );
 
-                        {/* Footer terms S&K Selesai */}
-                        {(() => {
-                          const s = getElementStyle('footer_terms');
-                          if (!s.isVisible || !settings.showTermsInReceipt) return null;
-                          const active = expandedElementId === 'footer_terms';
-                          return (
-                            <div 
-                              onClick={() => setExpandedElementId('footer_terms')}
-                              className={`cursor-pointer transition-all duration-150 rounded ${
-                                active ? 'ring-2 ring-rose-500 bg-rose-50/30 p-1' : 'hover:bg-slate-100/80 hover:ring-1 hover:ring-rose-350 p-0.5'
-                              }`}
-                              title="Klik untuk edit syarat & ketentuan / catatan kaki"
-                            >
-                              <div className="border-t border-dashed border-slate-400 my-2"></div>
-                              <div style={s.style} className={`whitespace-pre-line leading-tight text-slate-700 ${s.className}`}>
-                                {settings.customReceiptFooter || `* KETENTUAN OPERASIONAL *
+                            case 'member_points':
+                              if (!settings.showPointsInReceipt) return null;
+                              return (
+                                <div 
+                                  key={elementConfig.id}
+                                  style={{ ...s.style, ...spacingStyle }} 
+                                  onClick={() => setExpandedElementId('member_points')}
+                                  className={`flex justify-between font-bold cursor-pointer transition-all duration-150 rounded p-0.5 mt-1 ${s.className} ${activeClass}`}
+                                  title="Klik untuk rubah poin member"
+                                >
+                                  {s.showPrefix ? (
+                                    <>
+                                      <span>POIN MEMBER:</span>
+                                      <span>+1 Poin (+1 Stamp)</span>
+                                    </>
+                                  ) : (
+                                    <span className="w-full text-center block">+1 Poin (+1 Stamp)</span>
+                                  )}
+                                </div>
+                              );
+
+                            case 'footer_terms':
+                              if (!settings.showTermsInReceipt) return null;
+                              return (
+                                <div key={elementConfig.id} style={{ ...spacingStyle }} className="w-full">
+                                  <div className="border-t border-dashed border-slate-400 my-2"></div>
+                                  <div 
+                                    onClick={() => setExpandedElementId('footer_terms')}
+                                    className={`cursor-pointer transition-all duration-150 rounded ${activeClass}`}
+                                    title="Klik untuk edit syarat & ketentuan / catatan kaki"
+                                  >
+                                    <div style={s.style} className={`whitespace-pre-line leading-tight text-slate-700 ${s.className}`}>
+                                      {settings.customReceiptFooter || `* KETENTUAN OPERASIONAL *
 1. Serahkan nota asli saat ambil pakaian.
 2. Kerusakan/hilang diganti 5x lipat.
 3. Komplain maksimal 1x24 jam pasca ambil.`}
-                              </div>
-                            </div>
-                          );
-                        })()}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+
+                            default:
+                              return null;
+                          }
+                        })}
+
+
+
+
 
                         {/* CUSTOM RECEIPT PROMOTIONAL FOOTER BLOCK */}
                         {settings.customReceiptPromo && (
                           <>
                             <div className="border-t border-dashed border-slate-400 my-2 pt-1.5">
                               <div className="text-center font-black text-[9px] text-rose-600 uppercase tracking-wide leading-tight bg-rose-50 p-1.5 rounded-lg border border-dashed border-rose-200">
-                                📣 PROMO: {settings.customReceiptPromo}
+                                PROMO: {settings.customReceiptPromo}
                               </div>
                             </div>
                           </>
@@ -6794,8 +6918,14 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
 
           {/* Physical Receipt Live Preview Modal popup */}
           {showReceiptPreviewPopup && (
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-              <div className="bg-slate-100 rounded-3xl p-5 w-full max-w-sm shadow-2xl relative font-sans max-h-[90vh] overflow-y-auto flex flex-col items-center">
+            <div 
+              className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto"
+              onClick={() => setShowReceiptPreviewPopup(false)}
+            >
+              <div 
+                className="bg-slate-100 rounded-3xl p-5 w-full max-w-sm shadow-2xl relative font-sans my-auto flex flex-col items-center"
+                onClick={(e) => e.stopPropagation()}
+              >
                 <div className="w-full flex items-center justify-between pb-3 border-b border-slate-200 mb-4 text-xs font-sans">
                   <h4 className="font-bold text-slate-800 text-xs uppercase tracking-wider flex items-center gap-1.5">
                     🖨️ Hasil Cetak Struk Fisik (58mm)
@@ -6806,6 +6936,39 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                     className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-600 transition text-xs font-bold cursor-pointer"
                   >
                     Tutup ✕
+                  </button>
+                </div>
+
+                {/* Jarak Elemen Control inside popup */}
+                <div className="w-full bg-white border border-slate-200 rounded-2xl p-4 mb-4 text-xs shadow-xs space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="font-extrabold text-slate-700 uppercase tracking-wider text-[11px]">📏 Jarak Antar Elemen:</span>
+                    <span className="font-black text-rose-600 bg-rose-50 px-2.5 py-0.5 rounded-lg text-[11px]">{tempSpacing} px</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="40"
+                    value={tempSpacing}
+                    onChange={(e) => {
+                      const newSpacing = Number(e.target.value);
+                      setTempSpacing(newSpacing);
+                      // Update in settings state so it live-previews
+                      handleSettingsChange('elementSpacing', newSpacing);
+                    }}
+                    className="w-full accent-rose-500 h-1.5 bg-slate-200 rounded-lg cursor-pointer"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updated = { ...settings, elementSpacing: tempSpacing };
+                      LaughDryDatabase.saveSettings(updated);
+                      setSettings(updated);
+                      triggerToast("💾 Pengaturan jarak elemen berhasil disimpan sebagai template default!");
+                    }}
+                    className="w-full py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold border border-rose-250 text-[10.5px] rounded-xl flex items-center justify-center gap-1 cursor-pointer transition active:scale-95"
+                  >
+                    💾 Simpan Jarak Sebagai Template
                   </button>
                 </div>
 
@@ -6854,7 +7017,8 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                         },
                         className: `${alignClass} ${weightClass} ${italicClass}`,
                         isVisible: config.isVisible !== false,
-                        showPrefix: config.showPrefix !== false
+                        showPrefix: config.showPrefix !== false,
+                        spacing: config.spacing !== undefined ? config.spacing : 4
                       };
                     };
 
@@ -6872,170 +7036,253 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                           </div>
                         )}
 
-                        {/* Outlet name */}
-                        {(() => {
-                          const s = getElementStyle('outlet_name');
+                        {/* Dynamics */}
+                        {(settings.receiptElements || [
+                          { id: 'outlet_name', label: 'Nama Outlet / Cabang', fontSize: 13, alignment: 'center', isBold: true, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                          { id: 'invoice_number', label: 'Nomor Nota Transaksi', fontSize: 11, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                          { id: 'customer_name', label: 'Nama Lengkap Pelanggan', fontSize: 13, alignment: 'left', isBold: true, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                          { id: 'customer_phone', label: 'Nomor HP Pelanggan', fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                          { id: 'order_date', label: 'Tanggal Transaksi', fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                          { id: 'cashier_info', label: 'Informasi Kasir', fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                          { id: 'order_status', label: 'Status Pembayaran', fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                          { id: 'estimated_time', label: 'Estimasi Ambil Cucian', fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                          { id: 'perfume_fragrance', label: 'Aroma Parfum Terpilih', fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                          { id: 'item_list', label: 'Daftar Cucian & Harga', fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                          { id: 'total_charge', label: 'Total Tagihan Biaya', fontSize: 12, alignment: 'right', isBold: true, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                          { id: 'member_points', label: 'Poin Member', fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                          { id: 'footer_terms', label: 'Catatan & Ucapan Terima Kasih', fontSize: 9, alignment: 'center', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 }
+                        ]).map((elementConfig: any, elementIdx: number) => {
+                          const s = getElementStyle(elementConfig.id);
                           if (!s.isVisible) return null;
-                          return (
-                            <div style={s.style} className={`uppercase tracking-tight whitespace-pre-line mb-1.5 leading-tight p-1 rounded ${s.className}`}>
-                              {settings.customReceiptHeader || 'LAUGHDRY EXPRESS'}
-                            </div>
-                          );
-                        })()}
 
-                        {settings.showBranchPhone && (
-                          <div className="font-bold text-slate-700 text-center text-[8px] mb-1">
-                            TELP BRANCH: {settings.branchPhone || '0812-3456-7890'}
-                          </div>
-                        )}
+                          const spacingStyle = elementIdx > 0 ? { marginTop: `${s.spacing}px` } : {};
 
-                        <div className="border-t border-dashed border-slate-400 my-2"></div>
+                          switch (elementConfig.id) {
+                            case 'outlet_name':
+                              return (
+                                <div key={elementConfig.id} style={{ ...spacingStyle }} className="space-y-1">
+                                  <div 
+                                    style={s.style} 
+                                    className={`uppercase tracking-tight whitespace-pre-line leading-tight p-1 rounded ${s.className}`}
+                                  >
+                                    {settings.customReceiptHeader || 'LAUGHDRY EXPRESS'}
+                                  </div>
+                                  {settings.showBranchPhone && (
+                                    <div className="font-bold text-slate-700 text-center text-[8px] mb-1">
+                                      TELP BRANCH: {settings.branchPhone || '0812-3456-7890'}
+                                    </div>
+                                  )}
+                                </div>
+                              );
 
-                        {/* Invoice & order meta information */}
-                        <div className="space-y-0.5 text-slate-850">
-                          {(() => {
-                            const s = getElementStyle('invoice_number');
-                            if (!s.isVisible) return null;
-                            return (
-                              <div style={s.style} className={`leading-tight p-1 rounded ${s.className}`}>
-                                {s.showPrefix && 'Nbr: '}LD-10023-A
-                              </div>
-                            );
-                          })()}
+                            case 'invoice_number':
+                              return (
+                                <div 
+                                  key={elementConfig.id}
+                                  style={{ ...s.style, ...spacingStyle }} 
+                                  className={`p-0.5 rounded ${s.className}`}
+                                >
+                                  {s.showPrefix ? 'Nota  : LD-20260604-0012' : 'LD-20260604-0012'}
+                                </div>
+                              );
 
-                          {(() => {
-                            const s = getElementStyle('customer_name');
-                            if (!s.isVisible) return null;
-                            return (
-                              <div style={s.style} className={`leading-tight p-1 rounded uppercase ${s.className}`}>
-                                {s.showPrefix && 'Cust: '}Budiman Pratama
-                              </div>
-                            );
-                          })()}
+                            case 'order_date':
+                              return (
+                                <div 
+                                  key={elementConfig.id}
+                                  style={{ ...s.style, ...spacingStyle }} 
+                                  className={`p-0.5 rounded ${s.className}`}
+                                >
+                                  {s.showPrefix ? `Tgl   : ${new Date().toLocaleDateString('id-ID')}` : new Date().toLocaleDateString('id-ID')}
+                                </div>
+                              );
 
-                          {(() => {
-                            const s = getElementStyle('customer_phone');
-                            if (!s.isVisible) return null;
-                            return (
-                              <div style={s.style} className={`leading-tight p-0.5 rounded ${s.className}`}>
-                                {s.showPrefix && 'Tel: '}0812-9876-5432
-                              </div>
-                            );
-                          })()}
+                            case 'customer_name':
+                              return (
+                                <div 
+                                  key={elementConfig.id}
+                                  style={{ ...s.style, ...spacingStyle }} 
+                                  className={`p-0.5 rounded ${s.className}`}
+                                >
+                                  {s.showPrefix ? 'Cust  : Budi Hartono' : 'Budi Hartono'}
+                                </div>
+                              );
 
-                          {(() => {
-                            const s = getElementStyle('order_date');
-                            if (!s.isVisible) return null;
-                            return (
-                              <div style={s.style} className={`leading-tight p-0.5 rounded ${s.className}`}>
-                                {s.showPrefix && 'Date: '}09/06/2026 14:15
-                              </div>
-                            );
-                          })()}
+                            case 'customer_phone':
+                              if (!settings.showCustomerPhoneInReceipt) return null;
+                              return (
+                                <div 
+                                  key={elementConfig.id}
+                                  style={{ ...s.style, ...spacingStyle }} 
+                                  className={`p-0.5 rounded ${s.className}`}
+                                >
+                                  {s.showPrefix ? 'Telp  : 0812-7788-9900' : '0812-7788-9900'}
+                                </div>
+                              );
 
-                          {(() => {
-                            const s = getElementStyle('cashier_info');
-                            if (!s.isVisible) return null;
-                            return (
-                              <div style={s.style} className={`leading-tight p-0.5 rounded uppercase ${s.className}`}>
-                                {s.showPrefix && 'Opr: '}Andi Wijaya
-                              </div>
-                            );
-                          })()}
+                            case 'cashier_info':
+                              if (!settings.showCashierNameInReceipt) return null;
+                              return (
+                                <div 
+                                  key={elementConfig.id}
+                                  style={{ ...s.style, ...spacingStyle }} 
+                                  className={`p-0.5 rounded ${s.className}`}
+                                >
+                                  {s.showPrefix ? 'Kasir : Amanda Kasir (POS)' : 'Amanda Kasir (POS)'}
+                                </div>
+                              );
 
-                          {(() => {
-                            const s = getElementStyle('order_status');
-                            if (!s.isVisible) return null;
-                            return (
-                              <div style={s.style} className={`leading-tight p-0.5 rounded ${s.className}`}>
-                                {s.showPrefix && 'Pay: '}LUNAS (Cash - Rp50.000)
-                              </div>
-                            );
-                          })()}
+                            case 'order_status':
+                              return (
+                                <div 
+                                  key={elementConfig.id}
+                                  style={{ ...s.style, ...spacingStyle }} 
+                                  className={`p-0.5 rounded ${s.className}`}
+                                >
+                                  {s.showPrefix ? 'Status: LUNAS via QRIS' : 'LUNAS via QRIS'}
+                                </div>
+                              );
 
-                          {(() => {
-                            const s = getElementStyle('estimated_time');
-                            if (!s.isVisible) return null;
-                            return (
-                              <div style={s.style} className={`leading-tight p-0.5 rounded ${s.className}`}>
-                                {s.showPrefix && 'Est: '}11/06/2026 14:15
-                              </div>
-                            );
-                          })()}
+                            case 'estimated_time':
+                              if (!settings.showEstimatedCompletion) return null;
+                              return (
+                                <div 
+                                  key={elementConfig.id}
+                                  style={{ ...s.style, ...spacingStyle }} 
+                                  className={`p-0.5 rounded ${s.className}`}
+                                >
+                                  {s.showPrefix ? 'Estim : 07/06/2026, 15:00' : '07/06/2026, 15:00'}
+                                </div>
+                              );
 
-                          {(() => {
-                            const s = getElementStyle('perfume_fragrance');
-                            if (!s.isVisible) return null;
-                            return (
-                              <div style={s.style} className={`leading-tight p-0.5 rounded ${s.className}`}>
-                                {s.showPrefix && 'Parfum: '}Downy Red Sweet
-                              </div>
-                            );
-                          })()}
-                        </div>
+                            case 'perfume_fragrance':
+                              return (
+                                <div 
+                                  key={elementConfig.id}
+                                  style={{ ...s.style, ...spacingStyle }} 
+                                  className={`p-0.5 rounded ${s.className}`}
+                                >
+                                  {s.showPrefix ? 'Aroma : + SWEET CANDY EXOTIC' : '+ SWEET CANDY EXOTIC'}
+                                </div>
+                              );
 
-                        <div className="border-t border-dashed border-slate-400 my-2"></div>
+                            case 'item_list':
+                              return (
+                                <div key={elementConfig.id} style={{ ...spacingStyle }} className="w-full">
+                                  <div className="border-t border-dashed border-slate-400 my-2"></div>
+                                  <div 
+                                    style={s.style} 
+                                    className="p-0.5"
+                                  >
+                                    <div className={`space-y-2 ${s.className}`}>
+                                      <div className="space-y-0.5 text-left">
+                                        <div className="font-extrabold text-slate-950 leading-tight">Cuci Setrika Reguler - Kiloan</div>
+                                        <div className="flex justify-between text-slate-600 text-[8.5px]">
+                                          <span>{s.showPrefix ? 'Qty: ' : ''}3 KG x @Rp 8.000</span>
+                                          <span className="font-black text-slate-950">Rp 24.000</span>
+                                        </div>
+                                      </div>
+                                      <div className="space-y-0.5 text-left">
+                                        <div className="font-extrabold text-slate-950 leading-tight">Bedcover Large - Satuan</div>
+                                        <div className="flex justify-between text-slate-600 text-[8.5px]">
+                                          <span>{s.showPrefix ? 'Qty: ' : ''}1 PCS x @Rp 35.000</span>
+                                          <span className="font-black text-slate-950">Rp 35.000</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
 
-                        {/* Item list */}
-                        {(() => {
-                          const s = getElementStyle('item_list');
-                          if (!s.isVisible) return null;
-                          return (
-                            <div style={s.style} className={`p-1 rounded ${s.className}`}>
-                              <div className="flex justify-between text-[11px] font-bold">
-                                <span>Cucian Kiloan (Reguler)</span>
-                                <span>5 kg</span>
-                              </div>
-                              <div className="flex justify-between text-[9px] text-slate-500">
-                                <span>@ Rp10.000 / kg</span>
-                                <span>Rp50.000</span>
-                              </div>
-                            </div>
-                          );
-                        })()}
+                            case 'total_charge':
+                              return (
+                                <div key={elementConfig.id} style={{ ...spacingStyle }} className="w-full">
+                                  <div className="border-t border-dashed border-slate-400 my-2"></div>
+                                  <div 
+                                    style={s.style} 
+                                    className="p-0.5"
+                                  >
+                                    <div className={`space-y-1 text-slate-950 ${s.className}`}>
+                                      <div className="flex justify-between font-black">
+                                        {s.showPrefix ? (
+                                          <>
+                                            <span>TOTAL BIAYA:</span>
+                                            <span>Rp 59.000</span>
+                                          </>
+                                        ) : (
+                                          <span className="w-full text-center block">Rp 59.000</span>
+                                        )}
+                                      </div>
+                                      <div className="flex justify-between text-[8px] text-slate-700">
+                                        {s.showPrefix ? (
+                                          <>
+                                            <span>PAID STATE:</span>
+                                            <span>LUNAS (Rp 0)</span>
+                                          </>
+                                        ) : (
+                                          <span className="w-full text-center block">LUNAS (Rp 0)</span>
+                                        )}
+                                      </div>
+                                      {settings.showNotesInReceipt && (
+                                        <div className="text-slate-650 italic text-[8.2px] mt-1 border-t border-slate-100 pt-1 text-left">
+                                          Notes: "Wanginya dibanyakin ya kak, trims"
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
 
-                        <div className="border-t border-dashed border-slate-400 my-2"></div>
+                            case 'member_points':
+                              if (!settings.showPointsInReceipt) return null;
+                              return (
+                                <div 
+                                  key={elementConfig.id}
+                                  style={{ ...s.style, ...spacingStyle }} 
+                                  className={`flex justify-between font-bold rounded p-0.5 mt-1 ${s.className}`}
+                                >
+                                  {s.showPrefix ? (
+                                    <>
+                                      <span>POIN MEMBER:</span>
+                                      <span>+1 Poin (+1 Stamp)</span>
+                                    </>
+                                  ) : (
+                                    <span className="w-full text-center block">+1 Poin (+1 Stamp)</span>
+                                  )}
+                                </div>
+                              );
 
-                        {/* Total charge */}
-                        {(() => {
-                          const s = getElementStyle('total_charge');
-                          if (!s.isVisible) return null;
-                          return (
-                            <div style={s.style} className={`p-1 rounded pr-2 text-slate-900 ${s.className}`}>
-                              {s.showPrefix && 'TOTAL TAGIHAN: '}Rp50.000
-                            </div>
-                          );
-                        })()}
+                            case 'footer_terms':
+                              if (!settings.showTermsInReceipt) return null;
+                              return (
+                                <div key={elementConfig.id} style={{ ...spacingStyle }} className="w-full">
+                                  <div className="border-t border-dashed border-slate-400 my-2"></div>
+                                  <div 
+                                    style={s.style} 
+                                    className="p-0.5"
+                                  >
+                                    <div className={`whitespace-pre-line leading-tight text-slate-700 ${s.className}`}>
+                                      {settings.customReceiptFooter || `* KETENTUAN OPERASIONAL *
+1. Serahkan nota asli saat ambil pakaian.
+2. Kerusakan/hilang diganti 5x lipat.
+3. Komplain maksimal 1x24 jam pasca ambil.`}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
 
-                        {/* Member points */}
-                        {(() => {
-                          const s = getElementStyle('member_points');
-                          if (!s.isVisible) return null;
-                          return (
-                            <div style={s.style} className={`p-0.5 rounded text-amber-800 ${s.className}`}>
-                              {s.showPrefix && 'Loyalty Points: '}+5 Poin (Total: 45 Poin)
-                            </div>
-                          );
-                        })()}
+                            default:
+                              return null;
+                          }
+                        })}
 
-                        <div className="border-t border-dashed border-slate-400 my-2"></div>
 
-                        {/* Footer S&K */}
-                        {(() => {
-                          const s = getElementStyle('footer_terms');
-                          if (!s.isVisible) return null;
-                          return (
-                            <div style={s.style} className={`text-slate-700 whitespace-pre-line leading-tight p-1 rounded ${s.className}`}>
-                              {settings.customReceiptFooter || 'Terima kasih telah mencuci di LaughDry!\nHarap bawa nota ini saat pengambilan pakaian.'}
-                            </div>
-                          );
-                        })()}
 
                         {/* Custom promos */}
                         {settings.customReceiptPromo && (
                           <div className="border-t border-dashed border-slate-400 my-2 pt-1.5">
                             <div className="text-center font-black text-[9px] text-rose-600 uppercase tracking-wide leading-tight bg-rose-50 p-1.5 rounded-lg border border-dashed border-rose-200">
-                              📣 PROMO: {settings.customReceiptPromo}
+                              PROMO: {settings.customReceiptPromo}
                             </div>
                           </div>
                         )}

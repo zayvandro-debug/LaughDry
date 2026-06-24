@@ -181,6 +181,7 @@ export interface SystemSettings {
   customReceiptHeaderLogoImg?: string;
   customReceiptPromo?: string;
   receiptElements?: ReceiptElementStyle[];
+  elementSpacing?: number; // spacing between elements on physical/thermal receipt in pixels
   // QRIS fields
   qrisType?: 'none' | 'static' | 'dynamic';
   qrisMerchantId?: string;
@@ -206,6 +207,7 @@ export interface ReceiptElementStyle {
   showPrefix?: boolean; // True by default. If false, prefix (e.g. "Cust:") is hidden
   isItalic?: boolean;   // Support italic stylized font modifier
   isVisibleInti?: boolean; // True if printed in "Print Inti" template option
+  spacing?: number;     // Fine-grain, pixel-by-pixel individual element control (top spacing/margin)
 }
 
 export interface AttendanceRecord {

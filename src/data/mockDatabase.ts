@@ -20,8 +20,7 @@ import {
   AttendanceRecord,
 } from '../types';
 import { LaundryService } from '../services/laundryService';
-import { collection, doc, onSnapshot } from 'firebase/firestore';
-import { db, auth } from '../lib/firebase';
+import { db, auth, setFirebaseQuotaExceeded, collection, doc, onSnapshot } from '../lib/firebase';
 import logoImg from '../assets/images/logo_laughdry_1781839107009.jpg';
 
 // Let's seed with rich initial data that demonstrates the platform's features instantly.
@@ -132,20 +131,20 @@ const INITIAL_SETTINGS: SystemSettings = {
   customReceiptHeaderLogoImg: logoImg,
   customReceiptFooter: 'TERIMA KASIH ATAS KUNJUNGAN ANDA!\nSIMPAN STRUK INI SEBAGAI PENJAMIN',
   receiptElements: [
-    { id: 'outlet_name', label: 'Nama Outlet / Cabang', fontSize: 13, alignment: 'center', isBold: true, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: true },
-    { id: 'invoice_number', label: 'Nomor Nota Transaksi', fontSize: 11, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: true },
-    { id: 'customer_name', label: 'Nama Lengkap Pelanggan', fontSize: 13, alignment: 'left', isBold: true, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: true },
-    { id: 'customer_phone', label: 'Nomor HP Pelanggan', fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: false },
-    { id: 'order_date', label: 'Tanggal Transaksi', fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: true },
-    { id: 'cashier_info', label: 'Informasi Kasir', fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: false },
-    { id: 'order_status', label: 'Status Pembayaran', fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: false },
-    { id: 'estimated_time', label: 'Estimasi Ambil Cucian', fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: false },
-    { id: 'perfume_fragrance', label: 'Aroma Parfum Terpilih', fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: false },
-    { id: 'item_list', label: 'Daftar Cucian & Harga', fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: true },
-    { id: 'total_charge', label: 'Total Tagihan Biaya', fontSize: 12, alignment: 'right', isBold: true, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: true },
-    { id: 'member_points', label: 'Poin Member', fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: false },
-    { id: 'footer_terms', label: 'Catatan & Ucapan Terima Kasih', fontSize: 9, alignment: 'center', isBold: false, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: false },
-    { id: 'whatsapp_template', label: 'Pesan WA Template / CRM', fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: true, isVisibleInti: false }
+    { id: 'outlet_name', label: 'Nama Outlet / Cabang', fontSize: 13, alignment: 'center', isBold: true, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: true, spacing: 4 },
+    { id: 'invoice_number', label: 'Nomor Nota Transaksi', fontSize: 11, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: true, spacing: 4 },
+    { id: 'customer_name', label: 'Nama Lengkap Pelanggan', fontSize: 13, alignment: 'left', isBold: true, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: true, spacing: 4 },
+    { id: 'customer_phone', label: 'Nomor HP Pelanggan', fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: false, spacing: 4 },
+    { id: 'order_date', label: 'Tanggal Transaksi', fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: true, spacing: 4 },
+    { id: 'cashier_info', label: 'Informasi Kasir', fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: false, spacing: 4 },
+    { id: 'order_status', label: 'Status Pembayaran', fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: false, spacing: 4 },
+    { id: 'estimated_time', label: 'Estimasi Ambil Cucian', fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: false, spacing: 4 },
+    { id: 'perfume_fragrance', label: 'Aroma Parfum Terpilih', fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: false, spacing: 4 },
+    { id: 'item_list', label: 'Daftar Cucian & Harga', fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: true, spacing: 4 },
+    { id: 'total_charge', label: 'Total Tagihan Biaya', fontSize: 12, alignment: 'right', isBold: true, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: true, spacing: 4 },
+    { id: 'member_points', label: 'Poin Member', fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: false, spacing: 4 },
+    { id: 'footer_terms', label: 'Catatan & Ucapan Terima Kasih', fontSize: 9, alignment: 'center', isBold: false, isVisible: true, showPrefix: true, isItalic: false, isVisibleInti: false, spacing: 4 },
+    { id: 'whatsapp_template', label: 'Pesan WA Template / CRM', fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: true, isVisibleInti: false, spacing: 4 }
   ],
   qrisType: 'static',
   qrisMerchantId: 'ID1020304050607',
@@ -210,8 +209,26 @@ export class LaughDryDatabase {
     return !!(a && typeof a === 'object' && a.id && a.userId && a.userName && a.branchId && a.checkIn && a.status);
   }
 
+  public static isFirebaseQuotaExceeded(): boolean {
+    if (typeof localStorage === 'undefined') return false;
+    const quotaTS = localStorage.getItem('laughdry_firebase_quota_exceeded_timestamp');
+    if (quotaTS) {
+      const elapsed = Date.now() - parseInt(quotaTS, 10);
+      if (elapsed < 10800000) { // 3 hours
+        return true;
+      } else {
+        localStorage.removeItem('laughdry_firebase_quota_exceeded_timestamp');
+      }
+    }
+    return false;
+  }
+
   // Firestore Synchronization static helper
   public static async syncFromFirestore(): Promise<void> {
+    if (this.isFirebaseQuotaExceeded()) {
+      console.log('Firebase quota is currently exceeded, skipping syncFromFirestore.');
+      return;
+    }
     if (localStorage.getItem('laughdry_firebase_disabled') === 'true') {
       console.log('Firebase is disabled, skipping syncFromFirestore.');
       return;
@@ -222,46 +239,16 @@ export class LaughDryDatabase {
       return;
     }
     try {
-      const skipDemoSeeds = localStorage.getItem('laughdry_skip_demo_seeds') === 'true';
-
-      // Proactively purge historical sandbox trial data records from Firestore
-      const mockCustomerIds = ['cust-1', 'cust-2', 'cust-3', 'cust-4', 'cust-5', 'cust-6', 'cust-7'];
-      const mockOrderIds = ['ord-1001', 'ord-1002', 'ord-1003', 'ord-1004', 'ord-1005'];
-      const mockExpenseIds = ['exp-1', 'exp-2', 'exp-3', 'exp-4', 'exp-5', 'exp-6', 'exp-7'];
-
-      if (!skipDemoSeeds) {
-        for (const id of mockCustomerIds) {
-          try { await LaundryService.deleteCustomer(id); } catch(e) {}
-        }
-        for (const id of mockOrderIds) {
-          try { await LaundryService.deleteOrder(id); } catch(e) {}
-        }
-        for (const id of mockExpenseIds) {
-          try { await LaundryService.deleteExpense(id); } catch(e) {}
-        }
-      }
+      localStorage.setItem('laughdry_skip_demo_seeds', 'true');
 
       // 0. Users (Owner & Kasir)
       const firestoreUsers = await LaundryService.getFirestoreUsers();
       const validUsers = firestoreUsers.filter(u => this.isValidUser(u));
-      const localUsers = this.getUsers().filter(u => this.isValidUser(u));
-      const isLocalUsersDefault = localUsers.length === 1 && 
-        localUsers[0].id === 'usr-1' && 
-        localUsers[0].name === 'Andi Owner' && 
-        localUsers[0].username === 'owner' && 
-        localUsers[0].password === 'owner';
-
       if (validUsers.length > 0) {
         this.saveKey('users', validUsers);
       } else {
-        if (!isLocalUsersDefault) {
-          for (const u of localUsers) {
-            await LaundryService.saveFirestoreUser(u);
-          }
-        } else {
-          for (const u of INITIAL_USERS) {
-            await LaundryService.saveFirestoreUser(u);
-          }
+        const localUsers = this.getUsers().filter(u => this.isValidUser(u));
+        if (localUsers.length === 0) {
           this.saveKey('users', INITIAL_USERS);
         }
       }
@@ -269,70 +256,41 @@ export class LaughDryDatabase {
       // 1. Branches
       const firestoreBranches = await LaundryService.getBranches();
       const validBranches = firestoreBranches.filter(b => this.isValidBranch(b));
-      const localBranches = this.getBranches().filter(b => this.isValidBranch(b));
-      const isLocalBranchesDefault = localBranches.length === 1 && localBranches[0].id === 'br-1' && localBranches[0].name === 'Cabang Utama';
-
       if (validBranches.length > 0) {
         this.saveKey('branches', validBranches);
       } else {
-        if (skipDemoSeeds) {
-          this.saveKey('branches', localBranches);
-        } else {
-          if (!isLocalBranchesDefault) {
-            for (const b of localBranches) {
-              await LaundryService.saveBranch(b);
-            }
-          } else {
-            for (const b of INITIAL_BRANCHES) {
-              await LaundryService.saveBranch(b);
-            }
-            this.saveKey('branches', INITIAL_BRANCHES);
-          }
+        const localBranches = this.getBranches().filter(b => this.isValidBranch(b));
+        if (localBranches.length === 0) {
+          this.saveKey('branches', INITIAL_BRANCHES);
         }
       }
 
       // 2. Services
       const firestoreServices = await LaundryService.getServices();
       const validServices = firestoreServices.filter(s => this.isValidService(s));
-      const localServices = this.getServices().filter(s => this.isValidService(s));
-      const isLocalServicesDefault = localServices.length === INITIAL_SERVICES.length && localServices[0]?.id === 'srv-1';
-
       if (validServices.length > 0) {
         this.saveKey('services', validServices);
       } else {
-        if (skipDemoSeeds) {
-          this.saveKey('services', localServices);
-        } else {
-          if (!isLocalServicesDefault) {
-            for (const s of localServices) {
-              await LaundryService.saveService(s);
-            }
-          } else {
-            for (const s of INITIAL_SERVICES) {
-              await LaundryService.saveService(s);
-            }
-            this.saveKey('services', INITIAL_SERVICES);
-          }
+        const localServices = this.getServices().filter(s => this.isValidService(s));
+        if (localServices.length === 0) {
+          this.saveKey('services', INITIAL_SERVICES);
         }
       }
 
       // 3. Customers
       const customers = await LaundryService.getCustomers();
       const validCustomers = customers.filter(c => this.isValidCustomer(c));
-      const cleanCustomers = skipDemoSeeds ? validCustomers : validCustomers.filter(c => !mockCustomerIds.includes(c.id));
-      this.saveKey('customers', cleanCustomers);
+      this.saveKey('customers', validCustomers);
 
       // 4. Orders
       const orders = await LaundryService.getOrders();
       const validOrders = orders.filter(o => this.isValidOrder(o));
-      const cleanOrders = skipDemoSeeds ? validOrders : validOrders.filter(o => !mockOrderIds.includes(o.id));
-      this.saveKey('orders', cleanOrders);
+      this.saveKey('orders', validOrders);
 
       // 5. Expenses
       const expenses = await LaundryService.getExpenses();
       const validExpenses = expenses.filter(e => this.isValidExpense(e));
-      const cleanExpenses = skipDemoSeeds ? validExpenses : validExpenses.filter(e => !mockExpenseIds.includes(e.id));
-      this.saveKey('expenses', cleanExpenses);
+      this.saveKey('expenses', validExpenses);
 
       // 6. Settings
       const firestoreSettings = await LaundryService.getSettings();
@@ -341,10 +299,7 @@ export class LaughDryDatabase {
       if (firestoreSettings && this.isValidSettings(firestoreSettings)) {
         this.saveKey('settings', firestoreSettings);
       } else {
-        if (localSettings && this.isValidSettings(localSettings)) {
-          await LaundryService.saveSettings(localSettings);
-        } else {
-          await LaundryService.saveSettings(INITIAL_SETTINGS);
+        if (!localSettings || !this.isValidSettings(localSettings)) {
           this.saveKey('settings', INITIAL_SETTINGS);
         }
       }
@@ -357,31 +312,18 @@ export class LaughDryDatabase {
       // 8. Perfumes (parfume collection)
       const firestorePerfumes = await LaundryService.getPerfumes();
       const validPerfumes = firestorePerfumes.filter(p => this.isValidPerfume(p));
-      const localPerfumes = this.getPerfumes().filter(p => this.isValidPerfume(p));
-      const isLocalPerfumeDefault = localPerfumes.length === 4 && localPerfumes[0]?.id === 'pf-1';
-
       if (validPerfumes.length > 0) {
         this.saveKey('perfumes', validPerfumes);
       } else {
-        if (skipDemoSeeds) {
-          this.saveKey('perfumes', localPerfumes);
-        } else {
-          if (!isLocalPerfumeDefault) {
-            for (const p of localPerfumes) {
-              await LaundryService.savePerfume(p);
-            }
-          } else {
-            const defaultPerfumes = [
-              { id: 'pf-1', name: 'Floral', description: 'Keharuman melati & kelopak bunga mawar anggun yang indah', isActive: true, icon: '🌸' },
-              { id: 'pf-2', name: 'Fresh', description: 'Wangi relaksasi kelapa muda segar pantai tropis', isActive: true, icon: '🥥' },
-              { id: 'pf-3', name: 'Sweet', description: 'Aroma manis kental buah stroberi segar kesukaan anak-anak', isActive: true, icon: '🍓' },
-              { id: 'pf-4', name: 'Woody', description: 'Keharuman maskulin batang kayu alami yang menenangkan', isActive: true, icon: '🪵' }
-            ];
-            for (const p of defaultPerfumes) {
-              await LaundryService.savePerfume(p);
-            }
-            this.saveKey('perfumes', defaultPerfumes);
-          }
+        const localPerfumes = this.getPerfumes().filter(p => this.isValidPerfume(p));
+        if (localPerfumes.length === 0) {
+          const defaultPerfumes = [
+            { id: 'pf-1', name: 'Floral', description: 'Keharuman melati & kelopak bunga mawar anggun yang indah', isActive: true, icon: '🌸' },
+            { id: 'pf-2', name: 'Fresh', description: 'Wangi relaksasi kelapa muda segar pantai tropis', isActive: true, icon: '🥥' },
+            { id: 'pf-3', name: 'Sweet', description: 'Aroma manis kental buah stroberi segar kesukaan anak-anak', isActive: true, icon: '🍓' },
+            { id: 'pf-4', name: 'Woody', description: 'Keharuman maskulin batang kayu alami yang menenangkan', isActive: true, icon: '🪵' }
+          ];
+          this.saveKey('perfumes', defaultPerfumes);
         }
       }
 
@@ -550,9 +492,23 @@ export class LaughDryDatabase {
       try {
         await this.executeSync(item.type, item.action, item.payloadId, item.payload);
         successCount++;
-      } catch (err) {
+      } catch (err: any) {
         console.error(`Failed to sync pending ${item.type} (${item.payloadId})`, err);
         remaining.push(item);
+
+        const errMsg = (err?.message || '').toLowerCase();
+        if (errMsg.includes('quota') || errMsg.includes('resource-exhausted') || errMsg.includes('exhausted') || errMsg.includes('limit exceeded')) {
+          setFirebaseQuotaExceeded();
+          
+          // Break immediately and push all remaining unattempted items back into the queue
+          const currentIndex = pending.indexOf(item);
+          if (currentIndex !== -1) {
+            for (let i = currentIndex + 1; i < pending.length; i++) {
+              remaining.push(pending[i]);
+            }
+          }
+          break;
+        }
       }
     }
     
@@ -713,20 +669,6 @@ export class LaughDryDatabase {
         this.queueSync('expense', 'delete', prevItem.id, null);
       }
     });
-
-    // Otomatis simpan data cabang, owner, dan karyawan ke database realtime setiap kali menginput pengeluaran baru
-    try {
-      const branches = this.getBranches();
-      branches.forEach(b => {
-        this.queueSync('branch', 'save', b.id, b);
-      });
-      const users = this.getUsers();
-      users.forEach(u => {
-        this.queueSync('user', 'save', u.id, u);
-      });
-    } catch (err) {
-      console.error("Gagal otomatis menyimpan data cabang, owner, dan karyawan saat pengeluaran baru:", err);
-    }
   }
 
   public static getDeposits(): DepositMutation[] { return this.loadKey('deposits', INITIAL_DEPOSITS); }
@@ -962,7 +904,40 @@ export class LaughDryDatabase {
 
   private static unsubscribes: (() => void)[] = [];
 
+  private static safeOnSnapshot(query: any, onNext: (snapshot: any) => void, onError: (error: any) => void): () => void {
+    if (this.isFirebaseQuotaExceeded()) {
+      return () => {};
+    }
+    try {
+      return onSnapshot(query, onNext, (error) => {
+        const errMsg = (error?.message || '').toLowerCase();
+        if (errMsg.includes('quota') || errMsg.includes('resource-exhausted') || errMsg.includes('exhausted') || errMsg.includes('limit exceeded')) {
+          setFirebaseQuotaExceeded();
+        }
+        onError(error);
+      });
+    } catch (e: any) {
+      onError(e);
+      return () => {};
+    }
+  }
+
+  private static handleRealtimeError(error: any, moduleName: string) {
+    console.error(`Realtime listener error - ${moduleName}:`, error);
+    const errMsg = (error?.message || '').toLowerCase();
+    if (errMsg.includes('quota') || errMsg.includes('resource-exhausted') || errMsg.includes('exhausted') || errMsg.includes('limit exceeded')) {
+      setFirebaseQuotaExceeded();
+      console.warn(`Stopping all realtime listeners due to Firebase daily quota exhaustion detected in ${moduleName}.`);
+      this.stopRealtimeListeners();
+      window.dispatchEvent(new CustomEvent('laughdry_data_changed'));
+    }
+  }
+
   public static startRealtimeListeners(): void {
+    if (this.isFirebaseQuotaExceeded()) {
+      console.warn("Firebase quota is currently exceeded, skipping startRealtimeListeners.");
+      return;
+    }
     if (localStorage.getItem('laughdry_firebase_disabled') === 'true') {
       console.log('Firebase is disabled, skipping startRealtimeListeners.');
       return;
@@ -979,7 +954,7 @@ export class LaughDryDatabase {
 
     try {
       // 1. Listen to orders
-      const unsubOrders = onSnapshot(collection(db, parent, 'orders'), (snapshot) => {
+      const unsubOrders = this.safeOnSnapshot(collection(db, parent, 'orders'), (snapshot) => {
         const list: Order[] = [];
         snapshot.forEach(doc => {
           list.push(doc.data() as Order);
@@ -995,12 +970,12 @@ export class LaughDryDatabase {
           window.dispatchEvent(new CustomEvent('laughdry_db_synced'));
         }
       }, (error) => {
-        console.error("Realtime listener error - orders:", error);
+        this.handleRealtimeError(error, "orders");
       });
       this.unsubscribes.push(unsubOrders);
 
       // 2. Listen to customers
-      const unsubCustomers = onSnapshot(collection(db, parent, 'customers'), (snapshot) => {
+      const unsubCustomers = this.safeOnSnapshot(collection(db, parent, 'customers'), (snapshot) => {
         const list: Customer[] = [];
         snapshot.forEach(doc => {
           list.push(doc.data() as Customer);
@@ -1015,12 +990,12 @@ export class LaughDryDatabase {
           window.dispatchEvent(new CustomEvent('laughdry_db_synced'));
         }
       }, (error) => {
-        console.error("Realtime listener error - customers:", error);
+        this.handleRealtimeError(error, "customers");
       });
       this.unsubscribes.push(unsubCustomers);
 
       // 3. Listen to expenses
-      const unsubExpenses = onSnapshot(collection(db, parent, 'expenses'), (snapshot) => {
+      const unsubExpenses = this.safeOnSnapshot(collection(db, parent, 'expenses'), (snapshot) => {
         const list: Expense[] = [];
         snapshot.forEach(doc => {
           list.push(doc.data() as Expense);
@@ -1035,12 +1010,12 @@ export class LaughDryDatabase {
           window.dispatchEvent(new CustomEvent('laughdry_db_synced'));
         }
       }, (error) => {
-        console.error("Realtime listener error - expenses:", error);
+        this.handleRealtimeError(error, "expenses");
       });
       this.unsubscribes.push(unsubExpenses);
 
       // 4. Listen to branches
-      const unsubBranches = onSnapshot(collection(db, parent, 'branches'), (snapshot) => {
+      const unsubBranches = this.safeOnSnapshot(collection(db, parent, 'branches'), (snapshot) => {
         const list: Branch[] = [];
         snapshot.forEach(doc => {
           list.push(doc.data() as Branch);
@@ -1052,12 +1027,12 @@ export class LaughDryDatabase {
           window.dispatchEvent(new CustomEvent('laughdry_db_synced'));
         }
       }, (error) => {
-        console.error("Realtime listener error - branches:", error);
+        this.handleRealtimeError(error, "branches");
       });
       this.unsubscribes.push(unsubBranches);
 
       // 5. Listen to services
-      const unsubServices = onSnapshot(collection(db, parent, 'services'), (snapshot) => {
+      const unsubServices = this.safeOnSnapshot(collection(db, parent, 'services'), (snapshot) => {
         const list: Service[] = [];
         snapshot.forEach(doc => {
           list.push(doc.data() as Service);
@@ -1069,12 +1044,12 @@ export class LaughDryDatabase {
           window.dispatchEvent(new CustomEvent('laughdry_db_synced'));
         }
       }, (error) => {
-        console.error("Realtime listener error - services:", error);
+        this.handleRealtimeError(error, "services");
       });
       this.unsubscribes.push(unsubServices);
 
       // 6. Listen to users
-      const unsubUsers = onSnapshot(collection(db, parent, 'users'), (snapshot) => {
+      const unsubUsers = this.safeOnSnapshot(collection(db, parent, 'users'), (snapshot) => {
         const list: User[] = [];
         snapshot.forEach(doc => {
           list.push(doc.data() as User);
@@ -1086,12 +1061,12 @@ export class LaughDryDatabase {
           window.dispatchEvent(new CustomEvent('laughdry_db_synced'));
         }
       }, (error) => {
-        console.error("Realtime listener error - users:", error);
+        this.handleRealtimeError(error, "users");
       });
       this.unsubscribes.push(unsubUsers);
 
       // 7. Listen to attendance
-      const unsubAttendance = onSnapshot(collection(db, parent, 'attendance'), (snapshot) => {
+      const unsubAttendance = this.safeOnSnapshot(collection(db, parent, 'attendance'), (snapshot) => {
         const list: AttendanceRecord[] = [];
         snapshot.forEach(doc => {
           list.push(doc.data() as AttendanceRecord);
@@ -1105,12 +1080,12 @@ export class LaughDryDatabase {
           window.dispatchEvent(new CustomEvent('laughdry_db_synced'));
         }
       }, (error) => {
-        console.error("Realtime listener error - attendance:", error);
+        this.handleRealtimeError(error, "attendance");
       });
       this.unsubscribes.push(unsubAttendance);
 
       // 8. Listen to settings
-      const unsubSettings = onSnapshot(doc(db, parent, 'settings', 'system'), (snapshot) => {
+      const unsubSettings = this.safeOnSnapshot(doc(db, parent, 'settings', 'system'), (snapshot) => {
         if (snapshot.exists()) {
           const s = snapshot.data() as SystemSettings;
           const currentLocal = this.loadKey<SystemSettings | null>('settings', null);
@@ -1122,12 +1097,12 @@ export class LaughDryDatabase {
           }
         }
       }, (error) => {
-        console.error("Realtime listener error - settings:", error);
+        this.handleRealtimeError(error, "settings");
       });
       this.unsubscribes.push(unsubSettings);
 
       // 9. Listen to perfumes (parfume collection)
-      const unsubPerfumes = onSnapshot(collection(db, parent, 'parfume'), (snapshot) => {
+      const unsubPerfumes = this.safeOnSnapshot(collection(db, parent, 'parfume'), (snapshot) => {
         const list: any[] = [];
         snapshot.forEach(doc => {
           list.push(doc.data());
@@ -1140,7 +1115,7 @@ export class LaughDryDatabase {
           window.dispatchEvent(new CustomEvent('laughdry_db_synced'));
         }
       }, (error) => {
-        console.error("Realtime listener error - perfumes:", error);
+        this.handleRealtimeError(error, "perfumes");
       });
       this.unsubscribes.push(unsubPerfumes);
 
