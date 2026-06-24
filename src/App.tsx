@@ -115,66 +115,90 @@ export default function App() {
       return;
     }
 
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setFirebaseUser(user);
-      
-      const queryParams = new URLSearchParams(window.location.search);
-      const ownerParam = queryParams.get('owner');
-      
-      if (user || ownerParam) {
-        if (ownerParam) {
-          localStorage.setItem('laughdry_firebase_uid', ownerParam);
-        } else if (user) {
-          localStorage.setItem('laughdry_firebase_uid', user.uid);
+    // Safety timeout to prevent getting stuck on "MEMBUAT JALUR TERENKRIPSI CLOUD..." on Android/slow connections
+    const timeoutDuration = isAndroidApp ? 2500 : 4000;
+    const safetyTimeout = setTimeout(() => {
+      setIsAuthLoading((current) => {
+        if (current) {
+          console.warn("Firebase Auth state observer timed out. Proceeding to gate...");
+          return false;
         }
+        return current;
+      });
+    }, timeoutDuration);
+
+    let unsubscribe = () => {};
+    try {
+      unsubscribe = onAuthStateChanged(auth, async (user) => {
+        clearTimeout(safetyTimeout);
+        setFirebaseUser(user);
         
-        // Run auth setup and background sync asynchronously to keep UI fast and interactive
-        (async () => {
-          try {
-            // Automatically save email mappings so other devices are linked easily via owner's Gmail
-            if (user && user.email && !isFirebaseQuotaExceeded()) {
-              try {
-                const emailClean = user.email.toLowerCase().trim();
-                await setDoc(doc(db, 'email_mappings', emailClean), { uid: user.uid }, { merge: true });
-              } catch (e: any) {
-                console.warn("Failed mapping write on state change (non-fatal info):", e);
-                const errMsg = (e?.message || '').toLowerCase();
-                if (errMsg.includes('quota') || errMsg.includes('resource-exhausted') || errMsg.includes('exhausted') || errMsg.includes('limit exceeded')) {
-                  setFirebaseQuotaExceeded();
+        const queryParams = new URLSearchParams(window.location.search);
+        const ownerParam = queryParams.get('owner');
+        
+        if (user || ownerParam) {
+          if (ownerParam) {
+            localStorage.setItem('laughdry_firebase_uid', ownerParam);
+          } else if (user) {
+            localStorage.setItem('laughdry_firebase_uid', user.uid);
+          }
+          
+          // Run auth setup and background sync asynchronously to keep UI fast and interactive
+          (async () => {
+            try {
+              // Automatically save email mappings so other devices are linked easily via owner's Gmail
+              if (user && user.email && !isFirebaseQuotaExceeded()) {
+                try {
+                  const emailClean = user.email.toLowerCase().trim();
+                  await setDoc(doc(db, 'email_mappings', emailClean), { uid: user.uid }, { merge: true });
+                } catch (e: any) {
+                  console.warn("Failed mapping write on state change (non-fatal info):", e);
+                  const errMsg = (e?.message || '').toLowerCase();
+                  if (errMsg.includes('quota') || errMsg.includes('resource-exhausted') || errMsg.includes('exhausted') || errMsg.includes('limit exceeded')) {
+                    setFirebaseQuotaExceeded();
+                  }
                 }
               }
-            }
-            // If login registers a brand new owner name, inject it as owner's display name
-            const customName = localStorage.getItem('laughdry_owner_name_registered');
-            if (customName) {
-              const users = LaughDryDatabase.getUsers();
-              const ownerObj = users.find(u => u.role === 'owner');
-              if (ownerObj) {
-                ownerObj.name = customName;
-                LaughDryDatabase.saveUsers(users);
+              // If login registers a brand new owner name, inject it as owner's display name
+              const customName = localStorage.getItem('laughdry_owner_name_registered');
+              if (customName) {
+                const users = LaughDryDatabase.getUsers();
+                const ownerObj = users.find(u => u.role === 'owner');
+                if (ownerObj) {
+                  ownerObj.name = customName;
+                  LaughDryDatabase.saveUsers(users);
+                }
+                localStorage.removeItem('laughdry_owner_name_registered');
               }
-              localStorage.removeItem('laughdry_owner_name_registered');
+              
+              setIsSyncing(true);
+              await LaughDryDatabase.syncFromFirestore();
+              LaughDryDatabase.startRealtimeListeners();
+              setSettings(LaughDryDatabase.getSettings());
+            } catch (err) {
+              console.error("Gagal sinkronasi latar belakang:", err);
+            } finally {
+              setIsSyncing(false);
             }
-            
-            setIsSyncing(true);
-            await LaughDryDatabase.syncFromFirestore();
-            LaughDryDatabase.startRealtimeListeners();
-            setSettings(LaughDryDatabase.getSettings());
-          } catch (err) {
-            console.error("Gagal sinkronasi latar belakang:", err);
-          } finally {
-            setIsSyncing(false);
-          }
-        })();
-      } else {
-        localStorage.removeItem('laughdry_firebase_uid');
-        LaughDryDatabase.stopRealtimeListeners();
-        setIsSyncing(false);
-      }
+          })();
+        } else {
+          localStorage.removeItem('laughdry_firebase_uid');
+          LaughDryDatabase.stopRealtimeListeners();
+          setIsSyncing(false);
+        }
+        setIsAuthLoading(false);
+      });
+    } catch (authErr) {
+      console.error("Firebase Auth initialization error:", authErr);
+      clearTimeout(safetyTimeout);
       setIsAuthLoading(false);
-    });
+    }
+
     return () => {
-      unsubscribe();
+      clearTimeout(safetyTimeout);
+      if (unsubscribe) {
+        unsubscribe();
+      }
       LaughDryDatabase.stopRealtimeListeners();
     };
   }, []);
