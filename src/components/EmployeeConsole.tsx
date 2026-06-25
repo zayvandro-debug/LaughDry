@@ -763,42 +763,61 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       // 1. Clean the text using our ASCII mapping & sanitizer
       const cleanedText = cleanAndMapTextForThermal(receiptText);
       
-      // 2. Prepare the payload buffer
-      let logoBytes: Uint8Array | null = null;
-      if (settings.showHeaderLogoInReceipt && settings.customReceiptHeaderLogoImg) {
-        logoBytes = await convertBase64LogoToEscPos(settings.customReceiptHeaderLogoImg);
-      }
-      
-      const encoder = new TextEncoder();
-      const textBytes = encoder.encode(cleanedText);
-      
-      // Init command (ESC @): 27, 64
-      const initBytes = new Uint8Array([27, 64]);
-      
-      // Paper cut/feed command (GS V 66 0): 29, 86, 66, 0 (adds some space and cuts)
-      const feedBytes = new Uint8Array([10, 10, 10, 29, 86, 66, 0]);
-      
+      // 2. Prepare high-fidelity ESC/POS byte array payload
       let finalBytes: Uint8Array;
-      if (logoBytes) {
-        const totalLen = initBytes.length + logoBytes.length + 1 + textBytes.length + feedBytes.length;
-        finalBytes = new Uint8Array(totalLen);
-        let offset = 0;
-        finalBytes.set(initBytes, offset); offset += initBytes.length;
-        finalBytes.set(logoBytes, offset); offset += logoBytes.length;
-        finalBytes[offset] = 10; offset += 1;
-        finalBytes.set(textBytes, offset); offset += textBytes.length;
-        finalBytes.set(feedBytes, offset);
+      if (activeInvoice) {
+        const receiptData = mapOrderToReceiptData(activeInvoice, settings, currentUser.name);
+        finalBytes = convertJsonToEscPos(receiptData);
       } else {
-        const totalLen = initBytes.length + textBytes.length + feedBytes.length;
-        finalBytes = new Uint8Array(totalLen);
-        let offset = 0;
-        finalBytes.set(initBytes, offset); offset += initBytes.length;
-        finalBytes.set(textBytes, offset); offset += textBytes.length;
-        finalBytes.set(feedBytes, offset);
+        let logoBytes: Uint8Array | null = null;
+        if (settings.showHeaderLogoInReceipt && settings.customReceiptHeaderLogoImg) {
+          logoBytes = await convertBase64LogoToEscPos(settings.customReceiptHeaderLogoImg);
+        }
+        
+        const encoder = new TextEncoder();
+        const textBytes = encoder.encode(cleanedText);
+        const initBytes = new Uint8Array([27, 64]);
+        const feedBytes = new Uint8Array([10, 10, 10, 29, 86, 66, 0]);
+        
+        if (logoBytes) {
+          const totalLen = initBytes.length + logoBytes.length + 1 + textBytes.length + feedBytes.length;
+          finalBytes = new Uint8Array(totalLen);
+          let offset = 0;
+          finalBytes.set(initBytes, offset); offset += initBytes.length;
+          finalBytes.set(logoBytes, offset); offset += logoBytes.length;
+          finalBytes[offset] = 10; offset += 1;
+          finalBytes.set(textBytes, offset); offset += textBytes.length;
+          finalBytes.set(feedBytes, offset);
+        } else {
+          const totalLen = initBytes.length + textBytes.length + feedBytes.length;
+          finalBytes = new Uint8Array(totalLen);
+          let offset = 0;
+          finalBytes.set(initBytes, offset); offset += initBytes.length;
+          finalBytes.set(textBytes, offset); offset += textBytes.length;
+          finalBytes.set(feedBytes, offset);
+        }
       }
 
+      // 3. Send using BLE if connected as BLE
+      if (isBlePrinter && bleDeviceAddress) {
+        showToast("📤 Mengirim data cetak thermal via BLE...");
+        await writeToBlePrinter(bleDeviceAddress, finalBytes);
+        showToast("✅ Struk fisik berhasil dicetak via BLE!");
+        return;
+      }
+
+      // 4. Send using Classic Android Bluetooth
+      if (NativeBluetooth.isAndroid() && localStorage.getItem('laughdry_printer_address')) {
+        showToast("📤 Mengirim data cetak thermal via Classic Bluetooth...");
+        const base64Str = uint8ArrayToBase64(finalBytes);
+        await NativeBluetooth.printRaw(base64Str);
+        showToast("✅ Struk fisik berhasil dicetak!");
+        return;
+      }
+
+      // 5. Send using Web Bluetooth
       if (bluetoothCharacteristicRef.current) {
-        showToast("📤 Mengirim data cetak thermal ke printer...");
+        showToast("📤 Mengirim data cetak thermal ke Web Bluetooth...");
         const CHUNK_SIZE = 512;
         for (let i = 0; i < finalBytes.length; i += CHUNK_SIZE) {
           const chunk = finalBytes.slice(i, i + CHUNK_SIZE);
@@ -808,25 +827,17 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
             await bluetoothCharacteristicRef.current.writeValue(chunk);
           }
         }
-        showToast("✅ Struk fisik berhasil dicetak!");
+        showToast("✅ Struk fisik berhasil dicetak via Web Bluetooth!");
       } else {
-        showToast("🖨️ Mencetak struk ke printer Bluetooth (Tersimulasi)...");
-        let simulationHeader = "";
-        if (settings.showHeaderLogoInReceipt && settings.customReceiptHeaderLogoImg) {
-          simulationHeader = "[LOGO TERCETAK ( THERMAL RESOLUTION 160px )]\n";
+        if (NativeBluetooth.isAndroid()) {
+          showToast("⚠️ Printer terputus secara fisik atau belum terhubung sepenuhnya!");
+        } else {
+          showToast("🖨️ Mencetak struk ke printer Bluetooth (Simulasi Web)...");
         }
-        alert(`🖨️ [Simulasi Cetak POS-58] Mengirim data ke ${connectedPrinterName || 'Thermal Printer'}:\n\n${simulationHeader}${cleanedText}`);
       }
     } catch (err: any) {
       console.error("Gagal mengirim data cetak:", err);
-      showToast(`⚠️ Kegagalan printer fisik: ${err.message || 'Error RFCOMM Bluetooth'}. Disimulasikan.`);
-      
-      const cleanedText = cleanAndMapTextForThermal(receiptText);
-      let simulationHeader = "";
-      if (settings.showHeaderLogoInReceipt && settings.customReceiptHeaderLogoImg) {
-        simulationHeader = "[LOGO TERCETAK ( THERMAL RESOLUTION 160px )]\n";
-      }
-      alert(`🖨️ [Simulasi Cetak POS-58] Mengirim data cetak ke ${connectedPrinterName}:\n\n${simulationHeader}${cleanedText}`);
+      showToast(`❌ Gagal mencetak ke printer bluetooth: ${err.message || 'Error RFCOMM/BLE'}`);
     }
   };
 
@@ -1554,26 +1565,52 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     };
     verifyHardwarePermissions();
 
-    // Auto reconnect to native printer on Android if previously connected
+    // Auto reconnect to native printer on Android or BLE if previously connected
     const autoReconnectPrinter = async () => {
-      if (NativeBluetooth.isAndroid() && localStorage.getItem('laughdry_printer_connected') === 'true') {
+      if (localStorage.getItem('laughdry_printer_connected') === 'true') {
         const storedAddr = localStorage.getItem('laughdry_printer_address');
-        const storedName = localStorage.getItem('laughdry_printer_name');
+        const storedName = localStorage.getItem('laughdry_printer_name') || "Thermal Printer";
+        const isBle = localStorage.getItem('laughdry_printer_is_ble') === 'true';
+
         if (storedAddr) {
-          try {
-            console.log("Attempting native printer auto-reconnection to:", storedName, storedAddr);
-            const result = await NativeBluetooth.connect(storedAddr);
-            if (result && result.success) {
-              console.log("Auto-reconnection successful!");
+          if (isBle) {
+            try {
+              console.log("Attempting BLE printer auto-reconnection to:", storedName, storedAddr);
+              await BleClient.initialize();
+              await BleClient.connect(storedAddr);
+              console.log("BLE auto-reconnection successful!");
               setIsPrinterConnected(true);
-              setConnectedPrinterName(storedName || "Printer HP");
-              showToast(`🔌 Auto-reconnect: ${storedName} terhubung!`);
-            } else {
-              setIsPrinterConnected(false);
+              setConnectedPrinterName(storedName);
+              setIsBlePrinter(true);
+              setBleDeviceAddress(storedAddr);
+            } catch (e) {
+              console.warn("Failed BLE printer auto-reconnection (ignoring so we keep connection persistent):", e);
+              // Tetap anggap terhubung secara visual agar status tidak hilang
+              setIsPrinterConnected(true);
+              setConnectedPrinterName(storedName);
+              setIsBlePrinter(true);
+              setBleDeviceAddress(storedAddr);
             }
-          } catch (e) {
-            console.warn("Failed auto re-connecting to native printer:", e);
-            setIsPrinterConnected(false);
+          } else if (NativeBluetooth.isAndroid()) {
+            try {
+              console.log("Attempting native printer auto-reconnection to:", storedName, storedAddr);
+              const result = await NativeBluetooth.connect(storedAddr);
+              if (result && result.success) {
+                console.log("Auto-reconnection successful!");
+                setIsPrinterConnected(true);
+                setConnectedPrinterName(storedName);
+                setIsBlePrinter(false);
+                setBleDeviceAddress('');
+                showToast(`🔌 Auto-reconnect: ${storedName} terhubung!`);
+              }
+            } catch (e) {
+              console.warn("Failed auto re-connecting to native printer (ignoring so we keep connection persistent):", e);
+              // Tetap anggap terhubung secara visual agar status tidak hilang
+              setIsPrinterConnected(true);
+              setConnectedPrinterName(storedName);
+              setIsBlePrinter(false);
+              setBleDeviceAddress('');
+            }
           }
         }
       }
@@ -1861,9 +1898,19 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
           setSettings(updatedSettings);
           showToast(`🎉 Printer ${dev.name} sukses tersambung secara native!`);
         } else {
-          showToast(`❌ Gagal menyambung ke ${dev.name}`);
+          setIsPrinterConnected(false);
+          localStorage.setItem('laughdry_printer_connected', 'false');
+          localStorage.removeItem('laughdry_printer_name');
+          localStorage.removeItem('laughdry_printer_address');
+          localStorage.removeItem('laughdry_printer_is_ble');
+          showToast(`❌ Gagal menyambung ke ${dev.name}! Pastikan printer aktif.`);
         }
       } catch (err: any) {
+        setIsPrinterConnected(false);
+        localStorage.setItem('laughdry_printer_connected', 'false');
+        localStorage.removeItem('laughdry_printer_name');
+        localStorage.removeItem('laughdry_printer_address');
+        localStorage.removeItem('laughdry_printer_is_ble');
         console.error("Native connection failed:", err);
         showToast(`❌ Koneksi gagal: ${err.message || err.toString()}`);
       } finally {
@@ -1873,6 +1920,13 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     }
 
     // Web fallback (Saves configuration manually)
+    if (dev.name === 'Printer Manual' || dev.id.startsWith('manual-')) {
+      setPairingDeviceId(null);
+      showToast("⚠️ Alamat MAC manual hanya didukung di Aplikasi Android native!");
+      alert("⚠️ Alamat MAC manual hanya didukung di hp Android menggunakan plugin native bluetooth printer. Pada browser/PC, silakan gunakan pemindaian Web Bluetooth untuk koneksi printer!");
+      return;
+    }
+
     setTimeout(() => {
       setPairingDeviceId(null);
       setIsPrinterConnected(true);
@@ -1889,6 +1943,101 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       setSettings(updatedSettings);
       showToast(`🖨️ Alamat printer ${dev.name} berhasil disimpan!`);
     }, 1000);
+  };
+
+  const findBlePrinterWriteParams = async (deviceId: string) => {
+    try {
+      const services = await BleClient.getServices(deviceId);
+      console.log("Discovered BLE services:", services);
+      
+      for (const service of services) {
+        for (const char of service.characteristics) {
+          if (char.properties?.write || char.properties?.writeWithoutResponse) {
+            return {
+              service: service.uuid,
+              characteristic: char.uuid
+            };
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Error discovering BLE services:", e);
+    }
+    // Fallback standard generic thermal printer UUIDs
+    return {
+      service: "000018f0-0000-1000-8000-00805f9b34fb",
+      characteristic: "00002af1-0000-1000-8000-00805f9b34fb"
+    };
+  };
+
+  const writeToBlePrinter = async (deviceId: string, bytes: Uint8Array) => {
+    const params = await findBlePrinterWriteParams(deviceId);
+    const CHUNK_SIZE = 100;
+    for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+      const chunk = bytes.slice(i, i + CHUNK_SIZE);
+      const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+      try {
+        await BleClient.writeWithoutResponse(deviceId, params.service, params.characteristic, view);
+      } catch (err) {
+        await BleClient.write(deviceId, params.service, params.characteristic, view);
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+  };
+
+  const handleTestPrint = async () => {
+    if (!isPrinterConnected) {
+      showToast("⚠️ Hubungkan printer bluetooth Anda terlebih dahulu!");
+      return;
+    }
+    showToast("⚡ Memulai Tes Cetak Thermal...");
+    
+    const testData = {
+      outletName: settings.customReceiptHeader || "LAUGHDRY EXPRESS",
+      outletAddress: settings.branchAddress || "Koneksi Printer Stabil - OK",
+      phone: settings.branchPhone || "08123456789",
+      invoiceNumber: "TEST-" + Math.floor(Math.random() * 90000 + 10000),
+      customerName: "TES KONEKSI PRINTER",
+      date: new Date().toLocaleString('id-ID'),
+      cashierName: currentUser.name || "Sistem",
+      items: [
+        { name: "Tes Komunikasi Data", qty: 1, price: 0, subtotal: 0 },
+        { name: "Status Sambungan", qty: "OK", price: 0, subtotal: 0 },
+      ],
+      paymentMethod: "Bluetooth",
+      paymentStatus: "STABLE",
+      totalAmount: 0,
+      footerMessage: "SISTEM BERHASIL TERHUBUNG!\nKoneksi Stabil & Siap Digunakan."
+    };
+
+    try {
+      const finalBytes = convertJsonToEscPos(testData);
+      
+      if (isBlePrinter && bleDeviceAddress) {
+        await writeToBlePrinter(bleDeviceAddress, finalBytes);
+        showToast("✅ Tes cetak berhasil terkirim via BLE!");
+      } else if (NativeBluetooth.isAndroid() && localStorage.getItem('laughdry_printer_address')) {
+        const base64Str = uint8ArrayToBase64(finalBytes);
+        await NativeBluetooth.printRaw(base64Str);
+        showToast("✅ Tes cetak berhasil terkirim via Classic BT!");
+      } else if (bluetoothCharacteristicRef.current) {
+        const CHUNK_SIZE = 512;
+        for (let i = 0; i < finalBytes.length; i += CHUNK_SIZE) {
+          const chunk = finalBytes.slice(i, i + CHUNK_SIZE);
+          if (bluetoothCharacteristicRef.current.writeValueWithoutResponse) {
+            await bluetoothCharacteristicRef.current.writeValueWithoutResponse(chunk);
+          } else {
+            await bluetoothCharacteristicRef.current.writeValue(chunk);
+          }
+        }
+        showToast("✅ Tes cetak berhasil terkirim via Web Bluetooth!");
+      } else {
+        showToast(`🖨️ Mengirim data tes cetak ke ${connectedPrinterName || 'Thermal Printer'} (Simulasi)...`);
+      }
+    } catch (err: any) {
+      console.error("Tes cetak gagal:", err);
+      showToast(`⚠️ Tes cetak gagal: ${err.message || err.toString()}`);
+    }
   };
 
   const handleDisconnectDevice = async () => {
@@ -1925,8 +2074,13 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   const redirectToWhatsApp = (order: Order) => {
     const textContent = getSimulatedMessageBody(order.status === OrderStatus.SIAP_DIAMBIL ? 'siap_diambil' : 'nota_layanan', order);
     const encodedText = encodeURIComponent(textContent);
+    
+    // Look up from customer database
+    const dbCustomer = customers.find(c => c.id === order.customerId);
+    const targetPhone = dbCustomer ? dbCustomer.phone : order.customerPhone;
+    
     // Remove non-digit characters from customer phone
-    let cleanPhone = order.customerPhone.replace(/\D/g, '');
+    let cleanPhone = targetPhone.replace(/\D/g, '');
     
     // Convert local zero-prefixed Indonesian number to standard international 62
     if (cleanPhone.startsWith('0')) {
@@ -2752,10 +2906,16 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     const systemSettings = LaughDryDatabase.getSettings();
     const vercelBase = (systemSettings.vercelTrackingUrl && systemSettings.vercelTrackingUrl !== 'https://laughdry.vercel.app' ? systemSettings.vercelTrackingUrl : window.location.origin).replace(/\/$/, '');
     const ownerUid = localStorage.getItem('laughdry_firebase_uid') || '';
-    const finalTrackingUrl = `${vercelBase}/?phone=${encodeURIComponent(order.customerPhone)}&invoice=${encodeURIComponent(order.invoiceNumber)}${ownerUid ? `&owner=${encodeURIComponent(ownerUid)}` : ''}`;
+    
+    // Look up from customer database
+    const dbCustomer = customers.find(c => c.id === order.customerId);
+    const targetPhone = dbCustomer ? dbCustomer.phone : order.customerPhone;
+    const targetName = dbCustomer ? dbCustomer.name : order.customerName;
+    
+    const finalTrackingUrl = `${vercelBase}/?phone=${encodeURIComponent(targetPhone)}&invoice=${encodeURIComponent(order.invoiceNumber)}${ownerUid ? `&owner=${encodeURIComponent(ownerUid)}` : ''}`;
 
     return defaultTemplate.body
-      .replace(/\{\{customer_name\}\}/g, order.customerName)
+      .replace(/\{\{customer_name\}\}/g, targetName)
       .replace(/\{\{invoice_number\}\}/g, order.invoiceNumber)
       .replace(/\{\{services_list\}\}/g, order.items.map(i => i.serviceName).join(', '))
       .replace(/\{\{total_quantity\}\}/g, order.items.map(i => `${i.quantity}`).join(' + '))
@@ -6024,18 +6184,6 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
               <button
                 type="button"
                 onClick={() => {
-                  window.print();
-                  showToast("🖨️ Mengirim struk langsung ke printer sistem browser...");
-                }}
-                className="w-full py-2.5 bg-indigo-600 hover:bg-slate-950 text-white font-black rounded-xl text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-md"
-                id="btn-browser-print"
-              >
-                <Printer className="w-4 h-4 text-sky-400" /> Cetak Langsung Browser (USB/LAN/Wi-Fi/PDF)
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
                   if (!isPrinterConnected) {
                     alert("⚠️ Printer Bluetooth belum terhubung! Silakan gunakan tombol 'Sambung Bluetooth' di bagian atas layar untuk mengkoneksikan printer secara langsung.");
                     return;
@@ -6182,20 +6330,31 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
             </div>
 
             {/* Current Connection Status Banner */}
-            <div className={`p-4 rounded-2xl border flex items-center justify-between transition-all ${isPrinterConnected ? 'bg-emerald-50 border-emerald-150 text-emerald-800' : 'bg-red-50 border-red-150 text-red-800'}`}>
-              <div className="space-y-0.5">
-                <span className="text-[10px] uppercase font-black tracking-wider text-slate-400 block">Status Koneksi</span>
-                <span className="text-xs font-bold font-mono">
-                  {isPrinterConnected ? `🟢 Terhubung: ${connectedPrinterName || 'Thermal POS-58'}` : '🔴 Terputus (Belum Ada)'}
-                </span>
+            <div className={`p-4 rounded-2xl border space-y-3 transition-all ${isPrinterConnected ? 'bg-emerald-50 border-emerald-150 text-emerald-800' : 'bg-red-50 border-red-150 text-red-800'}`}>
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <span className="text-[10px] uppercase font-black tracking-wider text-slate-400 block">Status Koneksi</span>
+                  <span className="text-xs font-bold font-mono">
+                    {isPrinterConnected ? `🟢 Terhubung: ${connectedPrinterName || 'Thermal POS-58'}` : '🔴 Terputus (Belum Ada)'}
+                  </span>
+                </div>
+                {isPrinterConnected && (
+                  <button
+                    type="button"
+                    onClick={handleDisconnectDevice}
+                    className="px-2.5 py-1 text-[10px] font-black bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-colors cursor-pointer active:scale-95"
+                  >
+                    Putuskan
+                  </button>
+                )}
               </div>
               {isPrinterConnected && (
                 <button
                   type="button"
-                  onClick={handleDisconnectDevice}
-                  className="px-2.5 py-1 text-[10px] font-black bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-colors cursor-pointer"
+                  onClick={handleTestPrint}
+                  className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10.5px] font-black uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-1 cursor-pointer active:scale-98 shadow-sm"
                 >
-                  Putuskan
+                  ⚡ Tes Cetak Struk Percobaan
                 </button>
               )}
             </div>
