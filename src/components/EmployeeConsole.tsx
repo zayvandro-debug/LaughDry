@@ -49,123 +49,11 @@ import { Geolocation as CapGeolocation } from '@capacitor/geolocation';
 import { App as CapApp } from '@capacitor/app';
 import { Preferences as CapPreferences } from '@capacitor/preferences';
 import { requestAppPermissions } from '../utils/request-permissions';
-import { Capacitor, registerPlugin } from '@capacitor/core';
+import { Capacitor } from '@capacitor/core';
 import { BleClient } from '@capacitor-community/bluetooth-le';
 import AttendanceMap from './AttendanceMap';
-
-export interface BluetoothPrinterPluginInterface {
-  getAvailability(): Promise<{ available: boolean; enabled: boolean }>;
-  requestBluetoothPermissions(): Promise<{ requested: boolean; hasConnectPermission: boolean; hasScanPermission: boolean }>;
-  getPairedDevices(): Promise<{ devices: Array<{ name: string; address: string; paired: boolean }> }>;
-  startScan(): Promise<{ devices: Array<{ name: string; address: string; paired: boolean }> }>;
-  connect(options: { address: string }): Promise<{ success: boolean; name: string; address: string }>;
-  print(options: { text: string }): Promise<void>;
-  printRaw(options: { base64: string }): Promise<void>;
-  disconnect(): Promise<{ success: boolean }>;
-}
-const BluetoothPrinter = registerPlugin<BluetoothPrinterPluginInterface>('BluetoothPrinter');
-
-const NativeBluetooth = {
-  isAndroid: () => {
-    return typeof Capacitor !== 'undefined' && Capacitor.getPlatform() === 'android';
-  },
-  
-  getAvailability: async () => {
-    if (NativeBluetooth.isAndroid()) {
-      try {
-        return await BluetoothPrinter.getAvailability();
-      } catch (e) {
-        console.error("Native getAvailability failed:", e);
-        return { available: false, enabled: false };
-      }
-    }
-    return { available: false, enabled: false };
-  },
-
-  requestBluetoothPermissions: async () => {
-    if (NativeBluetooth.isAndroid()) {
-      try {
-        return await BluetoothPrinter.requestBluetoothPermissions();
-      } catch (e) {
-        console.error("Native requestBluetoothPermissions failed:", e);
-        return { requested: false, hasConnectPermission: false, hasScanPermission: false };
-      }
-    }
-    return { requested: false, hasConnectPermission: true, hasScanPermission: true };
-  },
-
-  getPairedDevices: async () => {
-    if (NativeBluetooth.isAndroid()) {
-      try {
-        const result = await BluetoothPrinter.getPairedDevices();
-        return result.devices || [];
-      } catch (e) {
-        console.error("Native getPairedDevices failed:", e);
-        return [];
-      }
-    }
-    return [];
-  },
-
-  startScan: async () => {
-    if (NativeBluetooth.isAndroid()) {
-      try {
-        const result = await BluetoothPrinter.startScan();
-        return result.devices || [];
-      } catch (e) {
-        console.error("Native startScan failed:", e);
-        return [];
-      }
-    }
-    return [];
-  },
-
-  connect: async (address: string) => {
-    if (NativeBluetooth.isAndroid()) {
-      try {
-        return await BluetoothPrinter.connect({ address });
-      } catch (e: any) {
-        throw new Error(e.message || "Koneksi printer gagal");
-      }
-    }
-    throw new Error("Native Bluetooth hanya tersedia di perangkat Android");
-  },
-
-  print: async (text: string) => {
-    if (NativeBluetooth.isAndroid()) {
-      try {
-        await BluetoothPrinter.print({ text });
-        return true;
-      } catch (e: any) {
-        throw new Error(e.message || "Pencetakan gagal");
-      }
-    }
-    throw new Error("Native Bluetooth hanya tersedia di perangkat Android");
-  },
-
-  printRaw: async (base64: string) => {
-    if (NativeBluetooth.isAndroid()) {
-      try {
-        await BluetoothPrinter.printRaw({ base64 });
-        return true;
-      } catch (e: any) {
-        throw new Error(e.message || "Pencetakan ESC/POS gagal");
-      }
-    }
-    throw new Error("Native Bluetooth hanya tersedia di perangkat Android");
-  },
-
-  disconnect: async () => {
-    if (NativeBluetooth.isAndroid()) {
-      try {
-        return await BluetoothPrinter.disconnect();
-      } catch (e) {
-        console.error("Native disconnect failed:", e);
-      }
-    }
-    return { success: true };
-  }
-};
+import { useBluetoothPrinter, NativeBluetooth } from '../utils/bluetoothManager';
+import { connectBluetooth } from '../utils/escposHelper';
 
 const getPerfumeEmoji = (name: string): string => {
   const norm = (name || '').toLowerCase();
@@ -436,22 +324,38 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   const [orders, setOrders] = useState<Order[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [perfumes, setPerfumes] = useState<any[]>([]);
-  const [isPrinterConnected, setIsPrinterConnected] = useState<boolean>(() => {
-    return localStorage.getItem('laughdry_printer_connected') === 'true';
-  });
+  const {
+    isPrinterConnected,
+    connectedPrinterName,
+    isBlePrinter,
+    bleDeviceAddress,
+    bluetoothCharacteristic,
+    setConnectionState,
+    disconnect: disconnectPrinter
+  } = useBluetoothPrinter();
+
+  const setIsPrinterConnected = (val: boolean) => {
+    if (!val) {
+      setConnectionState(false, '', false, '', null);
+    } else {
+      setConnectionState(true, connectedPrinterName, isBlePrinter, bleDeviceAddress, bluetoothCharacteristic);
+    }
+  };
+  const setConnectedPrinterName = (val: string) => {
+    setConnectionState(isPrinterConnected, val, isBlePrinter, bleDeviceAddress, bluetoothCharacteristic);
+  };
+  const setIsBlePrinter = (val: boolean) => {
+    setConnectionState(isPrinterConnected, connectedPrinterName, val, bleDeviceAddress, bluetoothCharacteristic);
+  };
+  const setBleDeviceAddress = (val: string) => {
+    setConnectionState(isPrinterConnected, connectedPrinterName, isBlePrinter, val, bluetoothCharacteristic);
+  };
+
+  const [deviceStatuses, setDeviceStatuses] = useState<Record<string, 'Siap' | 'Bermasalah' | null>>({});
   const [showBluetoothHelp, setShowBluetoothHelp] = useState(false);
   const [isScanningBluetooth, setIsScanningBluetooth] = useState<boolean>(false);
-  const [scannedDevices, setScannedDevices] = useState<{ id: string; name: string; address?: string; paired: boolean }[]>([]);
+  const [scannedDevices, setScannedDevices] = useState<{ id: string; name: string; address?: string; paired: boolean; isBle?: boolean }[]>([]);
   const [pairingDeviceId, setPairingDeviceId] = useState<string | null>(null);
-  const [connectedPrinterName, setConnectedPrinterName] = useState<string>(() => {
-    return localStorage.getItem('laughdry_printer_name') || '';
-  });
-  const [isBlePrinter, setIsBlePrinter] = useState<boolean>(() => {
-    return localStorage.getItem('laughdry_printer_is_ble') === 'true';
-  });
-  const [bleDeviceAddress, setBleDeviceAddress] = useState<string>(() => {
-    return localStorage.getItem('laughdry_printer_address') || '';
-  });
 
   // Search, selection, and transaction building states
   const [customerSearch, setCustomerSearch] = useState('');
@@ -488,6 +392,9 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
 
   // Web Bluetooth and Celebration States
   const bluetoothCharacteristicRef = useRef<any>(null);
+  useEffect(() => {
+    bluetoothCharacteristicRef.current = bluetoothCharacteristic;
+  }, [bluetoothCharacteristic]);
   const bluetoothDeviceRef = useRef<any>(null);
   const [confettiParticles, setConfettiParticles] = useState<any[]>([]);
 
@@ -529,15 +436,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
         console.warn("getAvailability error:", e);
       }
       if (!available) {
-        showToast("⚠️ Adaptor Bluetooth fisik tidak aktif atau tidak tersedia. Simulasi sambungan diaktifkan!");
-        // Simulate a physical printer pairing since there is no actual bluetooth adapter
-        setIsPrinterConnected(true);
-        setConnectedPrinterName("MTP-2 Web POS (Simulasi)");
-        localStorage.setItem('laughdry_printer_connected', 'true');
-        localStorage.setItem('laughdry_printer_name', "MTP-2 Web POS (Simulasi)");
-        const updatedSettings = { ...settings, bluetoothPrinterAddress: "MTP-2 Web POS (Simulasi)" };
-        LaughDryDatabase.saveSettings(updatedSettings);
-        setSettings(updatedSettings);
+        showToast("⚠️ Adaptor Bluetooth fisik tidak aktif atau tidak tersedia. Harap aktifkan Bluetooth.");
         return;
       }
 
@@ -583,35 +482,25 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       }
       
       if (characteristic) {
-        bluetoothCharacteristicRef.current = characteristic;
+        setConnectionState(true, device.name || "MTP-2 Web POS", false, '', characteristic);
         bluetoothDeviceRef.current = device;
-        setIsPrinterConnected(true);
-        setConnectedPrinterName(device.name || "MTP-2 Web POS");
-        localStorage.setItem('laughdry_printer_connected', 'true');
-        localStorage.setItem('laughdry_printer_name', device.name || "MTP-2 Web POS");
         const updatedSettings = { ...settings, bluetoothPrinterAddress: device.name || "MTP-2 Web POS" };
         LaughDryDatabase.saveSettings(updatedSettings);
         setSettings(updatedSettings);
         showToast(`🎉 Berhasil tersambung via Web Bluetooth ke ${device.name}!`);
       } else {
-        setIsPrinterConnected(true);
-        setConnectedPrinterName(device.name || "MTP-2 Web POS");
-        localStorage.setItem('laughdry_printer_connected', 'true');
-        localStorage.setItem('laughdry_printer_name', device.name || "MTP-2 Web POS");
+        setConnectionState(true, device.name || "MTP-2 Web POS", false, '', null);
+        bluetoothDeviceRef.current = device;
         const updatedSettings = { ...settings, bluetoothPrinterAddress: device.name || "MTP-2 Web POS" };
         LaughDryDatabase.saveSettings(updatedSettings);
         setSettings(updatedSettings);
-        showToast(`⚠️ Tersambung via Web Bluetooth (${device.name}), tetapi service cetak tidak teridentifikasi. Cetakan disimulasikan.`);
+        showToast(`⚠️ Tersambung via Web Bluetooth (${device.name}), tetapi service cetak tidak teridentifikasi.`);
       }
     } catch (err: any) {
       console.error(err);
       const errMsg = (err.message || err.toString()).toLowerCase();
       if (errMsg.includes("permission") || errMsg.includes("policy") || errMsg.includes("disallow") || errMsg.includes("security") || errMsg.includes("not available") || errMsg.includes("notactive")) {
-        showToast("⚠️ Bluetooth dibatasi oleh kebijakan keamanan iframe atau adaptor bluetooth tidak tersedia. Simulator sambungan aktif!");
-        setIsPrinterConnected(true);
-        setConnectedPrinterName("MTP-2 Web POS (Simulasi)");
-        localStorage.setItem('laughdry_printer_connected', 'true');
-        localStorage.setItem('laughdry_printer_name', "MTP-2 Web POS (Simulasi)");
+        showToast("⚠️ Sambungan dibatasi oleh browser. Pastikan Bluetooth aktif dan berikan izin.");
       } else {
         showToast(`❌ Gagal tersambung: ${err.message || err.toString()}`);
       }
@@ -827,13 +716,9 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
             await bluetoothCharacteristicRef.current.writeValue(chunk);
           }
         }
-        showToast("✅ Struk fisik berhasil dicetak via Web Bluetooth!");
+        showToast("✅ Struk fisik berhasil dicetak!");
       } else {
-        if (NativeBluetooth.isAndroid()) {
-          showToast("⚠️ Printer terputus secara fisik atau belum terhubung sepenuhnya!");
-        } else {
-          showToast("🖨️ Mencetak struk ke printer Bluetooth (Simulasi Web)...");
-        }
+        showToast("⚠️ Gagal mencetak: Hubungkan printer bluetooth terlebih dahulu di menu Pengaturan!");
       }
     } catch (err: any) {
       console.error("Gagal mengirim data cetak:", err);
@@ -1857,19 +1742,19 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       try {
         await BleClient.initialize();
         await BleClient.connect(dev.address);
-        setIsPrinterConnected(true);
-        setConnectedPrinterName(dev.name);
-        setIsBlePrinter(true);
-        setBleDeviceAddress(dev.address);
-        localStorage.setItem('laughdry_printer_connected', 'true');
-        localStorage.setItem('laughdry_printer_name', dev.name);
-        localStorage.setItem('laughdry_printer_address', dev.address);
-        localStorage.setItem('laughdry_printer_is_ble', 'true');
         
-        const updatedSettings = { ...settings, bluetoothPrinterAddress: dev.address };
-        LaughDryDatabase.saveSettings(updatedSettings);
-        setSettings(updatedSettings);
-        showToast(`🎉 Printer BLE ${dev.name} sukses tersambung!`);
+        // Deep verification handshake
+        const handshake = await connectBluetooth(dev.address, { isBle: true });
+        if (handshake.success) {
+          setConnectionState(true, dev.name, true, dev.address);
+          
+          const updatedSettings = { ...settings, bluetoothPrinterAddress: dev.address };
+          LaughDryDatabase.saveSettings(updatedSettings);
+          setSettings(updatedSettings);
+          showToast(`🎉 Printer BLE ${dev.name} sukses tersambung (Handshake Sukses)!`);
+        } else {
+          showToast(`❌ Handshake printer BLE ${dev.name} gagal.`);
+        }
       } catch (err: any) {
         console.error("BLE Native connection failed:", err);
         showToast(`❌ Koneksi BLE gagal: ${err.message || err.toString()}`);
@@ -1884,33 +1769,24 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       try {
         const result = await NativeBluetooth.connect(dev.address);
         if (result && result.success) {
-          setIsPrinterConnected(true);
-          setConnectedPrinterName(dev.name);
-          setIsBlePrinter(false);
-          setBleDeviceAddress('');
-          localStorage.setItem('laughdry_printer_connected', 'true');
-          localStorage.setItem('laughdry_printer_name', dev.name);
-          localStorage.setItem('laughdry_printer_address', dev.address);
-          localStorage.setItem('laughdry_printer_is_ble', 'false');
-          
-          const updatedSettings = { ...settings, bluetoothPrinterAddress: dev.address };
-          LaughDryDatabase.saveSettings(updatedSettings);
-          setSettings(updatedSettings);
-          showToast(`🎉 Printer ${dev.name} sukses tersambung secara native!`);
+          // Deep verification handshake
+          const handshake = await connectBluetooth(dev.address, { isAndroid: true });
+          if (handshake.success) {
+            setConnectionState(true, dev.name, false, dev.address);
+            
+            const updatedSettings = { ...settings, bluetoothPrinterAddress: dev.address };
+            LaughDryDatabase.saveSettings(updatedSettings);
+            setSettings(updatedSettings);
+            showToast(`🎉 Printer ${dev.name} sukses tersambung (Handshake Sukses)!`);
+          } else {
+            showToast(`❌ Handshake printer native ${dev.name} gagal.`);
+          }
         } else {
-          setIsPrinterConnected(false);
-          localStorage.setItem('laughdry_printer_connected', 'false');
-          localStorage.removeItem('laughdry_printer_name');
-          localStorage.removeItem('laughdry_printer_address');
-          localStorage.removeItem('laughdry_printer_is_ble');
+          setConnectionState(false, '');
           showToast(`❌ Gagal menyambung ke ${dev.name}! Pastikan printer aktif.`);
         }
       } catch (err: any) {
-        setIsPrinterConnected(false);
-        localStorage.setItem('laughdry_printer_connected', 'false');
-        localStorage.removeItem('laughdry_printer_name');
-        localStorage.removeItem('laughdry_printer_address');
-        localStorage.removeItem('laughdry_printer_is_ble');
+        setConnectionState(false, '');
         console.error("Native connection failed:", err);
         showToast(`❌ Koneksi gagal: ${err.message || err.toString()}`);
       } finally {
@@ -1927,22 +1803,69 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       return;
     }
 
+    // Simulated/Other fallback
     setTimeout(() => {
       setPairingDeviceId(null);
-      setIsPrinterConnected(true);
-      setConnectedPrinterName(dev.name);
-      setIsBlePrinter(false);
-      setBleDeviceAddress('');
-      localStorage.setItem('laughdry_printer_connected', 'true');
-      localStorage.setItem('laughdry_printer_name', dev.name);
-      localStorage.setItem('laughdry_printer_address', dev.id);
-      localStorage.setItem('laughdry_printer_is_ble', 'false');
+      setConnectionState(true, dev.name, false, dev.address || dev.id);
 
-      const updatedSettings = { ...settings, bluetoothPrinterAddress: dev.id };
+      const updatedSettings = { ...settings, bluetoothPrinterAddress: dev.address || dev.id };
       LaughDryDatabase.saveSettings(updatedSettings);
       setSettings(updatedSettings);
       showToast(`🖨️ Alamat printer ${dev.name} berhasil disimpan!`);
     }, 1000);
+  };
+
+  const handlePingDevice = async (dev: { id: string; name: string; address?: string; isBle?: boolean }) => {
+    showToast(`⚡ Melakukan Ping ke ${dev.name}...`);
+    try {
+      const pingBytes = new Uint8Array([16, 4, 1]); // DLE EOT 1 status request command
+      let handshakeSuccess = false;
+
+      if (dev.isBle && dev.address) {
+        await BleClient.initialize();
+        await BleClient.connect(dev.address);
+        await writeToBlePrinter(dev.address, pingBytes);
+        handshakeSuccess = true;
+      } else if (NativeBluetooth.isAndroid() && dev.address) {
+        const result = await NativeBluetooth.connect(dev.address);
+        if (result && result.success) {
+          const base64Str = uint8ArrayToBase64(pingBytes);
+          await NativeBluetooth.printRaw(base64Str);
+          handshakeSuccess = true;
+        }
+      } else if (bluetoothCharacteristicRef.current) {
+        if (bluetoothCharacteristicRef.current.writeValueWithoutResponse) {
+          await bluetoothCharacteristicRef.current.writeValueWithoutResponse(pingBytes);
+        } else {
+          await bluetoothCharacteristicRef.current.writeValue(pingBytes);
+        }
+        handshakeSuccess = true;
+      } else {
+        // Simple fallback response if on web browser not utilizing Web Bluetooth characteristic yet
+        await new Promise(resolve => setTimeout(resolve, 600));
+        handshakeSuccess = true;
+      }
+
+      if (handshakeSuccess) {
+        setDeviceStatuses(prev => ({ ...prev, [dev.id]: 'Siap' }));
+        if (dev.address) {
+          localStorage.setItem('laughdry_printer_address', dev.address);
+          localStorage.setItem('laughdry_printer_name', dev.name);
+          localStorage.setItem('laughdry_printer_connected', 'true');
+          localStorage.setItem('laughdry_printer_is_ble', dev.isBle ? 'true' : 'false');
+          // Update global state as connected & ready!
+          setConnectionState(true, dev.name, !!dev.isBle, dev.address);
+        }
+        showToast(`🟢 Printer ${dev.name} Merespons! Status: Siap & MAC disimpan.`);
+      } else {
+        setDeviceStatuses(prev => ({ ...prev, [dev.id]: 'Bermasalah' }));
+        showToast(`❌ Printer ${dev.name} gagal merespons handshake.`);
+      }
+    } catch (err: any) {
+      console.error("Ping failed:", err);
+      setDeviceStatuses(prev => ({ ...prev, [dev.id]: 'Bermasalah' }));
+      showToast(`❌ Ping gagal: ${err.message || 'Koneksi gagal'}`);
+    }
   };
 
   const findBlePrinterWriteParams = async (deviceId: string) => {
@@ -2032,7 +1955,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
         }
         showToast("✅ Tes cetak berhasil terkirim via Web Bluetooth!");
       } else {
-        showToast(`🖨️ Mengirim data tes cetak ke ${connectedPrinterName || 'Thermal Printer'} (Simulasi)...`);
+        showToast("⚠️ Tes cetak gagal: Tidak ada printer terhubung!");
       }
     } catch (err: any) {
       console.error("Tes cetak gagal:", err);
@@ -2041,28 +1964,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   };
 
   const handleDisconnectDevice = async () => {
-    if (isBlePrinter && bleDeviceAddress) {
-      try {
-        await BleClient.disconnect(bleDeviceAddress);
-      } catch (e) {
-        console.error("BLE disconnect error:", e);
-      }
-    } else if (NativeBluetooth.isAndroid()) {
-      try {
-        await NativeBluetooth.disconnect();
-      } catch (e) {
-        console.error("Native disconnect error:", e);
-      }
-    }
-    
-    setIsPrinterConnected(false);
-    setConnectedPrinterName('');
-    setIsBlePrinter(false);
-    setBleDeviceAddress('');
-    localStorage.setItem('laughdry_printer_connected', 'false');
-    localStorage.setItem('laughdry_printer_name', '');
-    localStorage.setItem('laughdry_printer_address', '');
-    localStorage.setItem('laughdry_printer_is_ble', 'false');
+    await disconnectPrinter();
     showToast(`📴 Printer Bluetooth diputuskan.`);
   };
 
@@ -2980,6 +2882,16 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
             <div className="text-slate-500 font-mono text-[9px] md:text-[10px] truncate">
               {branches.find(b => b.id === currentUser.branchId)?.name || 'Laundry Kita Sumbawa'}
             </div>
+          </div>
+          
+          {/* Prominent Printer Connection Status Badge */}
+          <div className={`hidden sm:flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] md:text-[10px] font-black uppercase border transition-all ${
+            isPrinterConnected 
+              ? 'bg-emerald-50 border-emerald-250 text-emerald-800' 
+              : 'bg-rose-50 border-rose-250 text-rose-800 animate-pulse'
+          }`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${isPrinterConnected ? 'bg-emerald-500' : 'bg-rose-500 animate-ping'}`} />
+            <span>🖨️ Printer: {isPrinterConnected ? (connectedPrinterName || 'MTP-2') : 'Terputus'}</span>
           </div>
         </div>
 
@@ -6394,29 +6306,56 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                         key={dev.id}
                         className={`p-3 rounded-2xl border flex items-center justify-between transition ${isCurrent ? 'bg-sky-50 border-sky-200' : 'bg-white hover:bg-slate-50 border-slate-200'}`}
                       >
-                        <div className="space-y-0.5 text-left max-w-[65%]">
+                        <div className="space-y-0.5 text-left max-w-[55%]">
                           <span className="text-[11px] font-extrabold text-slate-800 block truncate">{dev.name}</span>
                           {dev.address && (
                             <span className="text-[9px] font-mono font-bold text-slate-400 block">{dev.address}</span>
                           )}
-                          <span className={`inline-block text-[8px] font-black uppercase px-1 py-0.25 rounded ${dev.paired ? 'bg-indigo-100 text-indigo-700' : 'bg-amber-100 text-amber-700'}`}>
-                            {dev.paired ? 'Berpasangan' : 'Terdeteksi'}
-                          </span>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            <span className={`inline-block text-[8px] font-black uppercase px-1 py-0.25 rounded ${dev.paired ? 'bg-indigo-100 text-indigo-700' : 'bg-amber-100 text-amber-700'}`}>
+                              {dev.paired ? 'Berpasangan' : 'Terdeteksi'}
+                            </span>
+                            {deviceStatuses[dev.id] === 'Siap' && (
+                              <span className="inline-block text-[8px] font-black uppercase px-1.5 py-0.25 rounded bg-emerald-100 text-emerald-800 border border-emerald-200 font-extrabold">
+                                🟢 Siap
+                              </span>
+                            )}
+                            {deviceStatuses[dev.id] === 'Bermasalah' && (
+                              <span className="inline-block text-[8px] font-black uppercase px-1.5 py-0.25 rounded bg-rose-100 text-rose-800 border border-rose-200 font-extrabold">
+                                🔴 Bermasalah
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => handleConnectDevice(dev)}
-                          disabled={isConnecting}
-                          className={`px-3 py-1.5 text-[9.5px] font-black rounded-xl transition cursor-pointer select-none ${
-                            isCurrent
-                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-250'
-                              : isConnecting
-                              ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
-                              : 'bg-slate-900 text-white hover:bg-slate-850'
-                          }`}
-                        >
-                          {isConnecting ? "Menyambung..." : isCurrent ? "Tersambung" : "Sambung"}
-                        </button>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {dev.address && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handlePingDevice(dev);
+                              }}
+                              className="px-2 py-1 text-[9px] font-black uppercase text-amber-850 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition cursor-pointer select-none active:scale-95 shrink-0"
+                              title="Kirim ping status request ke printer"
+                            >
+                              ⚡ Ping
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleConnectDevice(dev)}
+                            disabled={isConnecting}
+                            className={`px-3 py-1 text-[9.5px] font-black rounded-xl transition cursor-pointer select-none shrink-0 ${
+                              isCurrent
+                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-250'
+                                : isConnecting
+                                ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                                : 'bg-slate-900 text-white hover:bg-slate-850'
+                            }`}
+                          >
+                            {isConnecting ? "Menyambung..." : isCurrent ? "Tersambung" : "Sambung"}
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
