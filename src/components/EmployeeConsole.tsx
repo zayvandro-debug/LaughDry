@@ -40,6 +40,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { LaughDryDatabase } from '../data/mockDatabase';
 import { LaundryService } from '../services/laundryService';
 import { Customer, Service, Order, OrderItem, OrderStatus, Expense, ExpenseCategory, WhatsAppTemplate, Branch, AttendanceRecord } from '../types';
+import { convertJsonToEscPos, uint8ArrayToBase64, mapOrderToReceiptData } from '../utils/escPosGenerator';
 import { CustomerManagement } from './CustomerManagement';
 import { ExpenseManagement } from './ExpenseManagement';
 import { AppLauncher } from '@capacitor/app-launcher';
@@ -49,14 +50,17 @@ import { App as CapApp } from '@capacitor/app';
 import { Preferences as CapPreferences } from '@capacitor/preferences';
 import { requestAppPermissions } from '../utils/request-permissions';
 import { Capacitor, registerPlugin } from '@capacitor/core';
+import { BleClient } from '@capacitor-community/bluetooth-le';
 import AttendanceMap from './AttendanceMap';
 
 export interface BluetoothPrinterPluginInterface {
   getAvailability(): Promise<{ available: boolean; enabled: boolean }>;
+  requestBluetoothPermissions(): Promise<{ requested: boolean; hasConnectPermission: boolean; hasScanPermission: boolean }>;
   getPairedDevices(): Promise<{ devices: Array<{ name: string; address: string; paired: boolean }> }>;
   startScan(): Promise<{ devices: Array<{ name: string; address: string; paired: boolean }> }>;
   connect(options: { address: string }): Promise<{ success: boolean; name: string; address: string }>;
   print(options: { text: string }): Promise<void>;
+  printRaw(options: { base64: string }): Promise<void>;
   disconnect(): Promise<{ success: boolean }>;
 }
 const BluetoothPrinter = registerPlugin<BluetoothPrinterPluginInterface>('BluetoothPrinter');
@@ -76,6 +80,18 @@ const NativeBluetooth = {
       }
     }
     return { available: false, enabled: false };
+  },
+
+  requestBluetoothPermissions: async () => {
+    if (NativeBluetooth.isAndroid()) {
+      try {
+        return await BluetoothPrinter.requestBluetoothPermissions();
+      } catch (e) {
+        console.error("Native requestBluetoothPermissions failed:", e);
+        return { requested: false, hasConnectPermission: false, hasScanPermission: false };
+      }
+    }
+    return { requested: false, hasConnectPermission: true, hasScanPermission: true };
   },
 
   getPairedDevices: async () => {
@@ -122,6 +138,18 @@ const NativeBluetooth = {
         return true;
       } catch (e: any) {
         throw new Error(e.message || "Pencetakan gagal");
+      }
+    }
+    throw new Error("Native Bluetooth hanya tersedia di perangkat Android");
+  },
+
+  printRaw: async (base64: string) => {
+    if (NativeBluetooth.isAndroid()) {
+      try {
+        await BluetoothPrinter.printRaw({ base64 });
+        return true;
+      } catch (e: any) {
+        throw new Error(e.message || "Pencetakan ESC/POS gagal");
       }
     }
     throw new Error("Native Bluetooth hanya tersedia di perangkat Android");
@@ -417,6 +445,12 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   const [pairingDeviceId, setPairingDeviceId] = useState<string | null>(null);
   const [connectedPrinterName, setConnectedPrinterName] = useState<string>(() => {
     return localStorage.getItem('laughdry_printer_name') || '';
+  });
+  const [isBlePrinter, setIsBlePrinter] = useState<boolean>(() => {
+    return localStorage.getItem('laughdry_printer_is_ble') === 'true';
+  });
+  const [bleDeviceAddress, setBleDeviceAddress] = useState<string>(() => {
+    return localStorage.getItem('laughdry_printer_address') || '';
   });
 
   // Search, selection, and transaction building states
@@ -1587,6 +1621,9 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     // Check if we are running in Capacitor Android Native environment
     if (NativeBluetooth.isAndroid()) {
       try {
+        showToast("🔑 Memeriksa & meminta izin Bluetooth HP...");
+        await NativeBluetooth.requestBluetoothPermissions();
+        
         showToast("🔍 Membaca daftar printer bluetooth & memindai...");
         
         // 1. Fetch bonded (paired) devices first. Bonded devices are most common for thermal printers.
@@ -1620,8 +1657,41 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
           return merged;
         });
 
+        // 3. Scan for BLE devices as well
+        try {
+          await BleClient.initialize();
+          await BleClient.requestLEScan({}, (result) => {
+            if (result && result.device && result.device.name) {
+              const name = result.device.name;
+              const address = result.device.deviceId;
+              const dev = {
+                id: `ble-${address}`,
+                name: `${name} (BLE)`,
+                address: address,
+                paired: false,
+                isBle: true
+              };
+              setScannedDevices(prev => {
+                if (!prev.some(m => m.address?.toLowerCase() === address.toLowerCase())) {
+                  return [...prev, dev];
+                }
+                return prev;
+              });
+            }
+          });
+
+          // Stop scanning BLE after 4 seconds
+          setTimeout(async () => {
+            try {
+              await BleClient.stopLEScan();
+            } catch (_) {}
+          }, 4000);
+        } catch (bleErr) {
+          console.warn("BLE Scan not supported or failed:", bleErr);
+        }
+
         setIsScanningBluetooth(false);
-        showToast("✅ Berhasil memindai printer bluetooth!");
+        showToast("✅ Berhasil memindai printer bluetooth (Classic & BLE)!");
         return;
       } catch (err: any) {
         console.error("Native Bluetooth scanning error:", err);
@@ -1741,10 +1811,37 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     startBluetoothScan();
   };
 
-  const handleConnectDevice = async (dev: { id: string; name: string; address?: string }) => {
+  const handleConnectDevice = async (dev: { id: string; name: string; address?: string; isBle?: boolean }) => {
     setPairingDeviceId(dev.id);
     showToast(`🔌 Menyambungkan ke ${dev.name}...`);
     
+    // Check if BLE connection is requested
+    if (dev.isBle && dev.address) {
+      try {
+        await BleClient.initialize();
+        await BleClient.connect(dev.address);
+        setIsPrinterConnected(true);
+        setConnectedPrinterName(dev.name);
+        setIsBlePrinter(true);
+        setBleDeviceAddress(dev.address);
+        localStorage.setItem('laughdry_printer_connected', 'true');
+        localStorage.setItem('laughdry_printer_name', dev.name);
+        localStorage.setItem('laughdry_printer_address', dev.address);
+        localStorage.setItem('laughdry_printer_is_ble', 'true');
+        
+        const updatedSettings = { ...settings, bluetoothPrinterAddress: dev.address };
+        LaughDryDatabase.saveSettings(updatedSettings);
+        setSettings(updatedSettings);
+        showToast(`🎉 Printer BLE ${dev.name} sukses tersambung!`);
+      } catch (err: any) {
+        console.error("BLE Native connection failed:", err);
+        showToast(`❌ Koneksi BLE gagal: ${err.message || err.toString()}`);
+      } finally {
+        setPairingDeviceId(null);
+      }
+      return;
+    }
+
     // Check if we can connect natively using address (MAC) on android
     if (NativeBluetooth.isAndroid() && dev.address) {
       try {
@@ -1752,9 +1849,12 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
         if (result && result.success) {
           setIsPrinterConnected(true);
           setConnectedPrinterName(dev.name);
+          setIsBlePrinter(false);
+          setBleDeviceAddress('');
           localStorage.setItem('laughdry_printer_connected', 'true');
           localStorage.setItem('laughdry_printer_name', dev.name);
           localStorage.setItem('laughdry_printer_address', dev.address);
+          localStorage.setItem('laughdry_printer_is_ble', 'false');
           
           const updatedSettings = { ...settings, bluetoothPrinterAddress: dev.address };
           LaughDryDatabase.saveSettings(updatedSettings);
@@ -1777,9 +1877,12 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       setPairingDeviceId(null);
       setIsPrinterConnected(true);
       setConnectedPrinterName(dev.name);
+      setIsBlePrinter(false);
+      setBleDeviceAddress('');
       localStorage.setItem('laughdry_printer_connected', 'true');
       localStorage.setItem('laughdry_printer_name', dev.name);
       localStorage.setItem('laughdry_printer_address', dev.id);
+      localStorage.setItem('laughdry_printer_is_ble', 'false');
 
       const updatedSettings = { ...settings, bluetoothPrinterAddress: dev.id };
       LaughDryDatabase.saveSettings(updatedSettings);
@@ -1789,7 +1892,13 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   };
 
   const handleDisconnectDevice = async () => {
-    if (NativeBluetooth.isAndroid()) {
+    if (isBlePrinter && bleDeviceAddress) {
+      try {
+        await BleClient.disconnect(bleDeviceAddress);
+      } catch (e) {
+        console.error("BLE disconnect error:", e);
+      }
+    } else if (NativeBluetooth.isAndroid()) {
       try {
         await NativeBluetooth.disconnect();
       } catch (e) {
@@ -1799,9 +1908,12 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     
     setIsPrinterConnected(false);
     setConnectedPrinterName('');
+    setIsBlePrinter(false);
+    setBleDeviceAddress('');
     localStorage.setItem('laughdry_printer_connected', 'false');
     localStorage.setItem('laughdry_printer_name', '');
     localStorage.setItem('laughdry_printer_address', '');
+    localStorage.setItem('laughdry_printer_is_ble', 'false');
     showToast(`📴 Printer Bluetooth diputuskan.`);
   };
 
@@ -5925,7 +6037,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                 type="button"
                 onClick={() => {
                   if (!isPrinterConnected) {
-                    alert("⚠️ Printer Bluetooth belum terhubung! Silakan gunakan tombol 'Sambung Bluetooth' di bagian atas layar untuk mengkoneksikan printer.");
+                    alert("⚠️ Printer Bluetooth belum terhubung! Silakan gunakan tombol 'Sambung Bluetooth' di bagian atas layar untuk mengkoneksikan printer secara langsung.");
                     return;
                   }
                   const txt = generateTextReceipt(activeInvoice, settings, currentUser, receiptTemplateMode);
@@ -5933,7 +6045,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                   setShowThermalReceiptModal(false);
                   setShowProcessSuccessModal(true);
                 }}
-                className="w-full py-2 bg-sky-500 hover:bg-sky-600 text-slate-950 font-extrabold rounded-xl text-xs flex items-center justify-center gap-2 transition"
+                className="w-full py-2.5 bg-sky-500 hover:bg-sky-600 text-slate-950 font-extrabold rounded-xl text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-sm"
                 id="btn-thermal-confirm-print"
               >
                 <Printer className="w-3.5 h-3.5" /> Kirim ke Printer Bluetooth HP
@@ -6153,6 +6265,23 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
               )}
             </div>
 
+            {/* FITUR UTAMA: INTEGRASI NATIVE BLUETOOTH */}
+            {NativeBluetooth.isAndroid() && (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-3xl p-4 space-y-2.5 shadow-sm">
+                <div className="flex items-center gap-1.5 text-emerald-800">
+                  <span className="w-1.5 h-3 bg-emerald-600 rounded-full"></span>
+                  <span className="text-[10.5px] uppercase font-black tracking-wider">Modul Native Bluetooth Aktif</span>
+                </div>
+                <p className="text-[9.5px] text-emerald-900 leading-snug">
+                  Aplikasi telah dilengkapi dengan <b>Plugin Native Bluetooth Printer</b> bawaan. Anda dapat memindai, menyambungkan printer, dan mencetak struk secara instan & langsung dari aplikasi tanpa memerlukan aplikasi pembantu pihak ketiga.
+                </p>
+                <div className="bg-emerald-100/50 p-2.5 rounded-xl border border-emerald-200/60 flex items-center gap-2">
+                  <span className="text-emerald-800 text-[11px]">⚡</span>
+                  <span className="text-[9px] font-extrabold text-emerald-950 uppercase">Koneksi Langsung & Stabil (Direct RFCOMM)</span>
+                </div>
+              </div>
+            )}
+
             {/* Manual Bluetooth Printer Configuration Card - Hubungkan via Alamat MAC */}
             <div className="bg-white border border-slate-200 rounded-3xl p-4 space-y-3 shadow-sm">
               <div className="flex items-center gap-1.5">
@@ -6208,22 +6337,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
             <div className="pt-2 border-t border-slate-100 flex flex-col gap-2">
               <button
                 type="button"
-                onClick={() => {
-                  const androidIntents = [
-                    'intent:#Intent;action=android.settings.BLUETOOTH_SETTINGS;category=android.intent.category.DEFAULT;end',
-                    'intent:#Intent;action=android.settings.BLUETOOTH_SETTINGS;end',
-                    'intent://settings/bluetooth'
-                  ];
-                  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
-                  if (isIOS) {
-                    window.location.href = 'App-Prefs:root=Bluetooth';
-                  } else {
-                    for (const intent of androidIntents) {
-                      try { window.location.href = intent; } catch(err){}
-                    }
-                  }
-                  showToast("🔄 Membuka Menu Bluetooth HP Anda...");
-                }}
+                onClick={() => openBluetoothSettings()}
                 className="w-full py-2.5 bg-blue-500 hover:bg-blue-600 text-white font-extrabold rounded-xl transition cursor-pointer text-center flex items-center justify-center gap-1 shadow-sm text-xs"
               >
                 <Bluetooth className="w-4 h-4" /> Buka Menu Bluetooth HP

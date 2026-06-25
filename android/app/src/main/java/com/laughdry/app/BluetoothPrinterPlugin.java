@@ -57,6 +57,44 @@ public class BluetoothPrinterPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void requestBluetoothPermissions(PluginCall call) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                ActivityCompat.requestPermissions(
+                    getActivity(),
+                    new String[]{
+                        Manifest.permission.BLUETOOTH,
+                        Manifest.permission.BLUETOOTH_ADMIN,
+                        Manifest.permission.BLUETOOTH_SCAN,
+                        Manifest.permission.BLUETOOTH_CONNECT,
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                    },
+                    1012
+                );
+            } else {
+                ActivityCompat.requestPermissions(
+                    getActivity(),
+                    new String[]{
+                        Manifest.permission.BLUETOOTH,
+                        Manifest.permission.BLUETOOTH_ADMIN,
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.ACCESS_COARSE_LOCATION
+                    },
+                    1012
+                );
+            }
+            JSObject ret = new JSObject();
+            ret.put("requested", true);
+            ret.put("hasConnectPermission", checkBluetoothPermission());
+            ret.put("hasScanPermission", checkScanPermission());
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("Gagal meminta izin: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
     public void getAvailability(PluginCall call) {
         JSObject ret = new JSObject();
         ret.put("available", bluetoothAdapter != null);
@@ -250,6 +288,31 @@ public class BluetoothPrinterPlugin extends Plugin {
                 call.resolve();
             } catch (Exception e) {
                 call.reject("Print failed: " + e.getMessage());
+            }
+        }).start();
+    }
+
+    @PluginMethod
+    public void printRaw(PluginCall call) {
+        String base64Data = call.getString("base64");
+        if (base64Data == null || base64Data.isEmpty()) {
+            call.reject("Base64 data is required");
+            return;
+        }
+
+        if (socket == null || outputStream == null) {
+            call.reject("Printer is not connected. Connect first!");
+            return;
+        }
+
+        new Thread(() -> {
+            try {
+                byte[] bytes = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT);
+                outputStream.write(bytes);
+                outputStream.flush();
+                call.resolve();
+            } catch (Exception e) {
+                call.reject("Print raw failed: " + e.getMessage());
             }
         }).start();
     }
