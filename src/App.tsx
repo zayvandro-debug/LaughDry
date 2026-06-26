@@ -1164,8 +1164,13 @@ export default function App() {
                   }
                   localStorage.removeItem('laughdry_firebase_disabled');
                   localStorage.removeItem('laughdry_firebase_uid');
+                  localStorage.removeItem('laughdry_shared_database_id');
+                  localStorage.removeItem('laughdry_shared_database_email');
                   localStorage.removeItem('laughdry_owner_logged_in');
                   localStorage.removeItem('laughdry_logged_in_cashier');
+                  localStorage.removeItem('laughdry_skip_demo_seeds');
+                  localStorage.removeItem('laughdry_owner_name_registered');
+                  localStorage.removeItem('laughdry_firebase_quota_exceeded_timestamp');
                   LaughDryDatabase.resetToSeed();
                   setShowSignOutConfirmModal(false);
                   window.location.reload();

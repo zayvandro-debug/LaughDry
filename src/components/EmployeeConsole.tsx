@@ -53,7 +53,8 @@ import { Capacitor } from '@capacitor/core';
 import { BleClient } from '@capacitor-community/bluetooth-le';
 import AttendanceMap from './AttendanceMap';
 import { useBluetoothPrinter, NativeBluetooth } from '../utils/bluetoothManager';
-import { connectBluetooth } from '../utils/escposHelper';
+import { connectBluetooth, convertHtmlToEscPos } from '../utils/escposHelper';
+import { printRawBytes } from '../lib/nativePrinter';
 
 const getPerfumeEmoji = (name: string): string => {
   const norm = (name || '').toLowerCase();
@@ -423,90 +424,6 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     }
   };
 
-  const connectWebBluetooth = async () => {
-    if (typeof navigator === 'undefined' || !('bluetooth' in navigator)) {
-      showToast("❌ Browser Anda tidak mendukung Web Bluetooth API.");
-      return;
-    }
-    try {
-      let available = false;
-      try {
-        available = await (navigator as any).bluetooth.getAvailability();
-      } catch (e) {
-        console.warn("getAvailability error:", e);
-      }
-      if (!available) {
-        showToast("⚠️ Adaptor Bluetooth fisik tidak aktif atau tidak tersedia. Harap aktifkan Bluetooth.");
-        return;
-      }
-
-      showToast("🔍 Mencari printer Thermal Bluetooth terdekat...");
-      const device = await (navigator as any).bluetooth.requestDevice({
-        acceptAllDevices: true,
-        optionalServices: [
-          '000018f0-0000-1000-8000-00805f9b34fb', // Thermal receipt service
-          '00001101-0000-1000-8000-00805f9b34fb', // Standard Serial/RFCOMM service
-          'e7810a71-73ae-499d-8c15-faa9aef0c3f2'  // BLE Print service
-        ]
-      });
-      if (!device) return;
-      
-      showToast(`🔌 Menyambungkan ke: ${device.name || 'Thermal Device'}...`);
-      const server = await device.gatt.connect();
-      
-      showToast("⚙️ Mencari service penulisan data (Print)...");
-      let characteristic: any = null;
-      const services = await server.getPrimaryServices().catch(() => []);
-      
-      for (const service of services) {
-        const characteristics = await service.getCharacteristics().catch(() => []);
-        for (const char of characteristics) {
-          if (char.properties.write || char.properties.writeWithoutResponse) {
-            characteristic = char;
-            break;
-          }
-        }
-        if (characteristic) break;
-      }
-      
-      if (!characteristic) {
-        try {
-          const service = await server.getPrimaryService('000018f0-0000-1000-8000-00805f9b34fb');
-          characteristic = await service.getCharacteristic('00002af1-0000-1000-8000-00805f9b34fb');
-        } catch (err) {
-          try {
-            const service = await server.getPrimaryService('00001101-0000-1000-8000-00805f9b34fb');
-            characteristic = await service.getCharacteristic('00001101-0000-1000-8000-00805f9b34fb');
-          } catch (e) {}
-        }
-      }
-      
-      if (characteristic) {
-        setConnectionState(true, device.name || "MTP-2 Web POS", false, '', characteristic);
-        bluetoothDeviceRef.current = device;
-        const updatedSettings = { ...settings, bluetoothPrinterAddress: device.name || "MTP-2 Web POS" };
-        LaughDryDatabase.saveSettings(updatedSettings);
-        setSettings(updatedSettings);
-        showToast(`🎉 Berhasil tersambung via Web Bluetooth ke ${device.name}!`);
-      } else {
-        setConnectionState(true, device.name || "MTP-2 Web POS", false, '', null);
-        bluetoothDeviceRef.current = device;
-        const updatedSettings = { ...settings, bluetoothPrinterAddress: device.name || "MTP-2 Web POS" };
-        LaughDryDatabase.saveSettings(updatedSettings);
-        setSettings(updatedSettings);
-        showToast(`⚠️ Tersambung via Web Bluetooth (${device.name}), tetapi service cetak tidak teridentifikasi.`);
-      }
-    } catch (err: any) {
-      console.error(err);
-      const errMsg = (err.message || err.toString()).toLowerCase();
-      if (errMsg.includes("permission") || errMsg.includes("policy") || errMsg.includes("disallow") || errMsg.includes("security") || errMsg.includes("not available") || errMsg.includes("notactive")) {
-        showToast("⚠️ Sambungan dibatasi oleh browser. Pastikan Bluetooth aktif dan berikan izin.");
-      } else {
-        showToast(`❌ Gagal tersambung: ${err.message || err.toString()}`);
-      }
-    }
-  };
-
   const generateTextReceipt = (invoice: Order, currentSettings: any, cUser: any, printMode: 'full' | 'inti' = 'full') => {
     let t = "";
     const sep = "--------------------------------\n";
@@ -654,7 +571,11 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       
       // 2. Prepare high-fidelity ESC/POS byte array payload
       let finalBytes: Uint8Array;
-      if (activeInvoice) {
+      const htmlReceiptPaper = document.getElementById('thermal-receipt-paper');
+      if (htmlReceiptPaper) {
+        console.log("[BLUETOOTH_PRINT] Mengompilasi format HTML nota ke perintah ESC/POS secara lokal...");
+        finalBytes = convertHtmlToEscPos(htmlReceiptPaper.outerHTML);
+      } else if (activeInvoice) {
         const receiptData = mapOrderToReceiptData(activeInvoice, settings, currentUser.name);
         finalBytes = convertJsonToEscPos(receiptData);
       } else {
@@ -696,12 +617,20 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       }
 
       // 4. Send using Classic Android Bluetooth
-      if (NativeBluetooth.isAndroid() && localStorage.getItem('laughdry_printer_address')) {
+      const nativeMac = localStorage.getItem('laughdry_printer_address') || settings.bluetoothPrinterAddress;
+      if (NativeBluetooth.isAndroid() && nativeMac) {
         showToast("📤 Mengirim data cetak thermal via Classic Bluetooth...");
-        const base64Str = uint8ArrayToBase64(finalBytes);
-        await NativeBluetooth.printRaw(base64Str);
-        showToast("✅ Struk fisik berhasil dicetak!");
-        return;
+        try {
+          await printRawBytes(nativeMac, finalBytes);
+          showToast("✅ Struk fisik berhasil dicetak!");
+          return;
+        } catch (nativeErr: any) {
+          console.warn("[NATIVE_PRINT_ERROR] Native serial failed, trying fallback custom plugin:", nativeErr);
+          const base64Str = uint8ArrayToBase64(finalBytes);
+          await NativeBluetooth.printRaw(base64Str);
+          showToast("✅ Struk fisik dicetak via fallback!");
+          return;
+        }
       }
 
       // 5. Send using Web Bluetooth
@@ -1619,38 +1548,10 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
         console.error("Native Bluetooth scanning error:", err);
         showToast(`❌ Gagal scan native: ${err.message || err.toString()}`);
       }
-    }
-
-    // Fallback block for Web browser environments / stubs
-    if (typeof navigator !== 'undefined' && 'bluetooth' in navigator) {
-      try {
-        let isAvailable = false;
-        try {
-          isAvailable = await (navigator as any).bluetooth.getAvailability();
-        } catch (_) {}
-
-        if (isAvailable) {
-          const device = await (navigator as any).bluetooth.requestDevice({
-            acceptAllDevices: true,
-            optionalServices: ['00001101-0000-1000-8000-00805f9b34fb']
-          });
-          if (device) {
-            const matchedDev = { id: device.id, name: device.name || 'Thermal Printer', paired: true };
-            setScannedDevices([matchedDev]);
-            setIsScanningBluetooth(false);
-            handleConnectDevice(matchedDev);
-            return;
-          }
-        }
-      } catch (err) {
-        console.warn("Real Web Bluetooth scan cancelled or not permitted in iframe sandbox:", err);
-      }
-    }
-
-    // Non-native environment scan finish (Real scanning is done on actual hardware)
-    setTimeout(() => {
+    } else {
+      showToast("⚠️ Bluetooth hanya tersedia pada aplikasi Android real.");
       setIsScanningBluetooth(false);
-    }, 1000);
+    }
   };
 
   const openBluetoothSettings = async () => {
@@ -1795,24 +1696,14 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       return;
     }
 
-    // Web fallback (Saves configuration manually)
-    if (dev.name === 'Printer Manual' || dev.id.startsWith('manual-')) {
-      setPairingDeviceId(null);
-      showToast("⚠️ Alamat MAC manual hanya didukung di Aplikasi Android native!");
-      alert("⚠️ Alamat MAC manual hanya didukung di hp Android menggunakan plugin native bluetooth printer. Pada browser/PC, silakan gunakan pemindaian Web Bluetooth untuk koneksi printer!");
-      return;
-    }
+    // Web / Manual config fallback: Saves configuration directly to allow seamless native Android run
+    setPairingDeviceId(null);
+    setConnectionState(true, dev.name, false, dev.address || dev.id);
 
-    // Simulated/Other fallback
-    setTimeout(() => {
-      setPairingDeviceId(null);
-      setConnectionState(true, dev.name, false, dev.address || dev.id);
-
-      const updatedSettings = { ...settings, bluetoothPrinterAddress: dev.address || dev.id };
-      LaughDryDatabase.saveSettings(updatedSettings);
-      setSettings(updatedSettings);
-      showToast(`🖨️ Alamat printer ${dev.name} berhasil disimpan!`);
-    }, 1000);
+    const updatedSettings = { ...settings, bluetoothPrinterAddress: dev.address || dev.id };
+    LaughDryDatabase.saveSettings(updatedSettings);
+    setSettings(updatedSettings);
+    showToast(`🖨️ Alamat printer ${dev.name} (${dev.address || dev.id}) berhasil disimpan!`);
   };
 
   const handlePingDevice = async (dev: { id: string; name: string; address?: string; isBle?: boolean }) => {
@@ -5792,14 +5683,24 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
               };
 
               return (
-                <div id="thermal-receipt-paper" className="bg-white text-slate-950 font-mono p-4 mx-auto max-w-[245px] border border-slate-300 shadow-inner rounded-md select-all">
+                <div 
+                  id="thermal-receipt-paper" 
+                  className="bg-white text-black font-mono p-5 mx-auto max-w-[245px] border-l border-r border-slate-300 relative select-all flex flex-col shadow-inner"
+                  style={{
+                    filter: 'contrast(1.4) grayscale(1)',
+                    boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1)',
+                  }}
+                >
+                  {/* Jagged thermal paper top tear simulation */}
+                  <div className="absolute top-0 inset-x-0 h-1 bg-[linear-gradient(135deg,transparent_3px,#f8fafc_3px,transparent_6px),linear-gradient(-135deg,transparent_3px,#f8fafc_3px,transparent_6px)] bg-[size:6px_6px] bg-repeat-x -translate-y-1 z-10" />
+
                   {/* Header logo */}
                   {settings.showHeaderLogoInReceipt && settings.customReceiptHeaderLogoImg && (
                     <div className="flex justify-center mb-2 text-center">
                       <img 
                         src={settings.customReceiptHeaderLogoImg} 
                         alt="Receipt Header Logo" 
-                        className="w-14 h-14 object-contain rounded border border-slate-200 p-0.5 bg-white bg-opacity-90"
+                        className="w-14 h-14 object-contain rounded border border-black p-0.5 bg-white filter grayscale contrast-200"
                       />
                     </div>
                   )}
@@ -5811,7 +5712,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                     return (
                       <div 
                         style={s.style} 
-                        className={`uppercase tracking-tight whitespace-pre-line border border-transparent hover:border-slate-300 hover:bg-slate-50 p-0.5 rounded cursor-text ${s.className}`}
+                        className={`uppercase tracking-tight whitespace-pre-line border border-transparent hover:border-black hover:bg-slate-100 p-0.5 rounded cursor-text ${s.className}`}
                         contentEditable={true}
                         suppressContentEditableWarning={true}
                       >
@@ -5822,7 +5723,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
 
                   {settings.showBranchPhone && (
                     <div 
-                      className="font-bold text-slate-700 text-center text-[8.5px] border border-transparent hover:border-slate-300 hover:bg-slate-50 p-0.5 rounded cursor-text"
+                      className="font-bold text-black text-center text-[8.5px] border border-transparent hover:border-black hover:bg-slate-100 p-0.5 rounded cursor-text"
                       style={{ marginTop: `${tempSpacing / 2}px` }}
                       contentEditable={true}
                       suppressContentEditableWarning={true}
@@ -5831,11 +5732,11 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                     </div>
                   )}
                   
-                  <div className="border-t border-dashed border-slate-400" style={{ marginTop: `${tempSpacing}px`, marginBottom: `${tempSpacing}px` }}></div>
+                  <div className="border-t border-dashed border-black" style={{ marginTop: `${tempSpacing}px`, marginBottom: `${tempSpacing}px` }}></div>
                   
                   {/* Transaction info block - Fully Editable */}
                   <div 
-                    className="space-y-0.5 text-slate-800 border border-transparent hover:border-slate-300 hover:bg-slate-50 p-0.5 rounded cursor-text"
+                    className="space-y-0.5 text-black border border-transparent hover:border-black hover:bg-slate-100 p-0.5 rounded cursor-text"
                     contentEditable={true}
                     suppressContentEditableWarning={true}
                   >
@@ -5926,19 +5827,19 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                     if (!s.isVisible) return null;
                     return (
                       <>
-                        <div className="border-t border-dashed border-slate-400" style={{ marginTop: `${tempSpacing}px`, marginBottom: `${tempSpacing}px` }}></div>
+                        <div className="border-t border-dashed border-black" style={{ marginTop: `${tempSpacing}px`, marginBottom: `${tempSpacing}px` }}></div>
                         <div 
                           style={s.style} 
-                          className={`space-y-2 border border-transparent hover:border-slate-300 hover:bg-slate-50 p-0.5 rounded cursor-text ${s.className}`}
+                          className={`space-y-2 border border-transparent hover:border-black hover:bg-slate-100 p-0.5 rounded cursor-text ${s.className}`}
                           contentEditable={true}
                           suppressContentEditableWarning={true}
                         >
                           {activeInvoice.items.map(it => (
                             <div key={it.id} className="space-y-0.5 text-left">
-                              <div className="font-extrabold text-slate-900 leading-tight">{it.serviceName}</div>
-                              <div className="flex justify-between text-slate-600">
+                              <div className="font-extrabold text-black leading-tight">{it.serviceName}</div>
+                              <div className="flex justify-between text-black/85">
                                 <span>{it.quantity} {it.unit || 'X'} x @Rp {it.price.toLocaleString()}</span>
-                                <span className="font-black text-slate-950">Rp {it.subtotal.toLocaleString()}</span>
+                                <span className="font-black text-black">Rp {it.subtotal.toLocaleString()}</span>
                               </div>
                             </div>
                           ))}
@@ -5953,10 +5854,10 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                     if (!s.isVisible) return null;
                     return (
                       <>
-                        <div className="border-t border-dashed border-slate-400" style={{ marginTop: `${tempSpacing}px`, marginBottom: `${tempSpacing}px` }}></div>
+                        <div className="border-t border-dashed border-black" style={{ marginTop: `${tempSpacing}px`, marginBottom: `${tempSpacing}px` }}></div>
                         <div 
                           style={s.style} 
-                          className={`space-y-1 text-slate-950 border border-transparent hover:border-slate-300 hover:bg-slate-50 p-0.5 rounded cursor-text ${s.className}`}
+                          className={`space-y-1 text-black border border-transparent hover:border-black hover:bg-slate-100 p-0.5 rounded cursor-text ${s.className}`}
                           contentEditable={true}
                           suppressContentEditableWarning={true}
                         >
@@ -5964,7 +5865,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                             <span>TOTAL BIAYA:</span>
                             <span>Rp {activeInvoice.totalAmount.toLocaleString()}</span>
                           </div>
-                          <div className="flex justify-between text-[8px] text-slate-700">
+                          <div className="flex justify-between text-[8px] text-black">
                             <span>PAID STATE:</span>
                             <span>{activeInvoice.paymentStatus === 'Lunas' ? 'LUNAS (Rp 0)' : `BILL (Rp ${activeInvoice.totalAmount.toLocaleString()})`}</span>
                           </div>
@@ -5985,7 +5886,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                             );
                           })()}
                           {settings.showNotesInReceipt && activeInvoice.notes && (
-                            <div className="text-slate-650 italic text-[8.2px] mt-1 border-t border-slate-100 pt-1 text-left">
+                            <div className="text-black italic text-[8.2px] mt-1 border-t border-black pt-1 text-left">
                               Notes: "{activeInvoice.notes}"
                             </div>
                           )}
@@ -6399,6 +6300,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                     type="text"
                     id="input-manual-printer-name"
                     placeholder="Alamat MAC (Contoh: CC:3F:1D:9B:D2:4E)"
+                    defaultValue={settings.bluetoothPrinterAddress || ''}
                     className="w-full text-xs font-bold font-mono text-slate-800 p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-indigo-500 outline-none transition"
                   />
                 </div>

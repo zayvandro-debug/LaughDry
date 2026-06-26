@@ -14,6 +14,7 @@ import {
   uint8ArrayToBase64,
   mapOrderToReceiptData
 } from './escPosGenerator';
+import { convertHtmlToEscPos } from './htmlEscposCompiler';
 
 export type { ReceiptItem, ReceiptData };
 
@@ -24,7 +25,8 @@ export {
   formatItemRow,
   convertJsonToEscPos,
   uint8ArrayToBase64,
-  mapOrderToReceiptData
+  mapOrderToReceiptData,
+  convertHtmlToEscPos
 };
 
 /**

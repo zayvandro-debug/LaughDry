@@ -325,89 +325,152 @@ export class LaughDryDatabase {
       }
 
       // 0. Users (Owner & Kasir)
-      const firestoreUsers = await LaundryService.getFirestoreUsers();
-      const validUsers = firestoreUsers.filter(u => this.isValidUser(u));
-      if (validUsers.length > 0) {
-        this.saveKey('users', validUsers);
-      } else {
-        const localUsers = this.getUsers().filter(u => this.isValidUser(u));
-        if (localUsers.length === 0) {
-          this.saveKey('users', INITIAL_USERS);
+      try {
+        const firestoreUsers = await LaundryService.getFirestoreUsers();
+        const validUsers = firestoreUsers.filter(u => this.isValidUser(u));
+        if (validUsers.length > 0) {
+          this.saveKey('users', validUsers);
+        } else {
+          const localUsers = this.getUsers().filter(u => this.isValidUser(u));
+          const finalUsers = localUsers.length > 0 ? localUsers : INITIAL_USERS;
+          this.saveKey('users', finalUsers);
+          try {
+            for (const u of finalUsers) {
+              await LaundryService.saveFirestoreUser(u);
+            }
+          } catch (e) {
+            console.warn("Could not save initial users to Firestore:", e);
+          }
         }
+      } catch (err) {
+        console.warn("Failed syncing users step:", err);
       }
 
       // 1. Branches
-      const firestoreBranches = await LaundryService.getBranches();
-      const validBranches = firestoreBranches.filter(b => this.isValidBranch(b));
-      if (validBranches.length > 0) {
-        this.saveKey('branches', validBranches);
-      } else {
-        const localBranches = this.getBranches().filter(b => this.isValidBranch(b));
-        if (localBranches.length === 0) {
-          this.saveKey('branches', INITIAL_BRANCHES);
+      try {
+        const firestoreBranches = await LaundryService.getBranches();
+        const validBranches = firestoreBranches.filter(b => this.isValidBranch(b));
+        if (validBranches.length > 0) {
+          this.saveKey('branches', validBranches);
+        } else {
+          const localBranches = this.getBranches().filter(b => this.isValidBranch(b));
+          const finalBranches = localBranches.length > 0 ? localBranches : INITIAL_BRANCHES;
+          this.saveKey('branches', finalBranches);
+          try {
+            for (const b of finalBranches) {
+              await LaundryService.saveBranch(b);
+            }
+          } catch (e) {
+            console.warn("Could not save initial branches to Firestore:", e);
+          }
         }
+      } catch (err) {
+        console.warn("Failed syncing branches step:", err);
       }
 
       // 2. Services
-      const firestoreServices = await LaundryService.getServices();
-      const validServices = firestoreServices.filter(s => this.isValidService(s));
-      if (validServices.length > 0) {
-        this.saveKey('services', validServices);
-      } else {
-        const localServices = this.getServices().filter(s => this.isValidService(s));
-        if (localServices.length === 0) {
-          this.saveKey('services', INITIAL_SERVICES);
+      try {
+        const firestoreServices = await LaundryService.getServices();
+        const validServices = firestoreServices.filter(s => this.isValidService(s));
+        if (validServices.length > 0) {
+          this.saveKey('services', validServices);
+        } else {
+          const localServices = this.getServices().filter(s => this.isValidService(s));
+          const finalServices = localServices.length > 0 ? localServices : INITIAL_SERVICES;
+          this.saveKey('services', finalServices);
+          try {
+            for (const s of finalServices) {
+              await LaundryService.saveService(s);
+            }
+          } catch (e) {
+            console.warn("Could not save initial services to Firestore:", e);
+          }
         }
+      } catch (err) {
+        console.warn("Failed syncing services step:", err);
       }
 
       // 3. Customers
-      const customers = await LaundryService.getCustomers();
-      const validCustomers = customers.filter(c => this.isValidCustomer(c));
-      this.saveKey('customers', validCustomers);
+      try {
+        const customers = await LaundryService.getCustomers();
+        const validCustomers = customers.filter(c => this.isValidCustomer(c));
+        this.saveKey('customers', validCustomers);
+      } catch (err) {
+        console.warn("Failed syncing customers step:", err);
+      }
 
       // 4. Orders
-      const orders = await LaundryService.getOrders();
-      const validOrders = orders.filter(o => this.isValidOrder(o));
-      this.saveKey('orders', validOrders);
+      try {
+        const orders = await LaundryService.getOrders();
+        const validOrders = orders.filter(o => this.isValidOrder(o));
+        this.saveKey('orders', validOrders);
+      } catch (err) {
+        console.warn("Failed syncing orders step:", err);
+      }
 
       // 5. Expenses
-      const expenses = await LaundryService.getExpenses();
-      const validExpenses = expenses.filter(e => this.isValidExpense(e));
-      this.saveKey('expenses', validExpenses);
+      try {
+        const expenses = await LaundryService.getExpenses();
+        const validExpenses = expenses.filter(e => this.isValidExpense(e));
+        this.saveKey('expenses', validExpenses);
+      } catch (err) {
+        console.warn("Failed syncing expenses step:", err);
+      }
 
       // 6. Settings
-      const firestoreSettings = await LaundryService.getSettings();
-      const localSettings = this.loadKey('settings', null);
+      try {
+        const firestoreSettings = await LaundryService.getSettings();
+        const localSettings = this.loadKey('settings', null);
 
-      if (firestoreSettings && this.isValidSettings(firestoreSettings)) {
-        this.saveKey('settings', firestoreSettings);
-      } else {
-        if (!localSettings || !this.isValidSettings(localSettings)) {
-          this.saveKey('settings', INITIAL_SETTINGS);
+        if (firestoreSettings && this.isValidSettings(firestoreSettings)) {
+          this.saveKey('settings', firestoreSettings);
+        } else {
+          const finalSettings = (localSettings && this.isValidSettings(localSettings)) ? localSettings : INITIAL_SETTINGS;
+          this.saveKey('settings', finalSettings);
+          try {
+            await LaundryService.saveSettings(finalSettings);
+          } catch (e) {
+            console.warn("Could not save initial settings to Firestore:", e);
+          }
         }
+      } catch (err) {
+        console.warn("Failed syncing settings step:", err);
       }
 
       // 7. Attendance
-      const attendance = await LaundryService.getAttendanceRecords();
-      const validAttendance = attendance.filter(a => this.isValidAttendance(a));
-      this.saveKey('attendance', validAttendance);
+      try {
+        const attendance = await LaundryService.getAttendanceRecords();
+        const validAttendance = attendance.filter(a => this.isValidAttendance(a));
+        this.saveKey('attendance', validAttendance);
+      } catch (err) {
+        console.warn("Failed syncing attendance step:", err);
+      }
 
       // 8. Perfumes (parfume collection)
-      const firestorePerfumes = await LaundryService.getPerfumes();
-      const validPerfumes = firestorePerfumes.filter(p => this.isValidPerfume(p));
-      if (validPerfumes.length > 0) {
-        this.saveKey('perfumes', validPerfumes);
-      } else {
-        const localPerfumes = this.getPerfumes().filter(p => this.isValidPerfume(p));
-        if (localPerfumes.length === 0) {
-          const defaultPerfumes = [
+      try {
+        const firestorePerfumes = await LaundryService.getPerfumes();
+        const validPerfumes = firestorePerfumes.filter(p => this.isValidPerfume(p));
+        if (validPerfumes.length > 0) {
+          this.saveKey('perfumes', validPerfumes);
+        } else {
+          const localPerfumes = this.getPerfumes().filter(p => this.isValidPerfume(p));
+          const finalPerfumes = localPerfumes.length > 0 ? localPerfumes : [
             { id: 'pf-1', name: 'Floral', description: 'Keharuman bunga akasia anggun yang indah', isActive: true, icon: '🌸' },
             { id: 'pf-2', name: 'Fresh', description: 'Wangi relaksasi segar pantai tropis', isActive: true, icon: '🥥' },
             { id: 'pf-3', name: 'Sweet', description: 'Aroma manis kental buah-buahan', isActive: true, icon: '🍓' },
             { id: 'pf-4', name: 'Woody', description: 'Keharuman maskulin alami yang menenangkan', isActive: true, icon: '🪵' }
           ];
-          this.saveKey('perfumes', defaultPerfumes);
+          this.saveKey('perfumes', finalPerfumes);
+          try {
+            for (const p of finalPerfumes) {
+              await LaundryService.savePerfume(p);
+            }
+          } catch (e) {
+            console.warn("Could not save initial perfumes to Firestore:", e);
+          }
         }
+      } catch (err) {
+        console.warn("Failed syncing perfumes step:", err);
       }
 
       // 9. Templates

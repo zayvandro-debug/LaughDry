@@ -70,11 +70,23 @@ export class LaundryService {
     const parent = getUserIdPath();
     const path = `${parent}/orders`;
     try {
-      const q = query(collection(db, parent, 'orders'), orderBy('createdAt', 'desc'));
-      const snapshot = await getDocs(q);
+      let snapshot;
+      try {
+        const q = query(collection(db, parent, 'orders'), orderBy('createdAt', 'desc'));
+        snapshot = await getDocs(q);
+      } catch (err) {
+        console.warn("getOrders with orderBy failed, falling back to unordered fetch:", err);
+        snapshot = await getDocs(collection(db, parent, 'orders'));
+      }
       const orders: Order[] = [];
       snapshot.forEach((doc) => {
         orders.push(doc.data() as Order);
+      });
+      // In-memory sort fallback to ensure stability
+      orders.sort((a, b) => {
+        const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return dateB - dateA;
       });
       return orders;
     } catch (error) {
@@ -523,20 +535,56 @@ export class LaundryService {
       console.warn("Firebase Auth transitions or unauthenticated session. Delaying push notification subscription.");
       return () => {};
     }
-    const q = query(collection(db, parent, "push_notifications"), orderBy("createdAt", "desc"));
-    return onSnapshot(q, (snapshot) => {
+    
+    let unsubscribed = false;
+    let fallbackUnsubscribe: (() => void) | null = null;
+    
+    const primaryQ = query(collection(db, parent, "push_notifications"), orderBy("createdAt", "desc"));
+    
+    const primaryUnsubscribe = onSnapshot(primaryQ, (snapshot) => {
+      if (unsubscribed) return;
       const notifs: PushNotification[] = [];
       snapshot.forEach((doc) => {
         notifs.push(doc.data() as PushNotification);
       });
       callback(notifs);
     }, (error) => {
-      console.error("Error listening to push notifications:", error);
+      if (unsubscribed) return;
+      console.warn("Error listening to push notifications with orderBy, falling back to unordered listener:", error);
       const errMsg = (error?.message || '').toLowerCase();
       if (errMsg.includes('quota') || errMsg.includes('resource-exhausted') || errMsg.includes('exhausted') || errMsg.includes('limit exceeded')) {
         setFirebaseQuotaExceeded();
       }
+      
+      // Fallback to unordered listener
+      try {
+        fallbackUnsubscribe = onSnapshot(collection(db, parent, "push_notifications"), (snapshot) => {
+          if (unsubscribed) return;
+          const notifs: PushNotification[] = [];
+          snapshot.forEach((doc) => {
+            notifs.push(doc.data() as PushNotification);
+          });
+          notifs.sort((a, b) => {
+            const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+            const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+            return dateB - dateA;
+          });
+          callback(notifs);
+        }, (err2) => {
+          console.error("Critical error in fallback push notification listener:", err2);
+        });
+      } catch (e) {
+        console.error("Failed to start fallback push notification listener:", e);
+      }
     });
+
+    return () => {
+      unsubscribed = true;
+      primaryUnsubscribe();
+      if (fallbackUnsubscribe) {
+        fallbackUnsubscribe();
+      }
+    };
   }
 
   /**
