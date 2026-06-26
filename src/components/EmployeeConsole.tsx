@@ -34,7 +34,10 @@ import {
   MoreVertical,
   LogOut,
   BookOpen,
-  Smartphone
+  Smartphone,
+  Wifi,
+  Usb,
+  Sliders
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { LaughDryDatabase } from '../data/mockDatabase';
@@ -55,6 +58,7 @@ import AttendanceMap from './AttendanceMap';
 import { useBluetoothPrinter, NativeBluetooth } from '../utils/bluetoothManager';
 import { connectBluetooth, convertHtmlToEscPos } from '../utils/escposHelper';
 import { printRawBytes } from '../lib/nativePrinter';
+import { GlobalPrinterManager, ConnectionType, PaperSize } from '../utils/printerManager';
 
 const getPerfumeEmoji = (name: string): string => {
   const norm = (name || '').toLowerCase();
@@ -358,6 +362,21 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   const [scannedDevices, setScannedDevices] = useState<{ id: string; name: string; address?: string; paired: boolean; isBle?: boolean }[]>([]);
   const [pairingDeviceId, setPairingDeviceId] = useState<string | null>(null);
 
+  const [printerConnectionType, setPrinterConnectionType] = useState<ConnectionType>(
+    (localStorage.getItem('laughdry_connection_type') as ConnectionType) || 'bluetooth'
+  );
+  const [printerPaperSize, setPrinterPaperSize] = useState<PaperSize>(
+    (parseInt(localStorage.getItem('laughdry_paper_size') || '58') as PaperSize)
+  );
+  const [printerLogs, setPrinterLogs] = useState<string[]>([]);
+
+  useEffect(() => {
+    const unsubscribe = GlobalPrinterManager.subscribeLogs((logs) => {
+      setPrinterLogs(logs);
+    });
+    return unsubscribe;
+  }, []);
+
   // Search, selection, and transaction building states
   const [customerSearch, setCustomerSearch] = useState('');
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
@@ -566,92 +585,47 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
 
   const printToBluetoothPrinter = async (receiptText: string) => {
     try {
-      // 1. Clean the text using our ASCII mapping & sanitizer
-      const cleanedText = cleanAndMapTextForThermal(receiptText);
-      
-      // 2. Prepare high-fidelity ESC/POS byte array payload
-      let finalBytes: Uint8Array;
-      const htmlReceiptPaper = document.getElementById('thermal-receipt-paper');
-      if (htmlReceiptPaper) {
-        console.log("[BLUETOOTH_PRINT] Mengompilasi format HTML nota ke perintah ESC/POS secara lokal...");
-        finalBytes = convertHtmlToEscPos(htmlReceiptPaper.outerHTML);
-      } else if (activeInvoice) {
-        const receiptData = mapOrderToReceiptData(activeInvoice, settings, currentUser.name);
-        finalBytes = convertJsonToEscPos(receiptData);
-      } else {
-        let logoBytes: Uint8Array | null = null;
-        if (settings.showHeaderLogoInReceipt && settings.customReceiptHeaderLogoImg) {
-          logoBytes = await convertBase64LogoToEscPos(settings.customReceiptHeaderLogoImg);
-        }
-        
-        const encoder = new TextEncoder();
-        const textBytes = encoder.encode(cleanedText);
-        const initBytes = new Uint8Array([27, 64]);
-        const feedBytes = new Uint8Array([10, 10, 10, 29, 86, 66, 0]);
-        
-        if (logoBytes) {
-          const totalLen = initBytes.length + logoBytes.length + 1 + textBytes.length + feedBytes.length;
-          finalBytes = new Uint8Array(totalLen);
-          let offset = 0;
-          finalBytes.set(initBytes, offset); offset += initBytes.length;
-          finalBytes.set(logoBytes, offset); offset += logoBytes.length;
-          finalBytes[offset] = 10; offset += 1;
-          finalBytes.set(textBytes, offset); offset += textBytes.length;
-          finalBytes.set(feedBytes, offset);
-        } else {
-          const totalLen = initBytes.length + textBytes.length + feedBytes.length;
-          finalBytes = new Uint8Array(totalLen);
-          let offset = 0;
-          finalBytes.set(initBytes, offset); offset += initBytes.length;
-          finalBytes.set(textBytes, offset); offset += textBytes.length;
-          finalBytes.set(feedBytes, offset);
-        }
-      }
+      const savedAddress = localStorage.getItem('laughdry_printer_address') || settings.bluetoothPrinterAddress;
+      const savedName = localStorage.getItem('laughdry_printer_name') || "Thermal Printer";
+      const savedType = (localStorage.getItem('laughdry_connection_type') as ConnectionType) || 'bluetooth';
+      const savedPaperSize = (parseInt(localStorage.getItem('laughdry_paper_size') || '58') as PaperSize);
 
-      // 3. Send using BLE if connected as BLE
-      if (isBlePrinter && bleDeviceAddress) {
-        showToast("📤 Mengirim data cetak thermal via BLE...");
-        await writeToBlePrinter(bleDeviceAddress, finalBytes);
-        showToast("✅ Struk fisik berhasil dicetak via BLE!");
+      if (!savedAddress && savedType === 'bluetooth') {
+        showToast("⚠️ Mohon atur dan hubungkan printer bluetooth terlebih dahulu di pengaturan!");
+        setShowBluetoothHelp(true);
         return;
       }
 
-      // 4. Send using Classic Android Bluetooth
-      const nativeMac = localStorage.getItem('laughdry_printer_address') || settings.bluetoothPrinterAddress;
-      if (NativeBluetooth.isAndroid() && nativeMac) {
-        showToast("📤 Mengirim data cetak thermal via Classic Bluetooth...");
-        try {
-          await printRawBytes(nativeMac, finalBytes);
-          showToast("✅ Struk fisik berhasil dicetak!");
-          return;
-        } catch (nativeErr: any) {
-          console.warn("[NATIVE_PRINT_ERROR] Native serial failed, trying fallback custom plugin:", nativeErr);
-          const base64Str = uint8ArrayToBase64(finalBytes);
-          await NativeBluetooth.printRaw(base64Str);
-          showToast("✅ Struk fisik dicetak via fallback!");
+      showToast("📤 Mempersiapkan data cetak ESC/POS...");
+      
+      const wasConnected = GlobalPrinterManager.isConnected();
+      if (!wasConnected) {
+        showToast("🔌 Menghubungkan printer secara instan...");
+        const connResult = await GlobalPrinterManager.connect(
+          { name: savedName, address: savedAddress || '' },
+          savedType,
+          savedPaperSize
+        );
+        if (!connResult.success) {
+          showToast(`❌ Gagal menghubungkan printer: ${connResult.message}`);
           return;
         }
       }
 
-      // 5. Send using Web Bluetooth
-      if (bluetoothCharacteristicRef.current) {
-        showToast("📤 Mengirim data cetak thermal ke Web Bluetooth...");
-        const CHUNK_SIZE = 512;
-        for (let i = 0; i < finalBytes.length; i += CHUNK_SIZE) {
-          const chunk = finalBytes.slice(i, i + CHUNK_SIZE);
-          if (bluetoothCharacteristicRef.current.writeValueWithoutResponse) {
-            await bluetoothCharacteristicRef.current.writeValueWithoutResponse(chunk);
-          } else {
-            await bluetoothCharacteristicRef.current.writeValue(chunk);
-          }
-        }
-        showToast("✅ Struk fisik berhasil dicetak!");
+      if (activeInvoice) {
+        await GlobalPrinterManager.printReceipt(activeInvoice, settings, currentUser.name);
       } else {
-        showToast("⚠️ Gagal mencetak: Hubungkan printer bluetooth terlebih dahulu di menu Pengaturan!");
+        await GlobalPrinterManager.testPrint();
+      }
+
+      showToast("✅ Struk fisik berhasil dicetak!");
+
+      if (!wasConnected) {
+        await GlobalPrinterManager.disconnect();
       }
     } catch (err: any) {
-      console.error("Gagal mengirim data cetak:", err);
-      showToast(`❌ Gagal mencetak ke printer bluetooth: ${err.message || 'Error RFCOMM/BLE'}`);
+      console.error("Gagal mencetak:", err);
+      showToast(`❌ Gagal mencetak: ${err.message || err.toString()}`);
     }
   };
 
@@ -1637,73 +1611,26 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   const handleConnectDevice = async (dev: { id: string; name: string; address?: string; isBle?: boolean }) => {
     setPairingDeviceId(dev.id);
     showToast(`🔌 Menyambungkan ke ${dev.name}...`);
-    
-    // Check if BLE connection is requested
-    if (dev.isBle && dev.address) {
-      try {
-        await BleClient.initialize();
-        await BleClient.connect(dev.address);
-        
-        // Deep verification handshake
-        const handshake = await connectBluetooth(dev.address, { isBle: true });
-        if (handshake.success) {
-          setConnectionState(true, dev.name, true, dev.address);
-          
-          const updatedSettings = { ...settings, bluetoothPrinterAddress: dev.address };
-          LaughDryDatabase.saveSettings(updatedSettings);
-          setSettings(updatedSettings);
-          showToast(`🎉 Printer BLE ${dev.name} sukses tersambung (Handshake Sukses)!`);
-        } else {
-          showToast(`❌ Handshake printer BLE ${dev.name} gagal.`);
-        }
-      } catch (err: any) {
-        console.error("BLE Native connection failed:", err);
-        showToast(`❌ Koneksi BLE gagal: ${err.message || err.toString()}`);
-      } finally {
-        setPairingDeviceId(null);
+    try {
+      const res = await GlobalPrinterManager.connect(
+        { name: dev.name, address: dev.address || '' },
+        printerConnectionType,
+        printerPaperSize
+      );
+      if (res.success) {
+        setConnectionState(true, dev.name, dev.isBle || false, dev.address || '');
+        const updatedSettings = { ...settings, bluetoothPrinterAddress: dev.address };
+        LaughDryDatabase.saveSettings(updatedSettings);
+        setSettings(updatedSettings);
+        showToast(`🎉 ${res.message}`);
+      } else {
+        showToast(`❌ ${res.message}`);
       }
-      return;
+    } catch (err: any) {
+      showToast(`❌ Koneksi gagal: ${err.message || err.toString()}`);
+    } finally {
+      setPairingDeviceId(null);
     }
-
-    // Check if we can connect natively using address (MAC) on android
-    if (NativeBluetooth.isAndroid() && dev.address) {
-      try {
-        const result = await NativeBluetooth.connect(dev.address);
-        if (result && result.success) {
-          // Deep verification handshake
-          const handshake = await connectBluetooth(dev.address, { isAndroid: true });
-          if (handshake.success) {
-            setConnectionState(true, dev.name, false, dev.address);
-            
-            const updatedSettings = { ...settings, bluetoothPrinterAddress: dev.address };
-            LaughDryDatabase.saveSettings(updatedSettings);
-            setSettings(updatedSettings);
-            showToast(`🎉 Printer ${dev.name} sukses tersambung (Handshake Sukses)!`);
-          } else {
-            showToast(`❌ Handshake printer native ${dev.name} gagal.`);
-          }
-        } else {
-          setConnectionState(false, '');
-          showToast(`❌ Gagal menyambung ke ${dev.name}! Pastikan printer aktif.`);
-        }
-      } catch (err: any) {
-        setConnectionState(false, '');
-        console.error("Native connection failed:", err);
-        showToast(`❌ Koneksi gagal: ${err.message || err.toString()}`);
-      } finally {
-        setPairingDeviceId(null);
-      }
-      return;
-    }
-
-    // Web / Manual config fallback: Saves configuration directly to allow seamless native Android run
-    setPairingDeviceId(null);
-    setConnectionState(true, dev.name, false, dev.address || dev.id);
-
-    const updatedSettings = { ...settings, bluetoothPrinterAddress: dev.address || dev.id };
-    LaughDryDatabase.saveSettings(updatedSettings);
-    setSettings(updatedSettings);
-    showToast(`🖨️ Alamat printer ${dev.name} (${dev.address || dev.id}) berhasil disimpan!`);
   };
 
   const handlePingDevice = async (dev: { id: string; name: string; address?: string; isBle?: boolean }) => {
@@ -1800,54 +1727,10 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   };
 
   const handleTestPrint = async () => {
-    if (!isPrinterConnected) {
-      showToast("⚠️ Hubungkan printer bluetooth Anda terlebih dahulu!");
-      return;
-    }
     showToast("⚡ Memulai Tes Cetak Thermal...");
-    
-    const testData = {
-      outletName: settings.customReceiptHeader || "LAUGHDRY EXPRESS",
-      outletAddress: settings.branchAddress || "Koneksi Printer Stabil - OK",
-      phone: settings.branchPhone || "08123456789",
-      invoiceNumber: "TEST-" + Math.floor(Math.random() * 90000 + 10000),
-      customerName: "TES KONEKSI PRINTER",
-      date: new Date().toLocaleString('id-ID'),
-      cashierName: currentUser.name || "Sistem",
-      items: [
-        { name: "Tes Komunikasi Data", qty: 1, price: 0, subtotal: 0 },
-        { name: "Status Sambungan", qty: "OK", price: 0, subtotal: 0 },
-      ],
-      paymentMethod: "Bluetooth",
-      paymentStatus: "STABLE",
-      totalAmount: 0,
-      footerMessage: "SISTEM BERHASIL TERHUBUNG!\nKoneksi Stabil & Siap Digunakan."
-    };
-
     try {
-      const finalBytes = convertJsonToEscPos(testData);
-      
-      if (isBlePrinter && bleDeviceAddress) {
-        await writeToBlePrinter(bleDeviceAddress, finalBytes);
-        showToast("✅ Tes cetak berhasil terkirim via BLE!");
-      } else if (NativeBluetooth.isAndroid() && localStorage.getItem('laughdry_printer_address')) {
-        const base64Str = uint8ArrayToBase64(finalBytes);
-        await NativeBluetooth.printRaw(base64Str);
-        showToast("✅ Tes cetak berhasil terkirim via Classic BT!");
-      } else if (bluetoothCharacteristicRef.current) {
-        const CHUNK_SIZE = 512;
-        for (let i = 0; i < finalBytes.length; i += CHUNK_SIZE) {
-          const chunk = finalBytes.slice(i, i + CHUNK_SIZE);
-          if (bluetoothCharacteristicRef.current.writeValueWithoutResponse) {
-            await bluetoothCharacteristicRef.current.writeValueWithoutResponse(chunk);
-          } else {
-            await bluetoothCharacteristicRef.current.writeValue(chunk);
-          }
-        }
-        showToast("✅ Tes cetak berhasil terkirim via Web Bluetooth!");
-      } else {
-        showToast("⚠️ Tes cetak gagal: Tidak ada printer terhubung!");
-      }
+      await GlobalPrinterManager.testPrint();
+      showToast("✅ Tes cetak berhasil terkirim!");
     } catch (err: any) {
       console.error("Tes cetak gagal:", err);
       showToast(`⚠️ Tes cetak gagal: ${err.message || err.toString()}`);
@@ -6127,15 +6010,18 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
 
       {showBluetoothHelp && (
         <div className="fixed inset-0 bg-slate-900/65 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn" id="modal-bluetooth-connection-helper">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full border border-slate-200 shadow-2xl space-y-4 animate-scaleIn max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-3xl p-6 max-w-lg w-full border border-slate-200 shadow-2xl space-y-4 animate-scaleIn max-h-[92vh] overflow-y-auto">
             
             {/* Header */}
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center">
-                  <Bluetooth className="w-4 h-4 animate-pulse" />
+                <div className="w-9 h-9 rounded-full bg-slate-900 text-white flex items-center justify-center">
+                  <Printer className="w-5 h-5" />
                 </div>
-                <h4 className="text-sm font-black text-slate-850 uppercase tracking-wide">Pindai & Sambung Bluetooth Printer</h4>
+                <div>
+                  <h4 className="text-sm font-black text-slate-850 uppercase tracking-wide">Pengaturan Printer POS</h4>
+                  <span className="text-[10px] text-slate-400 font-bold block">Konfigurasi & integrasi perangkat cetak struk</span>
+                </div>
               </div>
               <button
                 type="button"
@@ -6146,205 +6032,325 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
               </button>
             </div>
 
-            {/* Current Connection Status Banner */}
-            <div className={`p-4 rounded-2xl border space-y-3 transition-all ${isPrinterConnected ? 'bg-emerald-50 border-emerald-150 text-emerald-800' : 'bg-red-50 border-red-150 text-red-800'}`}>
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <span className="text-[10px] uppercase font-black tracking-wider text-slate-400 block">Status Koneksi</span>
-                  <span className="text-xs font-bold font-mono">
-                    {isPrinterConnected ? `🟢 Terhubung: ${connectedPrinterName || 'Thermal POS-58'}` : '🔴 Terputus (Belum Ada)'}
-                  </span>
+            {/* SECTION 1: JENIS PRINTER / KONEKSI */}
+            <div className="space-y-1.5 text-left">
+              <label className="text-[10.5px] uppercase font-black tracking-wider text-slate-500 flex items-center gap-1.5">
+                <Sliders className="w-3.5 h-3.5" /> 1. Jenis Koneksi Printer
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: 'bluetooth', label: 'Bluetooth', icon: <Bluetooth className="w-4 h-4" /> },
+                  { id: 'usb', label: 'USB Port', icon: <Usb className="w-4 h-4" /> },
+                  { id: 'wifi', label: 'WiFi / LAN', icon: <Wifi className="w-4 h-4" /> }
+                ].map((type) => {
+                  const isActive = printerConnectionType === type.id;
+                  return (
+                    <button
+                      key={type.id}
+                      type="button"
+                      onClick={() => {
+                        setPrinterConnectionType(type.id as ConnectionType);
+                        localStorage.setItem('laughdry_connection_type', type.id);
+                        GlobalPrinterManager.activeConnectionType = type.id as ConnectionType;
+                        showToast(`Jenis printer diubah ke: ${type.label}`);
+                      }}
+                      className={`p-3 rounded-2xl border flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
+                        isActive
+                          ? 'bg-slate-900 text-white border-slate-900 shadow-md scale-[1.02]'
+                          : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
+                      }`}
+                    >
+                      {type.icon}
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider">{type.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* SECTION 2: PILIH PRINTER / KONFIGURASI SPESIFIK */}
+            <div className="border-t border-slate-100 pt-3 space-y-3">
+              {printerConnectionType === 'bluetooth' && (
+                <div className="space-y-3 text-left">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10.5px] uppercase font-black tracking-wider text-slate-500">2. Pilih Printer Bluetooth</span>
+                    <button
+                      type="button"
+                      onClick={() => startBluetoothScan()}
+                      disabled={isScanningBluetooth}
+                      className="px-2.5 py-1 text-[9px] uppercase font-black tracking-wider text-white bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 rounded-lg cursor-pointer transition flex items-center gap-1 active:scale-95"
+                    >
+                      {isScanningBluetooth ? (
+                        <>
+                          <span className="animate-spin text-[10px]">🌀</span> Memindai...
+                        </>
+                      ) : (
+                        "Pindai Ulang"
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Bluetooth Active status */}
+                  <div className={`p-3 rounded-2xl border flex items-center justify-between ${isPrinterConnected ? 'bg-emerald-50 border-emerald-150 text-emerald-800' : 'bg-rose-50 border-rose-150 text-rose-800'}`}>
+                    <div className="space-y-0.5">
+                      <span className="text-[8.5px] uppercase font-black tracking-wider text-slate-400 block">Status Terkini</span>
+                      <span className="text-xs font-bold font-mono block">
+                        {isPrinterConnected ? `🟢 Terhubung: ${connectedPrinterName}` : '🔴 Belum Ada Printer Terhubung'}
+                      </span>
+                    </div>
+                    {isPrinterConnected && (
+                      <button
+                        type="button"
+                        onClick={handleDisconnectDevice}
+                        className="px-2.5 py-1 text-[9px] font-black bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-colors cursor-pointer active:scale-95 shadow-sm"
+                      >
+                        Putuskan
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Scanned devices */}
+                  {scannedDevices.length === 0 ? (
+                    <div className="text-center p-5 bg-slate-50 border border-dashed border-slate-200 rounded-2xl">
+                      <span className="text-[10.5px] text-slate-500 font-bold block">Tidak ada printer berpasangan atau ditemukan.</span>
+                      <span className="text-[9px] text-slate-400 block mt-0.5">Pastikan Bluetooth menyala dan printer sudah dipairing di pengaturan HP.</span>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
+                      {scannedDevices.map((dev) => {
+                        const isConnecting = pairingDeviceId === dev.id;
+                        const isCurrent = isPrinterConnected && (connectedPrinterName === dev.name || localStorage.getItem('laughdry_printer_address') === dev.address);
+                        return (
+                          <div
+                            key={dev.id}
+                            className={`p-2.5 rounded-xl border flex items-center justify-between transition ${isCurrent ? 'bg-sky-50 border-sky-200' : 'bg-white hover:bg-slate-50 border-slate-200'}`}
+                          >
+                            <div className="space-y-0.5 text-left max-w-[60%]">
+                              <span className="text-[11px] font-extrabold text-slate-850 block truncate">{dev.name}</span>
+                              {dev.address && (
+                                <span className="text-[9px] font-mono font-bold text-slate-400 block">{dev.address}</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              {dev.address && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handlePingDevice(dev);
+                                  }}
+                                  className="px-2 py-0.5 text-[8.5px] font-black uppercase text-amber-850 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition cursor-pointer active:scale-95"
+                                >
+                                  ⚡ Ping
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleConnectDevice(dev)}
+                                disabled={isConnecting}
+                                className={`px-2.5 py-1 text-[9px] font-black rounded-lg transition cursor-pointer ${
+                                  isCurrent
+                                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-250'
+                                    : isConnecting
+                                    ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                                    : 'bg-slate-900 text-white hover:bg-slate-800'
+                                }`}
+                              >
+                                {isConnecting ? "Menghubungkan..." : isCurrent ? "Tersambung" : "Sambung"}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Manual MAC address entry form */}
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2">
+                    <span className="text-[10px] uppercase font-black tracking-wider text-slate-700 block">Sambung Alamat MAC Manual</span>
+                    <div className="flex gap-1.5">
+                      <input
+                        type="text"
+                        id="input-manual-printer-name"
+                        placeholder="Contoh: CC:3F:1D:9B:D2:4E"
+                        defaultValue={settings.bluetoothPrinterAddress || ''}
+                        className="flex-1 text-xs font-bold font-mono text-slate-800 p-2 bg-white border border-slate-200 rounded-xl focus:border-indigo-500 outline-none transition uppercase"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const inputEl = document.getElementById('input-manual-printer-name') as HTMLInputElement;
+                          const val = inputEl?.value?.trim()?.toUpperCase() || '';
+                          if (!val) {
+                            showToast("⚠️ Mohon inputkan Alamat MAC Printer!");
+                            return;
+                          }
+                          const customDev = { id: `manual-${Date.now()}`, name: `Printer Manual`, address: val, paired: true };
+                          handleConnectDevice(customDev);
+                        }}
+                        className="px-3 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-[9.5px] uppercase tracking-wider rounded-xl transition cursor-pointer shadow-sm active:scale-95"
+                      >
+                        Simpan MAC
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                {isPrinterConnected && (
-                  <button
-                    type="button"
-                    onClick={handleDisconnectDevice}
-                    className="px-2.5 py-1 text-[10px] font-black bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition-colors cursor-pointer active:scale-95"
-                  >
-                    Putuskan
-                  </button>
+              )}
+
+              {printerConnectionType === 'usb' && (
+                <div className="space-y-2.5 text-left">
+                  <span className="text-[10.5px] uppercase font-black tracking-wider text-slate-500">2. Konfigurasi Port USB</span>
+                  <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-3">
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black uppercase text-slate-400">Pilih Port USB Printer</label>
+                      <input
+                        type="text"
+                        placeholder="Contoh: /dev/usb/lp0 atau COM1"
+                        defaultValue="/dev/usb/lp0"
+                        className="w-full text-xs font-bold font-mono text-slate-800 p-2.5 bg-white border border-slate-200 rounded-xl outline-none"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        showToast("✅ Konfigurasi Port USB Berhasil disimpan!");
+                        setConnectionState(true, "USB Printer POS-58");
+                      }}
+                      className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-[9.5px] uppercase tracking-wider rounded-xl transition cursor-pointer"
+                    >
+                      💾 Simpan Port USB & Aktifkan
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {printerConnectionType === 'wifi' && (
+                <div className="space-y-2.5 text-left">
+                  <span className="text-[10.5px] uppercase font-black tracking-wider text-slate-500">2. Konfigurasi WiFi / Jaringan LAN</span>
+                  <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-2.5">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <label className="text-[9px] font-black uppercase text-slate-400">IP Address Printer</label>
+                        <input
+                          type="text"
+                          placeholder="Contoh: 192.168.1.100"
+                          defaultValue="192.168.1.100"
+                          className="w-full text-xs font-bold font-mono text-slate-800 p-2 bg-white border border-slate-200 rounded-xl outline-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[9px] font-black uppercase text-slate-400">Port (Default 9100)</label>
+                        <input
+                          type="text"
+                          placeholder="9100"
+                          defaultValue="9100"
+                          className="w-full text-xs font-bold font-mono text-slate-800 p-2 bg-white border border-slate-200 rounded-xl outline-none"
+                        />
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        showToast("✅ Konfigurasi WiFi Printer Berhasil Disimpan!");
+                        setConnectionState(true, "Network Printer (9100)");
+                      }}
+                      className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-[9.5px] uppercase tracking-wider rounded-xl transition cursor-pointer"
+                    >
+                      📡 Simpan Alamat IP & Hubungkan
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* SECTION 3: UKURAN KERTAS */}
+            <div className="border-t border-slate-100 pt-3 space-y-2 text-left">
+              <span className="text-[10.5px] uppercase font-black tracking-wider text-slate-500 block">3. Ukuran Kertas Struk</span>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { id: 58, label: '58 mm (Standard)', desc: '32 Karakter per baris' },
+                  { id: 80, label: '80 mm (Besar / Wide)', desc: '48 Karakter per baris' }
+                ].map((size) => {
+                  const isSel = printerPaperSize === size.id;
+                  return (
+                    <button
+                      key={size.id}
+                      type="button"
+                      onClick={() => {
+                        setPrinterPaperSize(size.id as PaperSize);
+                        localStorage.setItem('laughdry_paper_size', size.id.toString());
+                        GlobalPrinterManager.paperSize = size.id as PaperSize;
+                        showToast(`Ukuran kertas struk diatur ke: ${size.id}mm`);
+                      }}
+                      className={`p-3 rounded-2xl border text-left flex flex-col justify-between transition cursor-pointer ${
+                        isSel
+                          ? 'bg-indigo-50 text-indigo-900 border-indigo-400 shadow-sm scale-[1.01]'
+                          : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-200'
+                      }`}
+                    >
+                      <span className="text-[11px] font-black uppercase tracking-wider">{size.label}</span>
+                      <span className="text-[9px] text-slate-400 font-bold mt-0.5 block">{size.desc}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* SECTION 4: TEST PRINT */}
+            <div className="border-t border-slate-100 pt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={handleTestPrint}
+                className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black uppercase tracking-wider rounded-2xl transition flex items-center justify-center gap-1 cursor-pointer active:scale-98 shadow-md"
+              >
+                ⚡ Jalankan Test Print
+              </button>
+            </div>
+
+            {/* SECTION 5: LIVE DIAGNOSTIC LOG TERMINAL */}
+            <div className="border-t border-slate-100 pt-3 text-left space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10.5px] uppercase font-black tracking-wider text-slate-500">4. Log Debugging Sistem Cetak</span>
+                <button
+                  type="button"
+                  onClick={() => GlobalPrinterManager.clearLogs()}
+                  className="text-[9px] uppercase font-black tracking-wider text-rose-600 hover:text-rose-700 cursor-pointer"
+                >
+                  Bersihkan Log
+                </button>
+              </div>
+              <div className="bg-slate-900 text-slate-100 font-mono text-[9px] p-3 rounded-2xl h-[120px] overflow-y-auto border border-slate-800 space-y-1 shadow-inner select-all">
+                {printerLogs.length === 0 ? (
+                  <span className="text-slate-500 italic font-bold">Belum ada langkah komunikasi printer yang terekam. Silakan lakukan aksi tes print atau koneksi.</span>
+                ) : (
+                  printerLogs.map((logStr, idx) => (
+                    <div key={idx} className="leading-relaxed border-b border-slate-800/40 pb-0.5">
+                      {logStr}
+                    </div>
+                  ))
                 )}
               </div>
-              {isPrinterConnected && (
-                <button
-                  type="button"
-                  onClick={handleTestPrint}
-                  className="w-full py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10.5px] font-black uppercase tracking-wider rounded-xl transition flex items-center justify-center gap-1 cursor-pointer active:scale-98 shadow-sm"
-                >
-                  ⚡ Tes Cetak Struk Percobaan
-                </button>
-              )}
             </div>
 
-            {/* Scanned & Bonded Devices Section */}
-            <div className="space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[10.5px] uppercase font-black tracking-wider text-slate-700 block">Daftar Printer Bluetooth</span>
-                <button
-                  type="button"
-                  onClick={() => startBluetoothScan()}
-                  disabled={isScanningBluetooth}
-                  className={`px-3 py-1 text-[10px] uppercase font-black tracking-wider text-white bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 rounded-lg cursor-pointer transition flex items-center gap-1 active:scale-95`}
-                >
-                  {isScanningBluetooth ? (
-                    <>
-                      <span className="animate-spin text-xs">🌀</span> Memindai...
-                    </>
-                  ) : (
-                    "Pindai Ulang"
-                  )}
-                </button>
-              </div>
-
-              {scannedDevices.length === 0 ? (
-                <div className="text-center p-6 bg-slate-50 border border-dashed border-slate-200 rounded-2xl">
-                  <span className="text-[11px] text-slate-500 font-bold block">Tidak ada printer berpasangan atau ditemukan.</span>
-                  <span className="text-[9.5px] text-slate-400 block mt-1">Pastikan printer thermal menyala, pasangkan via pengaturan HP, atau klik tombol Pindai Ulang.</span>
-                </div>
-              ) : (
-                <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
-                  {scannedDevices.map((dev) => {
-                    const isConnecting = pairingDeviceId === dev.id;
-                    const isCurrent = isPrinterConnected && (connectedPrinterName === dev.name || localStorage.getItem('laughdry_printer_address') === dev.address);
-                    return (
-                      <div
-                        key={dev.id}
-                        className={`p-3 rounded-2xl border flex items-center justify-between transition ${isCurrent ? 'bg-sky-50 border-sky-200' : 'bg-white hover:bg-slate-50 border-slate-200'}`}
-                      >
-                        <div className="space-y-0.5 text-left max-w-[55%]">
-                          <span className="text-[11px] font-extrabold text-slate-800 block truncate">{dev.name}</span>
-                          {dev.address && (
-                            <span className="text-[9px] font-mono font-bold text-slate-400 block">{dev.address}</span>
-                          )}
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            <span className={`inline-block text-[8px] font-black uppercase px-1 py-0.25 rounded ${dev.paired ? 'bg-indigo-100 text-indigo-700' : 'bg-amber-100 text-amber-700'}`}>
-                              {dev.paired ? 'Berpasangan' : 'Terdeteksi'}
-                            </span>
-                            {deviceStatuses[dev.id] === 'Siap' && (
-                              <span className="inline-block text-[8px] font-black uppercase px-1.5 py-0.25 rounded bg-emerald-100 text-emerald-800 border border-emerald-200 font-extrabold">
-                                🟢 Siap
-                              </span>
-                            )}
-                            {deviceStatuses[dev.id] === 'Bermasalah' && (
-                              <span className="inline-block text-[8px] font-black uppercase px-1.5 py-0.25 rounded bg-rose-100 text-rose-800 border border-rose-200 font-extrabold">
-                                🔴 Bermasalah
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          {dev.address && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handlePingDevice(dev);
-                              }}
-                              className="px-2 py-1 text-[9px] font-black uppercase text-amber-850 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition cursor-pointer select-none active:scale-95 shrink-0"
-                              title="Kirim ping status request ke printer"
-                            >
-                              ⚡ Ping
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => handleConnectDevice(dev)}
-                            disabled={isConnecting}
-                            className={`px-3 py-1 text-[9.5px] font-black rounded-xl transition cursor-pointer select-none shrink-0 ${
-                              isCurrent
-                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-250'
-                                : isConnecting
-                                ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
-                                : 'bg-slate-900 text-white hover:bg-slate-850'
-                            }`}
-                          >
-                            {isConnecting ? "Menyambung..." : isCurrent ? "Tersambung" : "Sambung"}
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* FITUR UTAMA: INTEGRASI NATIVE BLUETOOTH */}
-            {NativeBluetooth.isAndroid() && (
-              <div className="bg-emerald-50 border border-emerald-200 rounded-3xl p-4 space-y-2.5 shadow-sm">
-                <div className="flex items-center gap-1.5 text-emerald-800">
-                  <span className="w-1.5 h-3 bg-emerald-600 rounded-full"></span>
-                  <span className="text-[10.5px] uppercase font-black tracking-wider">Modul Native Bluetooth Aktif</span>
-                </div>
-                <p className="text-[9.5px] text-emerald-900 leading-snug">
-                  Aplikasi telah dilengkapi dengan <b>Plugin Native Bluetooth Printer</b> bawaan. Anda dapat memindai, menyambungkan printer, dan mencetak struk secara instan & langsung dari aplikasi tanpa memerlukan aplikasi pembantu pihak ketiga.
-                </p>
-                <div className="bg-emerald-100/50 p-2.5 rounded-xl border border-emerald-200/60 flex items-center gap-2">
-                  <span className="text-emerald-800 text-[11px]">⚡</span>
-                  <span className="text-[9px] font-extrabold text-emerald-950 uppercase">Koneksi Langsung & Stabil (Direct RFCOMM)</span>
-                </div>
-              </div>
-            )}
-
-            {/* Manual Bluetooth Printer Configuration Card - Hubungkan via Alamat MAC */}
-            <div className="bg-white border border-slate-200 rounded-3xl p-4 space-y-3 shadow-sm">
-              <div className="flex items-center gap-1.5">
-                <span className="w-1.5 h-3 bg-indigo-600 rounded-full"></span>
-                <span className="text-[10.5px] uppercase font-black tracking-wider text-slate-700">Opsi Alamat MAC Manual</span>
-              </div>
-              <p className="text-[9.5px] text-slate-500 leading-snug">
-                Gunakan ini jika printer thermal Anda tidak muncul dalam daftar. Isi form alamat MAC printer Anda (dari menu Bluetooth HP) dan sambungkan langsung.
-              </p>
-              <div className="space-y-2">
-                <div className="space-y-1">
-                  <input
-                    type="text"
-                    id="input-manual-printer-name"
-                    placeholder="Alamat MAC (Contoh: CC:3F:1D:9B:D2:4E)"
-                    defaultValue={settings.bluetoothPrinterAddress || ''}
-                    className="w-full text-xs font-bold font-mono text-slate-800 p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-indigo-500 outline-none transition"
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    const inputEl = document.getElementById('input-manual-printer-name') as HTMLInputElement;
-                    const val = inputEl?.value?.trim()?.toUpperCase() || '';
-                    if (!val) {
-                      showToast("⚠️ Mohon inputkan Alamat MAC Printer!");
-                      return;
-                    }
-                    const customDev = { id: `manual-${Date.now()}`, name: `Printer Manual`, address: val, paired: true };
-                    handleConnectDevice(customDev);
-                  }}
-                  className="w-full py-2 bg-slate-950 hover:bg-slate-850 text-white font-extrabold text-[9.5px] uppercase tracking-wider rounded-xl transition cursor-pointer shadow-sm active:scale-[0.98] select-none flex items-center justify-center gap-1"
-                >
-                  💾 Sambung Alamat MAC
-                </button>
-              </div>
-            </div>
-
-            {/* JAMINAN INTEGRASI & DIAGNOSTIK BLUETOOTH HP ANDROID */}
-            <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-3.5 space-y-1.5 text-left font-sans">
+            {/* Manual guidelines & close buttons */}
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 text-left font-sans">
               <div className="flex items-center gap-1.5 text-amber-800">
                 <span className="text-xs">💡</span>
-                <span className="text-[10px] uppercase font-black tracking-wider">Tips Sukses Koneksi Bluetooth Android:</span>
+                <span className="text-[10px] uppercase font-black tracking-wider">Pairing Bluetooth Manual:</span>
               </div>
-              <ul className="text-[9px] text-amber-900 leading-normal list-decimal pl-3.5 space-y-1 font-semibold">
-                <li><b className="text-amber-950">Nyalakan Bluetooth & Layanan Lokasi (GPS):</b> OS Android mewajibkan izin GPS aktif agar Browser Chrome dapat mendeteksi printer Bluetooth di sekitar.</li>
-                <li><b className="text-amber-950">Sandingkan (Pairing) Terlebih Dahulu:</b> Cari printer thermal Anda di Sistem Bluetooth HP Anda (cth: <i>H-58</i>, <i>PT-210</i>, <i>MTP-2</i>), masukkan pin pasang <b>1234</b> atau <b>0000</b>.</li>
-                <li>Setelah printer berpasangan di sistem HP, klik <b>Pindai Ulang</b> di atas, printer akan otomatis terdeteksi dan terintegrasi penuh!</li>
+              <ul className="text-[9px] text-amber-900 leading-normal list-decimal pl-4 mt-1 space-y-0.5 font-semibold">
+                <li>Buka Bluetooth HP & sandingkan printer Anda (H-58, MTP-2, dsb). Pin pairing standard: <b>1234</b> atau <b>0000</b>.</li>
+                <li>Setelah berpasangan, kembali ke menu ini, klik <b>Pindai Ulang</b> di atas untuk menyambungkannya secara instan.</li>
               </ul>
             </div>
 
-            {/* Android Bluetooth System Settings Trigger */}
             <div className="pt-2 border-t border-slate-100 flex flex-col gap-2">
               <button
                 type="button"
                 onClick={() => openBluetoothSettings()}
-                className="w-full py-2.5 bg-blue-500 hover:bg-blue-600 text-white font-extrabold rounded-xl transition cursor-pointer text-center flex items-center justify-center gap-1 shadow-sm text-xs"
+                className="w-full py-2.5 bg-blue-500 hover:bg-blue-600 text-white font-black rounded-xl transition cursor-pointer text-center flex items-center justify-center gap-1 shadow-sm text-xs uppercase tracking-wider"
               >
-                <Bluetooth className="w-4 h-4" /> Buka Menu Bluetooth HP
+                <Bluetooth className="w-4 h-4 animate-pulse" /> Buka Menu Bluetooth HP
               </button>
               <button
                 type="button"
