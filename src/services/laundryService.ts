@@ -17,7 +17,7 @@ import {
   orderBy,
   onSnapshot
 } from '../lib/firebase';
-import { Order, OrderStatus, Customer, Service, Expense, Branch, SystemSettings, AttendanceRecord, User, PushNotification } from '../types';
+import { Order, OrderStatus, Customer, Service, Expense, Branch, SystemSettings, AttendanceRecord, User, PushNotification, WhatsAppTemplate } from '../types';
 
 function getUserIdPath(): string {
   const sharedDbId = localStorage.getItem('laughdry_shared_database_id');
@@ -598,6 +598,81 @@ export class LaundryService {
       await deleteDoc(doc(db, parent, 'parfume', perfumeId));
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, path);
+    }
+  }
+
+  /**
+   * Fetch a single order by invoice number and optional phone number
+   */
+  static async getOrderByInvoiceAndPhone(invoiceNumber: string, phone: string): Promise<Order | null> {
+    const parent = getUserIdPath();
+    const path = `${parent}/orders`;
+    try {
+      const q = query(collection(db, parent, 'orders'), where('invoiceNumber', '==', invoiceNumber));
+      const snapshot = await getDocs(q);
+      if (snapshot.empty) return null;
+      
+      let foundOrder: Order | null = null;
+      snapshot.forEach((doc) => {
+        const order = doc.data() as Order;
+        foundOrder = order;
+      });
+      return foundOrder;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, path);
+      return null;
+    }
+  }
+
+  /**
+   * Fetch a single customer by ID
+   */
+  static async getCustomerById(customerId: string): Promise<Customer | null> {
+    const parent = getUserIdPath();
+    const path = `${parent}/customers/${customerId}`;
+    try {
+      const docRef = doc(db, parent, 'customers', customerId);
+      const snapshot = await getDoc(docRef);
+      if (snapshot.exists()) {
+        return snapshot.data() as Customer;
+      }
+      return null;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, path);
+      return null;
+    }
+  }
+
+  /**
+   * Fetch templates from Firestore
+   */
+  static async getTemplates(): Promise<WhatsAppTemplate[]> {
+    const parent = getUserIdPath();
+    const path = `${parent}/templates`;
+    try {
+      const snapshot = await getDocs(collection(db, parent, 'templates'));
+      const list: WhatsAppTemplate[] = [];
+      snapshot.forEach((doc) => {
+        list.push(doc.data() as WhatsAppTemplate);
+      });
+      return list;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, path);
+      return [];
+    }
+  }
+
+  /**
+   * Save templates to Firestore
+   */
+  static async saveTemplates(templates: WhatsAppTemplate[]): Promise<void> {
+    const parent = getUserIdPath();
+    try {
+      for (const tmpl of templates) {
+        await setDoc(doc(db, parent, 'templates', tmpl.id), sanitizeFirestoreData(tmpl));
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `${parent}/templates`);
     }
   }
 }

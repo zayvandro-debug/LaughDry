@@ -238,8 +238,91 @@ export class LaughDryDatabase {
       console.log('No authenticated user, skipping syncFromFirestore.');
       return;
     }
+
+    // Check if we are in customer-only / guest tracking mode
+    const isClient = typeof window !== 'undefined';
+    const queryParams = isClient ? new URLSearchParams(window.location.search) : null;
+    const isCustomerOnlyMode = isClient && (
+      window.location.hostname.includes('vercel.app') || 
+      queryParams?.has('phone') || 
+      queryParams?.has('invoice')
+    );
+    const isGuest = !auth.currentUser;
+
     try {
       localStorage.setItem('laughdry_skip_demo_seeds', 'true');
+
+      if (isCustomerOnlyMode || isGuest) {
+        console.log('Customer-only / Guest mode detected. Syncing only tracking data.');
+        
+        // 1. Sync Settings
+        try {
+          const firestoreSettings = await LaundryService.getSettings();
+          if (firestoreSettings && this.isValidSettings(firestoreSettings)) {
+            this.saveKey('settings', firestoreSettings);
+          }
+        } catch (e) {
+          console.warn("Failed syncing settings:", e);
+        }
+
+        // 2. Sync Branches
+        try {
+          const firestoreBranches = await LaundryService.getBranches();
+          if (firestoreBranches.length > 0) {
+            this.saveKey('branches', firestoreBranches);
+          }
+        } catch (e) {
+          console.warn("Failed syncing branches:", e);
+        }
+
+        // 3. Sync Perfumes
+        try {
+          const firestorePerfumes = await LaundryService.getPerfumes();
+          if (firestorePerfumes.length > 0) {
+            this.saveKey('perfumes', firestorePerfumes);
+          }
+        } catch (e) {
+          console.warn("Failed syncing perfumes:", e);
+        }
+
+        // 4. Sync Services
+        try {
+          const firestoreServices = await LaundryService.getServices();
+          if (firestoreServices.length > 0) {
+            this.saveKey('services', firestoreServices);
+          }
+        } catch (e) {
+          console.warn("Failed syncing services:", e);
+        }
+
+        // 5. Sync ONLY the specific order matching the invoice from URL
+        const invoiceNum = queryParams?.get('invoice');
+        const phoneNum = queryParams?.get('phone');
+        if (invoiceNum) {
+          try {
+            const trackingOrder = await LaundryService.getOrderByInvoiceAndPhone(invoiceNum, phoneNum || '');
+            if (trackingOrder) {
+              // Merge into existing local orders
+              const localOrders = this.getOrders().filter(o => o.id !== trackingOrder.id);
+              this.saveKey('orders', [trackingOrder, ...localOrders]);
+              
+              // Also sync customer profile for this tracking order
+              if (trackingOrder.customerId) {
+                const customer = await LaundryService.getCustomerById(trackingOrder.customerId);
+                if (customer) {
+                  const localCusts = this.getCustomers().filter(c => c.id !== customer.id);
+                  this.saveKey('customers', [customer, ...localCusts]);
+                }
+              }
+            }
+          } catch (e) {
+            console.warn("Failed syncing tracking order:", e);
+          }
+        }
+
+        window.dispatchEvent(new CustomEvent('laughdry_db_synced'));
+        return;
+      }
 
       // 0. Users (Owner & Kasir)
       const firestoreUsers = await LaundryService.getFirestoreUsers();
@@ -318,13 +401,27 @@ export class LaughDryDatabase {
         const localPerfumes = this.getPerfumes().filter(p => this.isValidPerfume(p));
         if (localPerfumes.length === 0) {
           const defaultPerfumes = [
-            { id: 'pf-1', name: 'Floral', description: 'Keharuman melati & kelopak bunga mawar anggun yang indah', isActive: true, icon: '🌸' },
-            { id: 'pf-2', name: 'Fresh', description: 'Wangi relaksasi kelapa muda segar pantai tropis', isActive: true, icon: '🥥' },
-            { id: 'pf-3', name: 'Sweet', description: 'Aroma manis kental buah stroberi segar kesukaan anak-anak', isActive: true, icon: '🍓' },
-            { id: 'pf-4', name: 'Woody', description: 'Keharuman maskulin batang kayu alami yang menenangkan', isActive: true, icon: '🪵' }
+            { id: 'pf-1', name: 'Floral', description: 'Keharuman bunga akasia anggun yang indah', isActive: true, icon: '🌸' },
+            { id: 'pf-2', name: 'Fresh', description: 'Wangi relaksasi segar pantai tropis', isActive: true, icon: '🥥' },
+            { id: 'pf-3', name: 'Sweet', description: 'Aroma manis kental buah-buahan', isActive: true, icon: '🍓' },
+            { id: 'pf-4', name: 'Woody', description: 'Keharuman maskulin alami yang menenangkan', isActive: true, icon: '🪵' }
           ];
           this.saveKey('perfumes', defaultPerfumes);
         }
+      }
+
+      // 9. Templates
+      try {
+        const firestoreTemplates = await LaundryService.getTemplates();
+        if (firestoreTemplates.length > 0) {
+          this.saveKey('templates', firestoreTemplates);
+        } else {
+          // If Firestore has no templates, sync the local ones up to Firestore
+          const localTemplates = this.getTemplates();
+          await LaundryService.saveTemplates(localTemplates);
+        }
+      } catch (e) {
+        console.warn("Failed syncing templates:", e);
       }
 
       window.dispatchEvent(new CustomEvent('laughdry_db_synced'));
@@ -681,7 +778,18 @@ export class LaughDryDatabase {
   public static saveAuditLogs(data: AuditLog[]) { this.saveKey('audit_logs', data); }
 
   public static getTemplates(): WhatsAppTemplate[] { return this.loadKey('templates', INITIAL_TEMPLATES); }
-  public static saveTemplates(data: WhatsAppTemplate[]) { this.saveKey('templates', data); }
+  public static saveTemplates(data: WhatsAppTemplate[]) { 
+    this.saveKey('templates', data); 
+    // Direct write to Firestore for instant synchronisation across devices
+    if (localStorage.getItem('laughdry_firebase_disabled') !== 'true') {
+      const uid = localStorage.getItem('laughdry_firebase_uid') || auth.currentUser?.uid;
+      if (uid && uid !== 'default') {
+        LaundryService.saveTemplates(data).catch(e => {
+          console.error("Gagal menyimpan templates ke Firestore:", e);
+        });
+      }
+    }
+  }
 
   public static getAttendance(): AttendanceRecord[] { 
     const list = this.loadKey<AttendanceRecord[]>('attendance', INITIAL_ATTENDANCE); 
@@ -1118,6 +1226,24 @@ export class LaughDryDatabase {
         this.handleRealtimeError(error, "perfumes");
       });
       this.unsubscribes.push(unsubPerfumes);
+
+      // 10. Listen to templates
+      const unsubTemplates = this.safeOnSnapshot(collection(db, parent, 'templates'), (snapshot) => {
+        const list: WhatsAppTemplate[] = [];
+        snapshot.forEach(doc => {
+          list.push(doc.data() as WhatsAppTemplate);
+        });
+        const currentLocal = this.loadKey<WhatsAppTemplate[]>('templates', []);
+        if (list.length > 0 && JSON.stringify(currentLocal) !== JSON.stringify(list)) {
+          this.saveKey('templates', list);
+          window.dispatchEvent(new CustomEvent('laughdry_templates_updated'));
+          window.dispatchEvent(new CustomEvent('laughdry_data_changed'));
+          window.dispatchEvent(new CustomEvent('laughdry_db_synced'));
+        }
+      }, (error) => {
+        this.handleRealtimeError(error, "templates");
+      });
+      this.unsubscribes.push(unsubTemplates);
 
     } catch (e) {
       console.error("Error starting realtime listeners:", e);

@@ -34,14 +34,74 @@ export default function App() {
   const [isAndroidApp] = useState<boolean>(() => {
     return Capacitor.isNativePlatform() || window.location.search.includes('platform=android');
   });
-  const [isCustomerOnly] = useState<boolean>(() => {
+  const [isCustomerOnly, setIsCustomerOnly] = useState<boolean>(() => {
     const queryParams = new URLSearchParams(window.location.search);
-    return queryParams.has('phone') || queryParams.has('invoice');
+    if (queryParams.has('phone') || queryParams.has('invoice')) {
+      return true;
+    }
+    if (typeof window !== 'undefined') {
+      const hostname = window.location.hostname;
+      if (hostname.includes('vercel.app')) {
+        return true;
+      }
+      const s = LaughDryDatabase.getSettings();
+      if (s.vercelTrackingUrl) {
+        try {
+          const vercelUrl = new URL(s.vercelTrackingUrl);
+          if (vercelUrl.hostname && hostname === vercelUrl.hostname) {
+            return true;
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
+    return false;
   });
+
+  useEffect(() => {
+    // Explicit server-side environment and routing check
+    const checkServerEnv = async () => {
+      try {
+        const queryParams = new URLSearchParams(window.location.search).toString();
+        const response = await fetch(`/api/env-check?${queryParams}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.isCustomerOnly) {
+            setIsCustomerOnly(true);
+            setActiveConsole('pelanggan');
+          }
+        }
+      } catch (err) {
+        console.warn("Server-side environment check skipped or offline:", err);
+      }
+    };
+    checkServerEnv();
+  }, []);
   const [activeConsole, setActiveConsole] = useState<'owner' | 'karyawan' | 'pelanggan'>(() => {
     const queryParams = new URLSearchParams(window.location.search);
     if (queryParams.has('phone') || queryParams.has('invoice')) {
       return 'pelanggan';
+    }
+    if (typeof window !== 'undefined') {
+      const hostname = window.location.hostname;
+      let onVercel = hostname.includes('vercel.app');
+      if (!onVercel) {
+        const s = LaughDryDatabase.getSettings();
+        if (s.vercelTrackingUrl) {
+          try {
+            const vercelUrl = new URL(s.vercelTrackingUrl);
+            if (vercelUrl.hostname && hostname === vercelUrl.hostname) {
+              onVercel = true;
+            }
+          } catch (e) {
+            // ignore
+          }
+        }
+      }
+      if (onVercel) {
+        return 'pelanggan';
+      }
     }
     const isApp = Capacitor.isNativePlatform() || window.location.search.includes('platform=android');
     return isApp ? 'karyawan' : 'owner';
@@ -406,6 +466,13 @@ export default function App() {
   }, [activeConsole]);
 
   useEffect(() => {
+    // Force customer console mode if customer-only mode is active
+    if (isCustomerOnly && activeConsole !== 'pelanggan') {
+      setActiveConsole('pelanggan');
+    }
+  }, [isCustomerOnly, activeConsole]);
+
+  useEffect(() => {
     // Standard visual Clock ticking representing true local time
     const updateTime = () => {
       const date = new Date();
@@ -426,6 +493,79 @@ export default function App() {
       <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center">
         <div className="w-10 h-10 border-4 border-slate-700/50 border-t-sky-400 rounded-full animate-spin"></div>
         <p className="text-slate-400 text-xs mt-4 font-semibold tracking-wider animate-pulse">MEMBUAT JALUR TERENKRIPSI CLOUD...</p>
+      </div>
+    );
+  }
+
+  // HARD SEPARATION: If isCustomerOnly is true, ONLY render CustomerTracking portal.
+  // This completely eliminates any possibility of showing the OwnerDashboard, EmployeeConsole,
+  // or the Firebase authentication gates for operators/owners.
+  if (isCustomerOnly) {
+    return (
+      <div className={`min-h-screen flex flex-col font-sans ${theme === 'dark' ? 'dark bg-slate-950 text-slate-100' : 'bg-[#F8FAFC] text-slate-900'}`} id="app-root-customer-only">
+        <header className="bg-[#0F172A] text-white border-b border-slate-800 sticky top-0 z-40 px-4 md:px-8 py-2 md:py-4 shadow-sm select-none">
+          <div className="max-w-7xl mx-auto flex flex-row items-center justify-between gap-1.5 md:gap-4">
+            <div className="flex items-center gap-1.5 md:gap-3">
+              {settings.customReceiptHeaderLogoImg && !settings.customReceiptHeaderLogoImg.includes('unsplash.com') ? (
+                <div className="w-[50px] h-[50px] md:w-[60px] md:h-[60px] rounded-lg md:rounded-xl overflow-hidden shadow-lg bg-slate-900 border border-slate-800 shrink-0 p-0.5 animate-scaleIn">
+                  <img 
+                    src={settings.customReceiptHeaderLogoImg} 
+                    alt="Logo" 
+                    className="w-full h-full object-contain"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+              ) : (
+                <div className="w-[50px] h-[50px] md:w-[60px] md:h-[60px] rounded-lg md:rounded-xl overflow-hidden shadow-lg bg-slate-900 border border-slate-800 shrink-0 p-0.5 animate-scaleIn">
+                  <img 
+                    src={logoImg} 
+                    alt="LaughDry App Mascot" 
+                    className="w-full h-full object-contain rounded-lg"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+              )}
+              <div className="flex flex-col">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-sans font-black text-xs md:text-sm tracking-tight text-white uppercase select-none">
+                    {settings.customReceiptHeaderName || 'LaughDry Hub'}
+                  </span>
+                  <span className="text-[7.5px] md:text-[10px] bg-emerald-500/20 text-[#34D399] font-bold px-1.5 py-0.5 rounded uppercase border border-emerald-500/30">
+                    Situs Tracking Pelanggan
+                  </span>
+                </div>
+                <p className="text-[9px] md:text-[10px] text-slate-400 font-medium">
+                  Informasi Status Pesanan Anda Secara Real-Time
+                </p>
+              </div>
+            </div>
+
+            {/* Time and Theme Toggler only */}
+            <div className="flex items-center gap-1.5 md:gap-3 text-xs text-slate-400">
+              <div className="flex items-center gap-1 bg-slate-800 px-2 py-1 rounded-lg border border-slate-700/50">
+                <Clock className="w-3.5 h-3.5 text-sky-400 animate-pulse" />
+                <span className="font-mono text-[9px] md:text-[10px] font-bold text-white tracking-widest">{currentTime}</span>
+              </div>
+              <button
+                onClick={() => setTheme(prev => prev === 'light' ? 'dark' : 'light')}
+                className="p-1 md:p-1.5 rounded-lg bg-slate-800 hover:bg-slate-750 border border-slate-700/50 transition-all text-[#38BDF8] hover:bg-slate-700 cursor-pointer flex items-center justify-center w-7 h-7"
+                title={theme === 'light' ? 'Ganti ke Mode Gelap' : 'Ganti ke Mode Terang'}
+              >
+                {theme === 'light' ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <main className="flex-1 w-full max-w-7xl mx-auto px-4 md:px-8 pt-4 pb-6">
+          <CustomerTracking />
+        </main>
+
+        <footer className="py-4 text-[11px] text-slate-400 font-sans mt-8 text-center border-t border-slate-200 dark:border-slate-800/50">
+          <div className="max-w-7xl mx-auto px-4">
+            <span>{settings.customReceiptHeaderName || 'LaughDry'} &copy; 2026 &bull; Tracking Portal</span>
+          </div>
+        </footer>
       </div>
     );
   }

@@ -1943,6 +1943,29 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     triggerToast("Template WhatsApp berhasil disimpan!");
   };
 
+  const insertVariableAtCursor = (tmplId: string, variable: string) => {
+    const textarea = document.getElementById(`wa-tmpl-text-${tmplId}`) as HTMLTextAreaElement;
+    if (textarea) {
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const text = textarea.value;
+      const before = text.substring(0, start);
+      const after = text.substring(end, text.length);
+      const newValue = before + variable + after;
+      
+      const updated = templates.map(t => t.id === tmplId ? { ...t, body: newValue } : t);
+      LaughDryDatabase.saveTemplates(updated);
+      setTemplates(updated);
+      triggerToast(`Variabel ${variable} berhasil disisipkan!`);
+
+      setTimeout(() => {
+        textarea.focus();
+        const newCursorPos = start + variable.length;
+        textarea.setSelectionRange(newCursorPos, newCursorPos);
+      }, 50);
+    }
+  };
+
   const handleSettingsChange = (field: string, val: any) => {
     const updated = { ...settings, [field]: val };
     setSettingsSaveStatus('saving');
@@ -6872,16 +6895,50 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                       <span className="font-bold text-xs text-slate-700">{tmpl.name}</span>
                       <span className="text-[9px] bg-teal-50 text-teal-700 px-2 py-0.5 rounded-full font-bold uppercase">{tmpl.category}</span>
                     </div>
+
+                    {/* Dynamic Variable Selector */}
+                    <div className="mb-2">
+                      <select
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val) {
+                            insertVariableAtCursor(tmpl.id, val);
+                          }
+                          e.target.value = ''; // Reset select
+                        }}
+                        className="w-full text-[10.5px] font-black uppercase text-emerald-800 bg-emerald-50/70 border border-emerald-150 rounded-xl p-2 cursor-pointer transition hover:bg-emerald-100/80 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      >
+                        <option value="" className="font-bold">+ Sisipkan Variabel Kustom...</option>
+                        <option value="{{customer_name}}">👤 Nama Pelanggan (customer_name)</option>
+                        <option value="{{invoice_number}}">🔢 Nomor Nota (invoice_number)</option>
+                        <option value="{{services_list}}">🧺 Daftar Layanan (services_list)</option>
+                        <option value="{{total_quantity}}">⚖️ Total Timbangan/Qty (total_quantity)</option>
+                        <option value="{{total_amount}}">💰 Total Tagihan (total_amount)</option>
+                        <option value="{{payment_method}}">💳 Metode Pembayaran (payment_method)</option>
+                        <option value="{{payment_status}}">🏷️ Status Bayar (payment_status)</option>
+                        <option value="{{estimated_completion}}">📅 Estimasi Selesai (estimated_completion)</option>
+                        <option value="{{branch_name}}">🏢 Nama Cabang (branch_name)</option>
+                        <option value="{{branch_address}}">📍 Alamat Cabang (branch_address)</option>
+                        <option value="{{tracking_url}}">🔗 Link Tracking (tracking_url)</option>
+                        <option value="{{perfume}}">🌸 Aroma Parfum (perfume)</option>
+                      </select>
+                    </div>
+
                     <textarea
+                      id={`wa-tmpl-text-${tmpl.id}`}
                       rows={11}
-                      defaultValue={tmpl.body}
+                      value={tmpl.body}
+                      onChange={(e) => {
+                        const updated = templates.map(t => t.id === tmpl.id ? { ...t, body: e.target.value } : t);
+                        setTemplates(updated);
+                      }}
                       onBlur={(e) => handleTemplateChange(tmpl.id, e.target.value)}
                       placeholder="Masukkan format pesan..."
                       className="w-full bg-slate-50 border border-slate-100 rounded-lg p-2.5 text-[11px] font-mono leading-relaxed text-slate-700 focus:bg-white focus:outline-none focus:border-emerald-600"
                     />
                   </div>
                   <div className="text-[10px] text-slate-400 mt-2 bg-slate-50 p-2 rounded border border-slate-100 leading-relaxed">
-                    💡 Simpan dengan <strong>klik di luar kotak (blur target)</strong> untuk memperbarui template.
+                    💡 Simpan dengan <strong>klik di luar kotak (blur target)</strong> atau sisipkan variabel.
                   </div>
                 </div>
               ))}
@@ -6936,39 +6993,6 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                     className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-600 transition text-xs font-bold cursor-pointer"
                   >
                     Tutup ✕
-                  </button>
-                </div>
-
-                {/* Jarak Elemen Control inside popup */}
-                <div className="w-full bg-white border border-slate-200 rounded-2xl p-4 mb-4 text-xs shadow-xs space-y-3">
-                  <div className="flex justify-between items-center">
-                    <span className="font-extrabold text-slate-700 uppercase tracking-wider text-[11px]">📏 Jarak Antar Elemen:</span>
-                    <span className="font-black text-rose-600 bg-rose-50 px-2.5 py-0.5 rounded-lg text-[11px]">{tempSpacing} px</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="40"
-                    value={tempSpacing}
-                    onChange={(e) => {
-                      const newSpacing = Number(e.target.value);
-                      setTempSpacing(newSpacing);
-                      // Update in settings state so it live-previews
-                      handleSettingsChange('elementSpacing', newSpacing);
-                    }}
-                    className="w-full accent-rose-500 h-1.5 bg-slate-200 rounded-lg cursor-pointer"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const updated = { ...settings, elementSpacing: tempSpacing };
-                      LaughDryDatabase.saveSettings(updated);
-                      setSettings(updated);
-                      triggerToast("💾 Pengaturan jarak elemen berhasil disimpan sebagai template default!");
-                    }}
-                    className="w-full py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold border border-rose-250 text-[10.5px] rounded-xl flex items-center justify-center gap-1 cursor-pointer transition active:scale-95"
-                  >
-                    💾 Simpan Jarak Sebagai Template
                   </button>
                 </div>
 

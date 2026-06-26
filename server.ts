@@ -11,6 +11,18 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Explicit server-side environment-based verification endpoint
+  app.get("/api/env-check", (req, res) => {
+    const hostname = req.hostname || "";
+    const isVercel = hostname.includes("vercel.app");
+    const isCustomerOnly = isVercel || req.query.mode === "customer" || req.query.phone !== undefined || req.query.invoice !== undefined;
+    res.json({
+      isCustomerOnly,
+      hostname,
+      isProduction: process.env.NODE_ENV === "production"
+    });
+  });
+
   // ==========================================
   // MIDTRANS REAL-TIME DYNAMIC QRIS ENDPOINTS
   // ==========================================

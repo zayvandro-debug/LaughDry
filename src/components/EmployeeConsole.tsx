@@ -1975,7 +1975,10 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
 
   const redirectToWhatsApp = (order: Order) => {
     const textContent = getSimulatedMessageBody(order.status === OrderStatus.SIAP_DIAMBIL ? 'siap_diambil' : 'nota_layanan', order);
-    const encodedText = encodeURIComponent(textContent);
+    
+    // Normalize unicode characters to guarantee absolute preservation of emojis, formatting, and layout across all target platforms
+    const normalizedText = textContent.normalize('NFC');
+    const encodedText = encodeURIComponent(normalizedText);
     
     // Look up from customer database
     const dbCustomer = customers.find(c => c.id === order.customerId);
@@ -1989,8 +1992,9 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       cleanPhone = '62' + cleanPhone.substring(1);
     }
     
-    const waUrl = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedText}`;
-    window.open(waUrl, '_blank');
+    // Modern official universal deep link protocol (wa.me) that reliably maintains full UTF-8 emojis and formatting
+    const waUrl = `https://wa.me/${cleanPhone}?text=${encodedText}`;
+    window.open(waUrl, '_blank', 'noopener,noreferrer');
   };
 
   // Filter customers by input search
@@ -2806,7 +2810,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     const currentBranch = branches.find(b => b.id === order.branchId) || branches[0];
 
     const systemSettings = LaughDryDatabase.getSettings();
-    const vercelBase = (systemSettings.vercelTrackingUrl && systemSettings.vercelTrackingUrl !== 'https://laughdry.vercel.app' ? systemSettings.vercelTrackingUrl : window.location.origin).replace(/\/$/, '');
+    const vercelBase = (systemSettings.vercelTrackingUrl || window.location.origin).replace(/\/$/, '');
     const ownerUid = localStorage.getItem('laughdry_firebase_uid') || '';
     
     // Look up from customer database

@@ -191,6 +191,26 @@ service cloud.firestore {
       allow read, write: if isSignedIn() && request.auth.uid == ownerUid;
     }
 
+    // Allow unauthenticated reads to specific collections for customer tracking portal
+    match /users_db/{ownerUid}/orders/{orderId} {
+      allow read: if true;
+    }
+    match /users_db/{ownerUid}/branches/{branchId} {
+      allow read: if true;
+    }
+    match /users_db/{ownerUid}/settings/{settingId} {
+      allow read: if true;
+    }
+    match /users_db/{ownerUid}/parfume/{perfumeId} {
+      allow read: if true;
+    }
+    match /users_db/{ownerUid}/services/{serviceId} {
+      allow read: if true;
+    }
+    match /users_db/{ownerUid}/customers/{customerId} {
+      allow get: if true;
+    }
+
     // Path level: Tenant Root
     match /tenants/{ownerUid} {
       allow get: if isSignedIn() && (isOwner(ownerUid) || isEmployeeOfTenant(ownerUid));
