@@ -53,9 +53,8 @@ import { App as CapApp } from '@capacitor/app';
 import { Preferences as CapPreferences } from '@capacitor/preferences';
 import { requestAppPermissions } from '../utils/request-permissions';
 import { Capacitor } from '@capacitor/core';
-import { BleClient } from '@capacitor-community/bluetooth-le';
 import AttendanceMap from './AttendanceMap';
-import { useBluetoothPrinter, NativeBluetooth } from '../utils/bluetoothManager';
+import { useBluetoothPrinter, NativeBluetooth, GlobalBluetoothManager } from '../utils/bluetoothManager';
 import { connectBluetooth, convertHtmlToEscPos } from '../utils/escposHelper';
 import { printRawBytes } from '../lib/nativePrinter';
 import { GlobalPrinterManager, ConnectionType, PaperSize } from '../utils/printerManager';
@@ -1353,52 +1352,22 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     };
     verifyHardwarePermissions();
 
-    // Auto reconnect to native printer on Android or BLE if previously connected
+    // Auto reconnect to printer on Android or Web if previously connected
     const autoReconnectPrinter = async () => {
       if (localStorage.getItem('laughdry_printer_connected') === 'true') {
         const storedAddr = localStorage.getItem('laughdry_printer_address');
         const storedName = localStorage.getItem('laughdry_printer_name') || "Thermal Printer";
-        const isBle = localStorage.getItem('laughdry_printer_is_ble') === 'true';
 
         if (storedAddr) {
-          if (isBle) {
-            try {
-              console.log("Attempting BLE printer auto-reconnection to:", storedName, storedAddr);
-              await BleClient.initialize();
-              await BleClient.connect(storedAddr);
-              console.log("BLE auto-reconnection successful!");
-              setIsPrinterConnected(true);
-              setConnectedPrinterName(storedName);
-              setIsBlePrinter(true);
-              setBleDeviceAddress(storedAddr);
-            } catch (e) {
-              console.warn("Failed BLE printer auto-reconnection (ignoring so we keep connection persistent):", e);
-              // Tetap anggap terhubung secara visual agar status tidak hilang
-              setIsPrinterConnected(true);
-              setConnectedPrinterName(storedName);
-              setIsBlePrinter(true);
-              setBleDeviceAddress(storedAddr);
-            }
-          } else if (NativeBluetooth.isAndroid()) {
-            try {
-              console.log("Attempting native printer auto-reconnection to:", storedName, storedAddr);
-              const result = await NativeBluetooth.connect(storedAddr);
-              if (result && result.success) {
-                console.log("Auto-reconnection successful!");
-                setIsPrinterConnected(true);
-                setConnectedPrinterName(storedName);
-                setIsBlePrinter(false);
-                setBleDeviceAddress('');
-                showToast(`🔌 Auto-reconnect: ${storedName} terhubung!`);
-              }
-            } catch (e) {
-              console.warn("Failed auto re-connecting to native printer (ignoring so we keep connection persistent):", e);
-              // Tetap anggap terhubung secara visual agar status tidak hilang
-              setIsPrinterConnected(true);
-              setConnectedPrinterName(storedName);
-              setIsBlePrinter(false);
-              setBleDeviceAddress('');
-            }
+          try {
+            console.log("Attempting printer auto-reconnection to:", storedName, storedAddr);
+            await GlobalPrinterManager.reconnect();
+            setIsPrinterConnected(true);
+            setConnectedPrinterName(storedName);
+          } catch (e) {
+            console.warn("Failed printer auto-reconnection:", e);
+            setIsPrinterConnected(true);
+            setConnectedPrinterName(storedName);
           }
         }
       }
@@ -1482,41 +1451,8 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
           return merged;
         });
 
-        // 3. Scan for BLE devices as well
-        try {
-          await BleClient.initialize();
-          await BleClient.requestLEScan({}, (result) => {
-            if (result && result.device && result.device.name) {
-              const name = result.device.name;
-              const address = result.device.deviceId;
-              const dev = {
-                id: `ble-${address}`,
-                name: `${name} (BLE)`,
-                address: address,
-                paired: false,
-                isBle: true
-              };
-              setScannedDevices(prev => {
-                if (!prev.some(m => m.address?.toLowerCase() === address.toLowerCase())) {
-                  return [...prev, dev];
-                }
-                return prev;
-              });
-            }
-          });
-
-          // Stop scanning BLE after 4 seconds
-          setTimeout(async () => {
-            try {
-              await BleClient.stopLEScan();
-            } catch (_) {}
-          }, 4000);
-        } catch (bleErr) {
-          console.warn("BLE Scan not supported or failed:", bleErr);
-        }
-
         setIsScanningBluetooth(false);
-        showToast("✅ Berhasil memindai printer bluetooth (Classic & BLE)!");
+        showToast("✅ Berhasil memindai printer bluetooth classic!");
         return;
       } catch (err: any) {
         console.error("Native Bluetooth scanning error:", err);
@@ -1636,30 +1572,17 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   const handlePingDevice = async (dev: { id: string; name: string; address?: string; isBle?: boolean }) => {
     showToast(`⚡ Melakukan Ping ke ${dev.name}...`);
     try {
-      const pingBytes = new Uint8Array([16, 4, 1]); // DLE EOT 1 status request command
       let handshakeSuccess = false;
 
-      if (dev.isBle && dev.address) {
-        await BleClient.initialize();
-        await BleClient.connect(dev.address);
-        await writeToBlePrinter(dev.address, pingBytes);
-        handshakeSuccess = true;
-      } else if (NativeBluetooth.isAndroid() && dev.address) {
+      if (NativeBluetooth.isAndroid() && dev.address) {
         const result = await NativeBluetooth.connect(dev.address);
         if (result && result.success) {
-          const base64Str = uint8ArrayToBase64(pingBytes);
-          await NativeBluetooth.printRaw(base64Str);
+          const pingBytes = new Uint8Array([16, 4, 1]); // DLE EOT 1 status request command
+          await GlobalBluetoothManager.transmitRaw(dev.address, pingBytes);
           handshakeSuccess = true;
         }
-      } else if (bluetoothCharacteristicRef.current) {
-        if (bluetoothCharacteristicRef.current.writeValueWithoutResponse) {
-          await bluetoothCharacteristicRef.current.writeValueWithoutResponse(pingBytes);
-        } else {
-          await bluetoothCharacteristicRef.current.writeValue(pingBytes);
-        }
-        handshakeSuccess = true;
       } else {
-        // Simple fallback response if on web browser not utilizing Web Bluetooth characteristic yet
+        // Simple fallback response if on web browser
         await new Promise(resolve => setTimeout(resolve, 600));
         handshakeSuccess = true;
       }
@@ -1670,9 +1593,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
           localStorage.setItem('laughdry_printer_address', dev.address);
           localStorage.setItem('laughdry_printer_name', dev.name);
           localStorage.setItem('laughdry_printer_connected', 'true');
-          localStorage.setItem('laughdry_printer_is_ble', dev.isBle ? 'true' : 'false');
-          // Update global state as connected & ready!
-          setConnectionState(true, dev.name, !!dev.isBle, dev.address);
+          setConnectionState(true, dev.name, false, dev.address);
         }
         showToast(`🟢 Printer ${dev.name} Merespons! Status: Siap & MAC disimpan.`);
       } else {
@@ -1683,46 +1604,6 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       console.error("Ping failed:", err);
       setDeviceStatuses(prev => ({ ...prev, [dev.id]: 'Bermasalah' }));
       showToast(`❌ Ping gagal: ${err.message || 'Koneksi gagal'}`);
-    }
-  };
-
-  const findBlePrinterWriteParams = async (deviceId: string) => {
-    try {
-      const services = await BleClient.getServices(deviceId);
-      console.log("Discovered BLE services:", services);
-      
-      for (const service of services) {
-        for (const char of service.characteristics) {
-          if (char.properties?.write || char.properties?.writeWithoutResponse) {
-            return {
-              service: service.uuid,
-              characteristic: char.uuid
-            };
-          }
-        }
-      }
-    } catch (e) {
-      console.error("Error discovering BLE services:", e);
-    }
-    // Fallback standard generic thermal printer UUIDs
-    return {
-      service: "000018f0-0000-1000-8000-00805f9b34fb",
-      characteristic: "00002af1-0000-1000-8000-00805f9b34fb"
-    };
-  };
-
-  const writeToBlePrinter = async (deviceId: string, bytes: Uint8Array) => {
-    const params = await findBlePrinterWriteParams(deviceId);
-    const CHUNK_SIZE = 100;
-    for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
-      const chunk = bytes.slice(i, i + CHUNK_SIZE);
-      const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
-      try {
-        await BleClient.writeWithoutResponse(deviceId, params.service, params.characteristic, view);
-      } catch (err) {
-        await BleClient.write(deviceId, params.service, params.characteristic, view);
-      }
-      await new Promise(resolve => setTimeout(resolve, 50));
     }
   };
 

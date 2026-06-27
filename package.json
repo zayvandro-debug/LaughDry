@@ -17,7 +17,6 @@
     "cap:open-android": "cap open android"
   },
   "dependencies": {
-    "@capacitor-community/bluetooth-le": "^8.2.0",
     "@capacitor/app": "^8.1.0",
     "@capacitor/app-launcher": "^8.0.1",
     "@capacitor/camera": "^8.2.0",
@@ -27,7 +26,6 @@
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
-    "capacitor-bluetooth-serial": "^0.0.4",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "firebase": "^12.14.0",
