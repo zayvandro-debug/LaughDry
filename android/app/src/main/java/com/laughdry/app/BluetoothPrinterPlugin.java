@@ -232,37 +232,79 @@ public class BluetoothPrinterPlugin extends Plugin {
         }
 
         if (bluetoothAdapter == null) {
-            call.reject("Bluetooth not available");
+            call.reject("Bluetooth not available on this device");
             return;
         }
 
         if (!checkBluetoothPermission()) {
-            call.reject("No bluetooth connect permission");
+            call.reject("No bluetooth connect permission (BLUETOOTH_CONNECT)");
             return;
         }
 
         new Thread(() -> {
             try {
+                android.util.Log.d("BluetoothPrinter", "Disconnecting any previous connections...");
                 disconnectDeviceInternal();
 
                 BluetoothDevice device = bluetoothAdapter.getRemoteDevice(address);
-                socket = device.createRfcommSocketToServiceRecord(SPP_UUID);
+                android.util.Log.d("BluetoothPrinter", "Target device: " + device.getName() + " (" + address + ")");
                 
                 if (bluetoothAdapter.isDiscovering()) {
+                    android.util.Log.d("BluetoothPrinter", "Canceling discovery...");
                     bluetoothAdapter.cancelDiscovery();
                 }
 
-                socket.connect();
+                boolean connected = false;
+                Exception standardConnectError = null;
+
+                // Step 1: Attempt standard SPP connection
+                android.util.Log.d("BluetoothPrinter", "Creating standard RFCOMM socket...");
+                try {
+                    socket = device.createRfcommSocketToServiceRecord(SPP_UUID);
+                    android.util.Log.d("BluetoothPrinter", "Connecting to standard RFCOMM socket...");
+                    socket.connect();
+                    connected = true;
+                    android.util.Log.d("BluetoothPrinter", "Standard RFCOMM socket connected successfully!");
+                } catch (Exception e) {
+                    standardConnectError = e;
+                    android.util.Log.e("BluetoothPrinter", "Standard RFCOMM connection failed: " + e.getMessage());
+                    disconnectDeviceInternal();
+                }
+
+                // Step 2: Attempt reflection fallback if standard failed (highly effective for local thermal printers)
+                if (!connected) {
+                    android.util.Log.d("BluetoothPrinter", "Standard connection failed. Attempting reflection fallback (createRfcommSocket, channel 1)...");
+                    try {
+                        socket = (BluetoothSocket) device.getClass()
+                            .getMethod("createRfcommSocket", new Class[]{int.class})
+                            .invoke(device, 1);
+                        socket.connect();
+                        connected = true;
+                        android.util.Log.d("BluetoothPrinter", "Reflection RFCOMM fallback connected successfully!");
+                    } catch (Exception fallbackError) {
+                        disconnectDeviceInternal();
+                        String detailedMsg = "Standard connection failed: " + 
+                            (standardConnectError != null ? standardConnectError.getMessage() : "Unknown") + 
+                            " | Fallback failed: " + fallbackError.getMessage();
+                        android.util.Log.e("BluetoothPrinter", "Connection failed completely: " + detailedMsg);
+                        call.reject("Connection failed: " + detailedMsg);
+                        return;
+                    }
+                }
+
+                android.util.Log.d("BluetoothPrinter", "Getting OutputStream...");
                 outputStream = socket.getOutputStream();
+                android.util.Log.d("BluetoothPrinter", "OutputStream obtained successfully!");
 
                 JSObject ret = new JSObject();
                 ret.put("success", true);
-                ret.put("name", device.getName());
+                ret.put("name", device.getName() != null ? device.getName() : "Thermal Printer");
                 ret.put("address", address);
                 call.resolve(ret);
             } catch (Exception e) {
                 disconnectDeviceInternal();
-                call.reject("Connection failed: " + e.getMessage());
+                android.util.Log.e("BluetoothPrinter", "Connection process aborted: " + e.getMessage());
+                call.reject("Connection aborted: " + e.getMessage());
             }
         }).start();
     }
@@ -282,14 +324,22 @@ public class BluetoothPrinterPlugin extends Plugin {
 
         new Thread(() -> {
             try {
+                android.util.Log.d("BluetoothPrinter", "Writing text bytes to stream...");
                 byte[] bytes = text.getBytes("CP850");
                 outputStream.write(bytes);
                 outputStream.flush();
+                android.util.Log.d("BluetoothPrinter", "Text written and stream flushed!");
                 call.resolve();
             } catch (Exception e) {
+                android.util.Log.e("BluetoothPrinter", "Print failed: " + e.getMessage());
                 call.reject("Print failed: " + e.getMessage());
             }
         }).start();
+    }
+
+    @PluginMethod
+    public void printText(PluginCall call) {
+        print(call);
     }
 
     @PluginMethod
@@ -307,18 +357,33 @@ public class BluetoothPrinterPlugin extends Plugin {
 
         new Thread(() -> {
             try {
+                android.util.Log.d("BluetoothPrinter", "Decoding base64 bytes for printing (" + base64Data.length() + " chars)...");
                 byte[] bytes = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT);
+                android.util.Log.d("BluetoothPrinter", "Writing " + bytes.length + " raw bytes to stream...");
                 outputStream.write(bytes);
                 outputStream.flush();
+                android.util.Log.d("BluetoothPrinter", "Raw bytes written and stream flushed!");
                 call.resolve();
             } catch (Exception e) {
+                android.util.Log.e("BluetoothPrinter", "Print raw failed: " + e.getMessage());
                 call.reject("Print raw failed: " + e.getMessage());
             }
         }).start();
     }
 
     @PluginMethod
+    public void printEscPos(PluginCall call) {
+        printRaw(call);
+    }
+
+    @PluginMethod
+    public void write(PluginCall call) {
+        printRaw(call);
+    }
+
+    @PluginMethod
     public void disconnect(PluginCall call) {
+        android.util.Log.d("BluetoothPrinter", "Disconnect request received. Closing socket...");
         disconnectDeviceInternal();
         JSObject ret = new JSObject();
         ret.put("success", true);
@@ -328,16 +393,23 @@ public class BluetoothPrinterPlugin extends Plugin {
     private void disconnectDeviceInternal() {
         try {
             if (outputStream != null) {
+                android.util.Log.d("BluetoothPrinter", "Closing output stream...");
                 outputStream.close();
                 outputStream = null;
             }
-        } catch (IOException e) {}
+        } catch (IOException e) {
+            android.util.Log.e("BluetoothPrinter", "Error closing output stream: " + e.getMessage());
+        }
 
         try {
             if (socket != null) {
+                android.util.Log.d("BluetoothPrinter", "Closing socket...");
                 socket.close();
                 socket = null;
             }
-        } catch (IOException e) {}
+        } catch (IOException e) {
+            android.util.Log.e("BluetoothPrinter", "Error closing socket: " + e.getMessage());
+        }
+        android.util.Log.d("BluetoothPrinter", "Disconnection complete.");
     }
 }
