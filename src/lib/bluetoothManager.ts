@@ -1,11 +1,11 @@
 /**
  * BluetoothManager Utility for LaughDry POS
- * Handles Android Bluetooth permissions, pairing device lookup via getBondedDevices(), 
- * and raw byte stream transmission via SPP UUID (00001101-0000-1000-8000-00805F9B34FB).
- * Includes auto-reconnection and state tracking.
+ * Handles Android Bluetooth permissions, pairing device lookup via listDevices(), 
+ * and raw byte stream transmission via SPP.
+ * Consolidated to use BluetoothClassicPlugin exclusively.
  */
 
-import { registerPlugin, Capacitor } from '@capacitor/core';
+import { Capacitor } from '@capacitor/core';
 import { BluetoothClassicPlugin } from './bluetoothPlugin';
 
 export type ConnectionType = 'bluetooth' | 'usb' | 'wifi';
@@ -16,19 +16,6 @@ export interface BluetoothDevice {
   address: string;
   paired: boolean;
 }
-
-export interface BluetoothPrinterPluginInterface {
-  getAvailability(): Promise<{ available: boolean; enabled: boolean }>;
-  requestBluetoothPermissions(): Promise<{ requested: boolean; hasConnectPermission: boolean; hasScanPermission: boolean }>;
-  getPairedDevices(): Promise<{ devices: BluetoothDevice[] }>;
-  startScan(): Promise<{ devices: BluetoothDevice[] }>;
-  connect(options: { address: string }): Promise<{ success: boolean; name: string; address: string }>;
-  print(options: { text: string }): Promise<void>;
-  printRaw(options: { base64: string }): Promise<void>;
-  disconnect(): Promise<{ success: boolean }>;
-}
-
-const BluetoothPrinter = registerPlugin<BluetoothPrinterPluginInterface>('BluetoothPrinter');
 
 export class BluetoothManager {
   private static isAndroid(): boolean {
@@ -43,10 +30,15 @@ export class BluetoothManager {
       return { available: false, enabled: false };
     }
     try {
-      return await BluetoothPrinter.getAvailability();
-    } catch (e) {
+      await BluetoothClassicPlugin.listDevices();
+      return { available: true, enabled: true };
+    } catch (e: any) {
       console.warn("[BT_MANAGER] Error checking availability:", e);
-      return { available: false, enabled: false };
+      const msg = (e.message || "").toLowerCase();
+      if (msg.includes("tidak tersedia") || msg.includes("not available")) {
+        return { available: false, enabled: false };
+      }
+      return { available: true, enabled: false };
     }
   }
 
@@ -58,10 +50,12 @@ export class BluetoothManager {
       return true;
     }
     try {
-      const res = await BluetoothPrinter.requestBluetoothPermissions();
-      return res.hasConnectPermission;
+      // Trigger a call that requires permissions to prompt user if needed, or simply return true 
+      // as our Kotlin plugin performs run-time permission checks of BLUETOOTH_CONNECT automatically.
+      await BluetoothClassicPlugin.listDevices();
+      return true;
     } catch (e) {
-      console.warn("[BT_MANAGER] Error requesting permissions:", e);
+      console.warn("[BT_MANAGER] Error pre-checking permissions:", e);
       return false;
     }
   }
@@ -77,30 +71,17 @@ export class BluetoothManager {
       const result = await BluetoothClassicPlugin.listDevices();
       return (result.devices || []).map(d => ({ name: d.name, address: d.address, paired: true }));
     } catch (e) {
-      console.warn("[BT_MANAGER] Error getting paired devices via BluetoothClassicPlugin, trying legacy:", e);
-      try {
-        const result = await BluetoothPrinter.getPairedDevices();
-        return result.devices || [];
-      } catch (err) {
-        return [];
-      }
+      console.warn("[BT_MANAGER] Error getting paired devices via BluetoothClassicPlugin:", e);
+      return [];
     }
   }
 
   /**
-   * Scan for new nearby Bluetooth classic devices.
+   * Scan for nearby Bluetooth classic devices.
    */
   public async scan(): Promise<BluetoothDevice[]> {
-    if (!BluetoothManager.isAndroid()) {
-      return [];
-    }
-    try {
-      const result = await BluetoothPrinter.startScan();
-      return result.devices || [];
-    } catch (e) {
-      console.warn("[BT_MANAGER] Error scanning devices:", e);
-      return [];
-    }
+    // For classic thermal printing, bonded/paired devices are always preferred.
+    return await this.getBondedDevices();
   }
 
   /**
@@ -110,25 +91,16 @@ export class BluetoothManager {
   public async transmitRaw(address: string, bytes: Uint8Array): Promise<boolean> {
     try {
       if (BluetoothManager.isAndroid()) {
-        const base64Str = this.uint8ArrayToBase64(bytes);
-        await BluetoothClassicPlugin.write({ value: base64Str });
+        const intArray = Array.from(bytes);
+        await BluetoothClassicPlugin.write({ bytes: intArray });
         return true;
       } else {
         console.log(`[BT_MOCK_TRANSMIT] Sent ${bytes.length} bytes to ${address}`);
         return true;
       }
     } catch (e) {
-      console.error("[BT_MANAGER] Raw transmission failed via BluetoothClassicPlugin, trying legacy:", e);
-      try {
-        if (BluetoothManager.isAndroid()) {
-          const base64Str = this.uint8ArrayToBase64(bytes);
-          await BluetoothPrinter.printRaw({ base64: base64Str });
-          return true;
-        }
-        return false;
-      } catch (err) {
-        return false;
-      }
+      console.error("[BT_MANAGER] Raw transmission failed via BluetoothClassicPlugin:", e);
+      return false;
     }
   }
 
@@ -143,8 +115,8 @@ export class BluetoothManager {
       const result = await BluetoothClassicPlugin.connect({ address });
       return { success: result.success, name: result.name, address: result.address };
     } catch (e) {
-      console.warn("[BT_MANAGER] Error connecting via BluetoothClassicPlugin, trying legacy:", e);
-      return await BluetoothPrinter.connect({ address });
+      console.error("[BT_MANAGER] Error connecting via BluetoothClassicPlugin:", e);
+      throw e;
     }
   }
 
@@ -159,19 +131,9 @@ export class BluetoothManager {
       const res = await BluetoothClassicPlugin.disconnect();
       return res.success;
     } catch (e) {
-      console.warn("[BT_MANAGER] Error disconnecting via BluetoothClassicPlugin, trying legacy:", e);
-      const res = await BluetoothPrinter.disconnect();
-      return res.success;
+      console.error("[BT_MANAGER] Error disconnecting via BluetoothClassicPlugin:", e);
+      return false;
     }
-  }
-
-  private uint8ArrayToBase64(arr: Uint8Array): string {
-    let binary = "";
-    const len = arr.byteLength;
-    for (let i = 0; i < len; i++) {
-      binary += String.fromCharCode(arr[i]);
-    }
-    return btoa(binary);
   }
 }
 

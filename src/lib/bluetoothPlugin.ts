@@ -8,8 +8,8 @@ export interface BluetoothClassicDevice {
 export interface BluetoothClassicPluginInterface {
   listDevices(): Promise<{ devices: BluetoothClassicDevice[] }>;
   connect(options: { address: string }): Promise<{ success: boolean; name: string; address: string }>;
-  write(options: { value: string }): Promise<{ success: boolean }>;
-  printEscPos(options: { value: string }): Promise<{ success: boolean }>;
+  write(options: { bytes: number[] }): Promise<{ success: boolean }>;
+  printEscPos(options: { bytes: number[] }): Promise<{ success: boolean }>;
   disconnect(): Promise<{ success: boolean }>;
 }
 

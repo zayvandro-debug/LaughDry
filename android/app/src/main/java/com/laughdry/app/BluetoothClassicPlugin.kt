@@ -4,10 +4,8 @@ import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothSocket
-import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
-import android.util.Base64
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import com.getcapacitor.JSArray
@@ -45,12 +43,16 @@ class BluetoothClassicPlugin : Plugin() {
     @PluginMethod
     fun listDevices(call: PluginCall) {
         if (bluetoothAdapter == null) {
-            call.reject("Bluetooth tidak tersedia di perangkat ini")
+            activity.runOnUiThread {
+                call.reject("Bluetooth tidak tersedia di perangkat ini")
+            }
             return
         }
 
         if (!hasRequiredPermissions()) {
-            call.reject("Izin Bluetooth (BLUETOOTH_CONNECT) tidak diberikan")
+            activity.runOnUiThread {
+                call.reject("Izin Bluetooth (BLUETOOTH_CONNECT) tidak diberikan")
+            }
             return
         }
 
@@ -65,9 +67,13 @@ class BluetoothClassicPlugin : Plugin() {
             }
             val result = JSObject()
             result.put("devices", devicesArray)
-            call.resolve(result)
+            activity.runOnUiThread {
+                call.resolve(result)
+            }
         } catch (e: Exception) {
-            call.reject("Gagal mengambil daftar perangkat: ${e.message}")
+            activity.runOnUiThread {
+                call.reject("Gagal mengambil daftar perangkat: ${e.message}")
+            }
         }
     }
 
@@ -75,17 +81,23 @@ class BluetoothClassicPlugin : Plugin() {
     fun connect(call: PluginCall) {
         val address = call.getString("address")
         if (address == null || address.isEmpty()) {
-            call.reject("Alamat MAC printer tidak boleh kosong")
+            activity.runOnUiThread {
+                call.reject("Alamat MAC printer tidak boleh kosong")
+            }
             return
         }
 
         if (bluetoothAdapter == null) {
-            call.reject("Bluetooth tidak tersedia")
+            activity.runOnUiThread {
+                call.reject("Bluetooth tidak tersedia")
+            }
             return
         }
 
         if (!hasRequiredPermissions()) {
-            call.reject("Izin Bluetooth tidak diberikan")
+            activity.runOnUiThread {
+                call.reject("Izin Bluetooth tidak diberikan")
+            }
             return
         }
 
@@ -128,7 +140,9 @@ class BluetoothClassicPlugin : Plugin() {
                         disconnectInternal()
                         val errMsg = "Koneksi standard gagal: ${connectionError?.message} | Fallback gagal: ${e.message}"
                         Log.e("BluetoothClassicPlugin", "Koneksi gagal total: $errMsg")
-                        call.reject("Koneksi gagal: $errMsg")
+                        activity.runOnUiThread {
+                            call.reject("Koneksi gagal: $errMsg")
+                        }
                         return@Thread
                     }
                 }
@@ -140,41 +154,62 @@ class BluetoothClassicPlugin : Plugin() {
                 res.put("success", true)
                 res.put("name", device.name ?: "Thermal Printer")
                 res.put("address", address)
-                call.resolve(res)
+                activity.runOnUiThread {
+                    call.resolve(res)
+                }
 
             } catch (e: Exception) {
                 Log.e("BluetoothClassicPlugin", "Error alur koneksi: ${e.message}")
-                call.reject("Koneksi gagal karena error: ${e.message}")
+                activity.runOnUiThread {
+                    call.reject("Koneksi gagal karena error: ${e.message}")
+                }
             }
         }.start()
     }
 
     @PluginMethod
     fun write(call: PluginCall) {
-        val base64Data = call.getString("value") ?: call.getString("base64")
-        if (base64Data == null || base64Data.isEmpty()) {
-            call.reject("Data tidak boleh kosong")
+        val arr = call.getArray("bytes")
+        if (arr == null) {
+            activity.runOnUiThread {
+                call.reject("Data 'bytes' tidak ditemukan")
+            }
             return
         }
 
         if (outputStream == null) {
-            call.reject("Printer belum terhubung (OutputStream null)")
+            activity.runOnUiThread {
+                call.reject("Printer belum terhubung (OutputStream null)")
+            }
             return
         }
 
         Thread {
             try {
-                Log.d("BluetoothClassicPlugin", "Mendekode base64 untuk dikirim ke printer...")
-                val bytes = Base64.decode(base64Data, Base64.DEFAULT)
+                Log.d("BluetoothClassicPlugin", "Memproses array integer bytes untuk dikirim ke printer...")
+                val bytes = ByteArray(arr.length())
+                for (i in 0 until arr.length()) {
+                    bytes[i] = arr.getInt(i).toByte()
+                }
+
                 outputStream!!.write(bytes)
+                Log.d("PRINT", "Byte dikirim (${bytes.size}): ${bytes.joinToString(",")}")
+                
+                Thread.sleep(80)
                 outputStream!!.flush()
+                Thread.sleep(150)
+                
                 Log.d("BluetoothClassicPlugin", "Berhasil menulis ${bytes.size} byte ke printer!")
                 val res = JSObject()
                 res.put("success", true)
-                call.resolve(res)
+                activity.runOnUiThread {
+                    call.resolve(res)
+                }
             } catch (e: Exception) {
                 Log.e("BluetoothClassicPlugin", "Gagal menulis data ke printer: ${e.message}")
-                call.reject("Gagal mencetak: ${e.message}")
+                activity.runOnUiThread {
+                    call.reject("Gagal mencetak: ${e.message}")
+                }
             }
         }.start()
     }
@@ -191,9 +226,13 @@ class BluetoothClassicPlugin : Plugin() {
                 disconnectInternal()
                 val res = JSObject()
                 res.put("success", true)
-                call.resolve(res)
+                activity.runOnUiThread {
+                    call.resolve(res)
+                }
             } catch (e: Exception) {
-                call.reject("Gagal memutuskan koneksi: ${e.message}")
+                activity.runOnUiThread {
+                    call.reject("Gagal memutuskan koneksi: ${e.message}")
+                }
             }
         }.start()
     }

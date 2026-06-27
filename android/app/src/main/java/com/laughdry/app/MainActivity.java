@@ -6,7 +6,6 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        registerPlugin(BluetoothPrinterPlugin.class);
         registerPlugin(BluetoothClassicPlugin.class);
         super.onCreate(savedInstanceState);
     }

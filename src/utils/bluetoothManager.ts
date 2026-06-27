@@ -3,7 +3,7 @@
  * and maintain seamless backwards compatibility.
  */
 
-import { registerPlugin, Capacitor } from '@capacitor/core';
+import { Capacitor } from '@capacitor/core';
 import { useState, useEffect } from 'react';
 import { GlobalBluetoothManager } from '../lib/bluetoothManager';
 import { GlobalPrinterManager } from '../lib/printerManager';
@@ -46,9 +46,19 @@ export const NativeBluetooth = {
   },
 
   printRaw: async (base64: string) => {
-    const BluetoothPrinter = registerPlugin<any>('BluetoothPrinter');
-    await BluetoothPrinter.printRaw({ base64 });
-    return true;
+    try {
+      const binaryString = atob(base64);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      await GlobalBluetoothManager.transmitRaw('', bytes);
+      return true;
+    } catch (e) {
+      console.error("[NATIVE_BLUETOOTH] printRaw failed:", e);
+      return false;
+    }
   },
 
   disconnect: async () => {
