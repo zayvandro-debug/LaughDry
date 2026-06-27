@@ -148,20 +148,26 @@ export class ESCPosGenerator {
   }
 
   public qrCode(data: string): Uint8Array {
-    const bytes: number[] = [];
-    const len = data.length + 3;
-    const pL = len & 0xFF;
-    const pH = (len >> 8) & 0xFF;
-    
-    bytes.push(0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x43, 0x04); 
-    bytes.push(0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x45, 0x30);
-    bytes.push(0x1D, 0x28, 0x6B, pL, pH, 0x31, 0x50, 0x30);
-    for (let i = 0; i < data.length; i++) {
-      bytes.push(data.charCodeAt(i));
+    if (this.paperSize === 80) {
+      const bytes: number[] = [];
+      const len = data.length + 3;
+      const pL = len & 0xFF;
+      const pH = (len >> 8) & 0xFF;
+      
+      bytes.push(0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x43, 0x04); 
+      bytes.push(0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x45, 0x30);
+      bytes.push(0x1D, 0x28, 0x6B, pL, pH, 0x31, 0x50, 0x30);
+      for (let i = 0; i < data.length; i++) {
+        bytes.push(data.charCodeAt(i));
+      }
+      bytes.push(0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x51, 0x30);
+      bytes.push(LF);
+      return new Uint8Array(bytes);
+    } else {
+      // 58mm mobile thermal printers do not support native QR codes and crash/freeze when receiving GS ( k.
+      // We print a highly legible text block with the verification link instead.
+      return this.stringToBytes(`\nScan QR / Link Verifikasi:\n${data}\n\n`);
     }
-    bytes.push(0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x51, 0x30);
-    bytes.push(LF);
-    return new Uint8Array(bytes);
   }
 
   public image(): Uint8Array {
@@ -174,8 +180,14 @@ export class ESCPosGenerator {
   }
 
   public feedAndCut(): Uint8Array {
-    const bytes: number[] = [LF, LF, LF, LF, ...ESC_POS_COMMANDS.FEED_AND_CUT];
-    return new Uint8Array(bytes);
+    if (this.paperSize === 80) {
+      const bytes: number[] = [LF, LF, LF, LF, ...ESC_POS_COMMANDS.FEED_AND_CUT];
+      return new Uint8Array(bytes);
+    } else {
+      // 58mm mobile thermal printers have no cutter. Cut commands freeze them.
+      // We just feed the paper 5 lines so the user can easily tear it.
+      return new Uint8Array([LF, LF, LF, LF, LF, LF]);
+    }
   }
 }
 

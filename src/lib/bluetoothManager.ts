@@ -6,6 +6,7 @@
  */
 
 import { registerPlugin, Capacitor } from '@capacitor/core';
+import { BluetoothClassicPlugin } from './bluetoothPlugin';
 
 export type ConnectionType = 'bluetooth' | 'usb' | 'wifi';
 export type PaperSize = 58 | 80;
@@ -73,11 +74,16 @@ export class BluetoothManager {
       return [];
     }
     try {
-      const result = await BluetoothPrinter.getPairedDevices();
-      return result.devices || [];
+      const result = await BluetoothClassicPlugin.listDevices();
+      return (result.devices || []).map(d => ({ name: d.name, address: d.address, paired: true }));
     } catch (e) {
-      console.warn("[BT_MANAGER] Error getting paired devices:", e);
-      return [];
+      console.warn("[BT_MANAGER] Error getting paired devices via BluetoothClassicPlugin, trying legacy:", e);
+      try {
+        const result = await BluetoothPrinter.getPairedDevices();
+        return result.devices || [];
+      } catch (err) {
+        return [];
+      }
     }
   }
 
@@ -105,15 +111,24 @@ export class BluetoothManager {
     try {
       if (BluetoothManager.isAndroid()) {
         const base64Str = this.uint8ArrayToBase64(bytes);
-        await BluetoothPrinter.printRaw({ base64: base64Str });
+        await BluetoothClassicPlugin.write({ value: base64Str });
         return true;
       } else {
         console.log(`[BT_MOCK_TRANSMIT] Sent ${bytes.length} bytes to ${address}`);
         return true;
       }
     } catch (e) {
-      console.error("[BT_MANAGER] Raw transmission failed:", e);
-      return false;
+      console.error("[BT_MANAGER] Raw transmission failed via BluetoothClassicPlugin, trying legacy:", e);
+      try {
+        if (BluetoothManager.isAndroid()) {
+          const base64Str = this.uint8ArrayToBase64(bytes);
+          await BluetoothPrinter.printRaw({ base64: base64Str });
+          return true;
+        }
+        return false;
+      } catch (err) {
+        return false;
+      }
     }
   }
 
@@ -124,7 +139,13 @@ export class BluetoothManager {
     if (!BluetoothManager.isAndroid()) {
       return { success: true, name: "Web Mock Printer", address };
     }
-    return await BluetoothPrinter.connect({ address });
+    try {
+      const result = await BluetoothClassicPlugin.connect({ address });
+      return { success: result.success, name: result.name, address: result.address };
+    } catch (e) {
+      console.warn("[BT_MANAGER] Error connecting via BluetoothClassicPlugin, trying legacy:", e);
+      return await BluetoothPrinter.connect({ address });
+    }
   }
 
   /**
@@ -134,8 +155,14 @@ export class BluetoothManager {
     if (!BluetoothManager.isAndroid()) {
       return true;
     }
-    const res = await BluetoothPrinter.disconnect();
-    return res.success;
+    try {
+      const res = await BluetoothClassicPlugin.disconnect();
+      return res.success;
+    } catch (e) {
+      console.warn("[BT_MANAGER] Error disconnecting via BluetoothClassicPlugin, trying legacy:", e);
+      const res = await BluetoothPrinter.disconnect();
+      return res.success;
+    }
   }
 
   private uint8ArrayToBase64(arr: Uint8Array): string {
