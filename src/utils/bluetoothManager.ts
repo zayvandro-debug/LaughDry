@@ -5,9 +5,8 @@
 
 import { registerPlugin, Capacitor } from '@capacitor/core';
 import { useState, useEffect } from 'react';
-import { GlobalPrinterManager } from '../lib/printerManager';
 import { GlobalBluetoothManager } from '../lib/bluetoothManager';
-export { GlobalBluetoothManager };
+import { GlobalPrinterManager } from '../lib/printerManager';
 
 export interface BluetoothDevice {
   name: string;
