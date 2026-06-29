@@ -50,19 +50,22 @@ export default function App() {
     }
 
     // [FIX] Jika ada ?owner= di URL (link tracking dari WhatsApp), selalu customer-only mode.
-    // Owner UID selalu disertakan dalam link tracking, sehingga ini menjadi sinyal yang kuat.
     if (ownerParam && ownerParam.trim() !== '') {
       return true;
     }
 
     if (typeof window !== 'undefined') {
       const hostname = window.location.hostname;
-      // Hostname cocok dengan vercel.app (domain tracking default)
-      if (hostname.includes('vercel.app')) {
+
+      // [FIX] Gunakan domain SPESIFIK bukan hostname.includes('vercel.app') yang terlalu luas.
+      // Domain 'laughdry.vercel.app' (lama/salah) dan subdomain Vercel preview lain
+      // tidak akan lagi salah terdeteksi sebagai portal tracking pelanggan.
+      const TRACKING_HOSTNAME = 'laughdry-steel.vercel.app';
+      if (hostname === TRACKING_HOSTNAME) {
         return true;
       }
-      // [FIX] Cek juga custom domain tracking yang mungkin tidak mengandung 'vercel.app'
-      // Hostname cocok dengan vercelTrackingUrl yang dikonfigurasi owner di settings
+
+      // Cek juga custom domain tracking yang dikonfigurasi owner di settings
       const s = LaughDryDatabase.getSettings();
       if (s.vercelTrackingUrl) {
         try {
@@ -109,21 +112,25 @@ export default function App() {
     }
     if (typeof window !== 'undefined') {
       const hostname = window.location.hostname;
-      let onVercel = hostname.includes('vercel.app');
-      if (!onVercel) {
+
+      // [FIX] Gunakan domain SPESIFIK, bukan includes('vercel.app') yang terlalu luas
+      const TRACKING_HOSTNAME = 'laughdry-steel.vercel.app';
+      let isTrackingDomain = hostname === TRACKING_HOSTNAME;
+
+      if (!isTrackingDomain) {
         const s = LaughDryDatabase.getSettings();
         if (s.vercelTrackingUrl) {
           try {
             const vercelUrl = new URL(s.vercelTrackingUrl);
             if (vercelUrl.hostname && hostname === vercelUrl.hostname) {
-              onVercel = true;
+              isTrackingDomain = true;
             }
           } catch (e) {
             // ignore
           }
         }
       }
-      if (onVercel) {
+      if (isTrackingDomain) {
         return 'pelanggan';
       }
     }

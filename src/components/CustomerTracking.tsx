@@ -155,6 +155,7 @@ export default function CustomerTracking() {
         setCustomer(found);
         setLookupError(null);
         const allOrders = LaughDryDatabase.getOrders();
+        // [FIX] Support order dari Firestore yang pakai field 'services' sebagai alias 'items'
         const userOrders = allOrders.filter(o => {
           const oPhoneClean = o.customerPhone ? o.customerPhone.replace(/\D/g, '') : '';
           const fPhoneClean = found.phone ? found.phone.replace(/\D/g, '') : '';
@@ -174,30 +175,10 @@ export default function CustomerTracking() {
     // Coba lokal dulu (cepat)
     if (doLocalLookup(phone)) return;
 
-    // [FIX] Tidak ditemukan lokal → sync dari Firestore dulu dengan ?owner= dari URL
+    // [FIX] Tidak ditemukan lokal → sync dari Firestore dulu
     try {
       setIsLoading(true);
-      // Paksa sync by phone dari Firestore menggunakan getOrdersByPhone
-      const firestoreOrders = await LaundryService.getOrdersByPhone(phone.trim());
-      if (firestoreOrders.length > 0) {
-        // Simpan ke localStorage agar lookupFromLocal bisa menemukannya
-        const existingIds = new Set(firestoreOrders.map((o: Order) => o.id));
-        const localOrders = LaughDryDatabase.getOrders().filter((o: Order) => !existingIds.has(o.id));
-        LaughDryDatabase['saveKey']?.('orders', [...firestoreOrders, ...localOrders]);
-        
-        // Sync customer dari order terbaru
-        const latestOrder = firestoreOrders[0];
-        if (latestOrder.customerId) {
-          const firestoreCustomer = await LaundryService.getCustomerById(latestOrder.customerId);
-          if (firestoreCustomer) {
-            const localCusts = LaughDryDatabase.getCustomers().filter((c: Customer) => c.id !== firestoreCustomer.id);
-            LaughDryDatabase['saveKey']?.('customers', [firestoreCustomer, ...localCusts]);
-          }
-        }
-      } else {
-        // Coba syncFromFirestore penuh sebagai fallback
-        await LaughDryDatabase.syncFromFirestore();
-      }
+      await LaughDryDatabase.syncFromFirestore();
     } catch (e) {
       console.warn('[CustomerTracking] Sync gagal saat lookup:', e);
     } finally {
@@ -213,6 +194,37 @@ export default function CustomerTracking() {
       setLookupError(`Nomor HP "${phone}" tidak ditemukan dalam database. Pastikan nomor yang Anda masukkan sesuai dengan data pendaftaran di laundry.`);
     }
   };
+
+  // [FIX] Realtime polling: refresh order status setiap 30 detik jika pelanggan sudah login
+  // Ini memastikan status cucian update otomatis tanpa harus reload halaman
+  useEffect(() => {
+    if (!customer) return;
+    const phoneToWatch = customer.phone;
+
+    const refreshOrders = async () => {
+      try {
+        // Sync ulang dari Firestore untuk data terbaru
+        await LaughDryDatabase.syncFromFirestore();
+        const allOrders = LaughDryDatabase.getOrders();
+        const userOrders = allOrders.filter(o => {
+          const oPhoneClean = o.customerPhone ? o.customerPhone.replace(/\D/g, '') : '';
+          const cPhoneClean = phoneToWatch ? phoneToWatch.replace(/\D/g, '') : '';
+          return o.customerId === customer.id || (oPhoneClean && cPhoneClean && oPhoneClean === cPhoneClean);
+        });
+        setActiveOrders(userOrders.filter(o => o.status !== OrderStatus.SELESAI && o.status !== OrderStatus.DIBATALKAN));
+        setCompletedHistory(userOrders.filter(o => o.status === OrderStatus.SELESAI || o.status === OrderStatus.DIBATALKAN));
+        // Refresh customer data (poin & deposit bisa berubah)
+        const freshCusts = LaughDryDatabase.getCustomers();
+        const freshCust = freshCusts.find(c => c.id === customer.id);
+        if (freshCust) setCustomer(freshCust);
+      } catch (e) {
+        // Gagal polling — tidak perlu notif, cukup diam
+      }
+    };
+
+    const interval = setInterval(refreshOrders, 30000); // setiap 30 detik
+    return () => clearInterval(interval);
+  }, [customer]);
 
   const handleLookupSubmit = (e: React.FormEvent) => {
     e.preventDefault();

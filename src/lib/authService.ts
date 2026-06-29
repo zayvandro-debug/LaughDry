@@ -18,7 +18,7 @@ import {
   signOut,
   onAuthStateChanged,
 } from './firebase';
-import { LaughDryDatabase } from '../services/mockDatabase';
+import { LaughDryDatabase } from './mockDatabase';
 
 // ─── Simpan uid ke localStorage setelah login ─────────────────────────────────
 // Ini yang hilang sebelumnya: uid tidak tersimpan, sehingga queueSync/syncFromFirestore

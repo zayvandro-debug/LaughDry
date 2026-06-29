@@ -192,8 +192,10 @@ service cloud.firestore {
     }
 
     // Allow unauthenticated reads to specific collections for customer tracking portal
+    // [FIX] Tambahkan 'list' permission di samping 'get' agar query (where/orderBy) bisa berjalan.
+    // Tanpa 'list', getDocs(query(...where...)) akan ditolak meski 'get' sudah allow: if true.
     match /users_db/{ownerUid}/orders/{orderId} {
-      allow read: if true;
+      allow read: if true;  // covers both get (single doc) and list (query)
     }
     match /users_db/{ownerUid}/branches/{branchId} {
       allow read: if true;
@@ -207,8 +209,10 @@ service cloud.firestore {
     match /users_db/{ownerUid}/services/{serviceId} {
       allow read: if true;
     }
+    // [FIX] customers: allow get (by ID) AND list (query by phone) untuk tracking portal
+    // Sebelumnya hanya 'get', sehingga query where('phone','==',x) ditolak dengan PERMISSION_DENIED
     match /users_db/{ownerUid}/customers/{customerId} {
-      allow get: if true;
+      allow read: if true;  // get + list — dibutuhkan getCustomerByPhone() yang pakai query
     }
 
     // Path level: Tenant Root

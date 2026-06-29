@@ -663,7 +663,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
           setToastMessage("Berhasil mengambil kontak perangkat!");
           setTimeout(() => setToastMessage(null), 3000);
           return;
-        }
+        }np
       } catch (err: any) {
         console.warn("Contact picker native API error:", err);
         alert("Gagal mengambil kontak dari HP. Pastikan Anda telah memberikan izin akses kontak jika diminta.");

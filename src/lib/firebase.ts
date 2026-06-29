@@ -171,6 +171,7 @@ export function isOfflineOrQuota(): boolean {
   if (typeof window === 'undefined') return true;
   if (localStorage.getItem('laughdry_firebase_disabled') === 'true') return true;
   if (isFirebaseQuotaExceeded()) return true;
+
   // [FIX] Izinkan akses Firestore jika ada ?owner= di URL (mode tracking pelanggan).
   // Pelanggan tidak login, jadi auth.currentUser === null dan localStorage juga kosong,
   // tapi mereka tetap perlu baca data order dari Firestore menggunakan owner UID dari URL.
@@ -178,14 +179,15 @@ export function isOfflineOrQuota(): boolean {
     const ownerParam = new URLSearchParams(window.location.search).get('owner');
     if (ownerParam && ownerParam.trim() !== '') return false;
   }
-  // [FIX] Cek auth.currentUser (Firebase Auth SDK) ATAU laughdry_firebase_uid di localStorage.
-  // Alasannya: Firebase Auth me-restore session secara async. Saat module pertama kali diload,
-  // auth.currentUser bisa masih null meskipun user sudah login — restore belum selesai.
-  // localStorage sudah diisi oleh persistAuthUid() di authService saat login sebelumnya,
-  // jadi ini menjadi fallback yang valid sampai auth.currentUser tersedia.
+
+  // [FIX RACE CONDITION] Cek auth.currentUser ATAU laughdry_firebase_uid di localStorage.
+  // Firebase Auth me-restore session secara async — saat module load, auth.currentUser
+  // bisa masih null meskipun user sudah login. localStorage adalah fallback valid.
+  // Jika ada uid di localStorage (sisa session sebelumnya), izinkan write.
   const uid = auth?.currentUser?.uid || localStorage.getItem('laughdry_firebase_uid');
-  if (!uid) return true;
-  return false;
+  if (uid && uid !== 'default') return false;
+
+  return true;
 }
 
 // Proxied Firestore function implementations
@@ -396,6 +398,35 @@ export function onSnapshot(...args: any[]): any {
 }
 
 export { rawDisableNetwork as disableNetwork };
+
+/**
+ * [FIX RACE CONDITION] waitForAuthReady:
+ * Menunggu Firebase Auth selesai restore session (onAuthStateChanged fired pertama kali).
+ * Dipakai sebelum write ke Firestore agar tidak gagal karena auth.currentUser masih null.
+ * Timeout 5 detik agar tidak hang selamanya jika offline.
+ */
+export function waitForAuthReady(): Promise<void> {
+  return new Promise((resolve) => {
+    const uid = auth?.currentUser?.uid || localStorage.getItem('laughdry_firebase_uid');
+    if (uid && uid !== 'default') { resolve(); return; }
+    const timeout = setTimeout(() => resolve(), 5000);
+    const unsubscribe = auth.onAuthStateChanged(() => {
+      clearTimeout(timeout);
+      unsubscribe();
+      resolve();
+    });
+  });
+}
+
+/**
+ * [FIX] persistAuthUid: Simpan UID ke localStorage setelah auth restore.
+ * Dipanggil dari App.tsx di onAuthStateChanged callback.
+ */
+export function persistAuthUid(uid: string | null): void {
+  if (uid) {
+    localStorage.setItem('laughdry_firebase_uid', uid);
+  }
+}
 
 // [FIX] Export onAuthStateChanged so App.tsx can listen to auth state
 // and save uid to localStorage AFTER login completes (not before)
