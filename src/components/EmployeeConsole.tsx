@@ -2583,16 +2583,14 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
 
     const currentBranch = branches.find(b => b.id === order.branchId) || branches[0];
 
-    const systemSettings = LaughDryDatabase.getSettings();
-    const vercelBase = (systemSettings.vercelTrackingUrl || window.location.origin).replace(/\/$/, '');
-    const ownerUid = localStorage.getItem('laughdry_firebase_uid') || '';
-    
     // Look up from customer database
     const dbCustomer = customers.find(c => c.id === order.customerId);
     const targetPhone = dbCustomer ? dbCustomer.phone : order.customerPhone;
     const targetName = dbCustomer ? dbCustomer.name : order.customerName;
-    
-    const finalTrackingUrl = `${vercelBase}/?phone=${encodeURIComponent(targetPhone)}&invoice=${encodeURIComponent(order.invoiceNumber)}${ownerUid ? `&owner=${encodeURIComponent(ownerUid)}` : ''}`;
+
+    // [FIX] Gunakan LaughDryDatabase.getTrackingUrl() yang secara otomatis menyertakan
+    // ?owner=UID sehingga pelanggan dapat membaca database Firestore yang benar tanpa login.
+    const finalTrackingUrl = LaughDryDatabase.getTrackingUrl(targetPhone, order.invoiceNumber);
 
     return defaultTemplate.body
       .replace(/\{\{customer_name\}\}/g, targetName)

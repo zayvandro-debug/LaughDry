@@ -171,8 +171,20 @@ export function isOfflineOrQuota(): boolean {
   if (typeof window === 'undefined') return true;
   if (localStorage.getItem('laughdry_firebase_disabled') === 'true') return true;
   if (isFirebaseQuotaExceeded()) return true;
-  const uid = auth?.currentUser?.uid || localStorage.getItem('laughdry_firebase_uid') || 'default';
-  if (uid === 'default') return true;
+  // [FIX] Izinkan akses Firestore jika ada ?owner= di URL (mode tracking pelanggan).
+  // Pelanggan tidak login, jadi auth.currentUser === null dan localStorage juga kosong,
+  // tapi mereka tetap perlu baca data order dari Firestore menggunakan owner UID dari URL.
+  if (typeof window !== 'undefined') {
+    const ownerParam = new URLSearchParams(window.location.search).get('owner');
+    if (ownerParam && ownerParam.trim() !== '') return false;
+  }
+  // [FIX] Cek auth.currentUser (Firebase Auth SDK) ATAU laughdry_firebase_uid di localStorage.
+  // Alasannya: Firebase Auth me-restore session secara async. Saat module pertama kali diload,
+  // auth.currentUser bisa masih null meskipun user sudah login — restore belum selesai.
+  // localStorage sudah diisi oleh persistAuthUid() di authService saat login sebelumnya,
+  // jadi ini menjadi fallback yang valid sampai auth.currentUser tersedia.
+  const uid = auth?.currentUser?.uid || localStorage.getItem('laughdry_firebase_uid');
+  if (!uid) return true;
   return false;
 }
 
@@ -384,3 +396,12 @@ export function onSnapshot(...args: any[]): any {
 }
 
 export { rawDisableNetwork as disableNetwork };
+
+// [FIX] Export onAuthStateChanged so App.tsx can listen to auth state
+// and save uid to localStorage AFTER login completes (not before)
+export { onAuthStateChanged } from 'firebase/auth';
+
+// [FIX] Export Google auth helpers for Gmail login support
+// getRedirectResult diperlukan untuk menangkap hasil login Google setelah redirect
+// (fallback dari signInWithPopup di browser yang memblokir popup atau sessionStorage-partitioned)
+export { GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from 'firebase/auth';

@@ -19,10 +19,18 @@ import {
   History,
   Phone,
   Search,
-  ArrowRight
+  ArrowRight,
+  Loader2
 } from 'lucide-react';
 import { LaughDryDatabase } from '../data/mockDatabase';
+import { LaundryService } from '../services/laundryService';
 import { Order, OrderStatus, Customer } from '../types';
+
+// [FIX] Helper: ambil items dari order — support field 'items' maupun 'services'
+// (field 'services' ditambahkan sebagai alias 'items' untuk kompatibilitas Firestore rules)
+function getOrderItems(order: Order): any[] {
+  return (order as any).items || (order as any).services || [];
+}
 
 export default function CustomerTracking() {
   const [phoneSearch, setPhoneSearch] = useState('');
@@ -34,114 +42,182 @@ export default function CustomerTracking() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showStampCardModal, setShowStampCardModal] = useState(false);
   const [isUrlSession, setIsUrlSession] = useState(false);
+  // [FIX] Loading state untuk feedback visual saat sync/lookup sedang berjalan
+  const [isLoading, setIsLoading] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
 
   // Ready for user search inputs / URL auto-login
   useEffect(() => {
-    const performAutoLookup = () => {
-      const queryParams = new URLSearchParams(window.location.search);
-      const phoneParam = queryParams.get('phone');
-      const invoiceParam = queryParams.get('invoice');
-      
-      let targetPhone = phoneParam || '';
-      
-      if (!targetPhone && invoiceParam) {
+    // [FIX] Fungsi lookup lokal murni dari localStorage — dipakai setelah data sudah tersync
+    const lookupFromLocal = (targetPhone: string, fromInvoice?: string): boolean => {
+      const custs = LaughDryDatabase.getCustomers();
+      const found = custs.find(c => {
+        const cClean = c.phone.replace(/\D/g, '');
+        const tClean = targetPhone.replace(/\D/g, '');
+        return cClean === tClean || c.phone === targetPhone;
+      });
+
+      if (found) {
+        setCustomer(found);
+        setIsUrlSession(true);
+        setLookupError(null);
         const allOrders = LaughDryDatabase.getOrders();
-        const foundOrder = allOrders.find(o => o.invoiceNumber === invoiceParam);
-        if (foundOrder) {
-          targetPhone = foundOrder.customerPhone;
-        }
-      }
-      
-      if (targetPhone) {
-        setPhoneSearch(targetPhone);
-        
-        const custs = LaughDryDatabase.getCustomers();
-        const found = custs.find(c => {
-          const cClean = c.phone.replace(/\D/g, '');
-          const tClean = targetPhone.replace(/\D/g, '');
-          return cClean === tClean || c.phone === targetPhone;
+        const userOrders = allOrders.filter(o => {
+          const oPhoneClean = o.customerPhone ? o.customerPhone.replace(/\D/g, '') : '';
+          const fPhoneClean = found.phone ? found.phone.replace(/\D/g, '') : '';
+          return o.customerId === found.id || (oPhoneClean && fPhoneClean && oPhoneClean === fPhoneClean);
         });
-        
-        if (found) {
-          setCustomer(found);
-          setIsUrlSession(true);
-          const allOrders = LaughDryDatabase.getOrders();
-          const userOrders = allOrders.filter(o => {
-            const oPhoneClean = o.customerPhone ? o.customerPhone.replace(/\D/g, '') : '';
-            const fPhoneClean = found.phone ? found.phone.replace(/\D/g, '') : '';
-            return o.customerId === found.id || (oPhoneClean && fPhoneClean && oPhoneClean === fPhoneClean);
-          });
-          
-          const active = userOrders.filter(o => o.status !== OrderStatus.SELESAI && o.status !== OrderStatus.DIBATALKAN);
-          const history = userOrders.filter(o => o.status === OrderStatus.SELESAI || o.status === OrderStatus.DIBATALKAN);
-          
-          setActiveOrders(active);
-          setCompletedHistory(history);
-          setToastMessage(`👋 Halo ${found.name}! Informasi cucian Anda berhasil dimuat secara instan melalui tautan khusus.`);
-          setTimeout(() => setToastMessage(null), 3500);
-          return true; // Successfully found and loaded
-        }
+
+        const active = userOrders.filter(o => o.status !== OrderStatus.SELESAI && o.status !== OrderStatus.DIBATALKAN);
+        const history = userOrders.filter(o => o.status === OrderStatus.SELESAI || o.status === OrderStatus.DIBATALKAN);
+
+        setActiveOrders(active);
+        setCompletedHistory(history);
+        setToastMessage(`👋 Halo ${found.name}! Informasi cucian Anda berhasil dimuat.`);
+        setTimeout(() => setToastMessage(null), 3500);
+        return true;
       }
       return false;
     };
 
-    // Try immediately
-    const success = performAutoLookup();
-    
-    // If database wasn't synced yet, listen to custom sync events to retry
-    const handleDbSynced = () => {
-      performAutoLookup();
+    // [FIX] performAutoLookup: sync dari Firestore dulu, lalu lookup lokal
+    // Ini yang memungkinkan situs tracking membaca data real dari database owner.
+    const performAutoLookup = async () => {
+      const queryParams = new URLSearchParams(window.location.search);
+      const phoneParam = queryParams.get('phone');
+      const invoiceParam = queryParams.get('invoice');
+      const ownerParam = queryParams.get('owner');
+
+      // Tentukan nomor HP target
+      let targetPhone = phoneParam || '';
+      if (!targetPhone && invoiceParam) {
+        // Coba cari dari local dulu
+        const allOrders = LaughDryDatabase.getOrders();
+        const foundOrder = allOrders.find(o => o.invoiceNumber === invoiceParam);
+        if (foundOrder) targetPhone = foundOrder.customerPhone;
+      }
+
+      if (!targetPhone && !invoiceParam && !ownerParam) return;
+
+      // [FIX] Coba lookup lokal dulu (cepat, jika data sudah tersync sebelumnya)
+      if (targetPhone && lookupFromLocal(targetPhone)) return;
+
+      // [FIX] Belum ketemu? Sync dari Firestore terlebih dahulu.
+      // syncFromFirestore akan membaca owner UID dari ?owner= di URL
+      // dan mengambil data (settings, orders, customers) dari Firestore ke localStorage.
+      try {
+        setIsLoading(true);
+        await LaughDryDatabase.syncFromFirestore();
+      } catch (e) {
+        console.warn('[CustomerTracking] syncFromFirestore gagal:', e);
+      } finally {
+        setIsLoading(false);
+      }
+
+      // Setelah sync, resolve phone dari invoice jika belum ada
+      if (!targetPhone && invoiceParam) {
+        const allOrders = LaughDryDatabase.getOrders();
+        const foundOrder = allOrders.find(o => o.invoiceNumber === invoiceParam);
+        if (foundOrder) targetPhone = foundOrder.customerPhone;
+      }
+
+      if (targetPhone) {
+        setPhoneSearch(targetPhone);
+        lookupFromLocal(targetPhone);
+      }
     };
 
+    performAutoLookup();
+
+    // Juga re-run jika ada event sync selesai (dari realtime listener atau sync manual)
+    const handleDbSynced = () => { performAutoLookup(); };
     window.addEventListener('laughdry_db_synced', handleDbSynced);
-    
-    // As a solid fallback, also try twice after short intervals
-    const timer1 = setTimeout(() => {
-      performAutoLookup();
-    }, 500);
-    const timer2 = setTimeout(() => {
-      performAutoLookup();
-    }, 1500);
+    window.addEventListener('laughdry_data_changed', handleDbSynced);
 
     return () => {
       window.removeEventListener('laughdry_db_synced', handleDbSynced);
-      clearTimeout(timer1);
-      clearTimeout(timer2);
+      window.removeEventListener('laughdry_data_changed', handleDbSynced);
     };
   }, []);
 
-  const lookupCustomerDataByPhone = (phone: string) => {
-    const custs = LaughDryDatabase.getCustomers();
-    const found = custs.find(c => {
-      const cClean = c.phone.replace(/\D/g, '');
-      const tClean = phone.replace(/\D/g, '');
-      return cClean === tClean || c.phone === phone;
-    });
-    if (found) {
-      setCustomer(found);
-      const allOrders = LaughDryDatabase.getOrders();
-      const userOrders = allOrders.filter(o => {
-        const oPhoneClean = o.customerPhone ? o.customerPhone.replace(/\D/g, '') : '';
-        const fPhoneClean = found.phone ? found.phone.replace(/\D/g, '') : '';
-        return o.customerId === found.id || (oPhoneClean && fPhoneClean && oPhoneClean === fPhoneClean);
+  // [FIX] lookupCustomerDataByPhone: sync dari Firestore jika tidak ditemukan di lokal
+  const lookupCustomerDataByPhone = async (phone: string) => {
+    setLookupError(null);
+
+    const doLocalLookup = (ph: string): boolean => {
+      const custs = LaughDryDatabase.getCustomers();
+      const found = custs.find(c => {
+        const cClean = c.phone.replace(/\D/g, '');
+        const tClean = ph.replace(/\D/g, '');
+        return cClean === tClean || c.phone === ph;
       });
-      
-      const active = userOrders.filter(o => o.status !== OrderStatus.SELESAI && o.status !== OrderStatus.DIBATALKAN);
-      const history = userOrders.filter(o => o.status === OrderStatus.SELESAI || o.status === OrderStatus.DIBATALKAN);
-      
-      setActiveOrders(active);
-      setCompletedHistory(history);
-    } else {
+      if (found) {
+        setCustomer(found);
+        setLookupError(null);
+        const allOrders = LaughDryDatabase.getOrders();
+        const userOrders = allOrders.filter(o => {
+          const oPhoneClean = o.customerPhone ? o.customerPhone.replace(/\D/g, '') : '';
+          const fPhoneClean = found.phone ? found.phone.replace(/\D/g, '') : '';
+          return o.customerId === found.id || (oPhoneClean && fPhoneClean && oPhoneClean === fPhoneClean);
+        });
+
+        const active = userOrders.filter(o => o.status !== OrderStatus.SELESAI && o.status !== OrderStatus.DIBATALKAN);
+        const history = userOrders.filter(o => o.status === OrderStatus.SELESAI || o.status === OrderStatus.DIBATALKAN);
+
+        setActiveOrders(active);
+        setCompletedHistory(history);
+        return true;
+      }
+      return false;
+    };
+
+    // Coba lokal dulu (cepat)
+    if (doLocalLookup(phone)) return;
+
+    // [FIX] Tidak ditemukan lokal → sync dari Firestore dulu dengan ?owner= dari URL
+    try {
+      setIsLoading(true);
+      // Paksa sync by phone dari Firestore menggunakan getOrdersByPhone
+      const firestoreOrders = await LaundryService.getOrdersByPhone(phone.trim());
+      if (firestoreOrders.length > 0) {
+        // Simpan ke localStorage agar lookupFromLocal bisa menemukannya
+        const existingIds = new Set(firestoreOrders.map((o: Order) => o.id));
+        const localOrders = LaughDryDatabase.getOrders().filter((o: Order) => !existingIds.has(o.id));
+        LaughDryDatabase['saveKey']?.('orders', [...firestoreOrders, ...localOrders]);
+        
+        // Sync customer dari order terbaru
+        const latestOrder = firestoreOrders[0];
+        if (latestOrder.customerId) {
+          const firestoreCustomer = await LaundryService.getCustomerById(latestOrder.customerId);
+          if (firestoreCustomer) {
+            const localCusts = LaughDryDatabase.getCustomers().filter((c: Customer) => c.id !== firestoreCustomer.id);
+            LaughDryDatabase['saveKey']?.('customers', [firestoreCustomer, ...localCusts]);
+          }
+        }
+      } else {
+        // Coba syncFromFirestore penuh sebagai fallback
+        await LaughDryDatabase.syncFromFirestore();
+      }
+    } catch (e) {
+      console.warn('[CustomerTracking] Sync gagal saat lookup:', e);
+    } finally {
+      setIsLoading(false);
+    }
+
+    // Coba lagi setelah sync
+    const found = doLocalLookup(phone);
+    if (!found) {
       setCustomer(null);
       setActiveOrders([]);
       setCompletedHistory([]);
+      setLookupError(`Nomor HP "${phone}" tidak ditemukan dalam database. Pastikan nomor yang Anda masukkan sesuai dengan data pendaftaran di laundry.`);
     }
   };
 
   const handleLookupSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!phoneSearch) return;
-    lookupCustomerDataByPhone(phoneSearch);
+    if (!phoneSearch.trim()) return;
+    lookupCustomerDataByPhone(phoneSearch.trim());
   };
 
   const handleRatingChange = (orderId: string, rating: number) => {
@@ -212,16 +288,42 @@ export default function CustomerTracking() {
               onChange={(e) => setPhoneSearch(e.target.value)}
               className="w-full bg-slate-50 border border-slate-200 pl-10 pr-4 py-2.5 rounded-xl text-xs focus:bg-white focus:outline-none focus:border-[#38BDF8] focus:ring-1 focus:ring-[#38BDF8] font-mono font-semibold"
               id="customer-tracking-phone-id"
+              disabled={isLoading}
             />
           </div>
           <button
             type="submit"
-            className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-sm"
+            disabled={isLoading}
+            className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-60 disabled:cursor-wait text-white font-bold rounded-xl text-xs transition flex items-center justify-center gap-1.5 shadow-sm"
             id="btn-trigger-tracking-phone-look"
           >
-            Lacak Sekarang <ArrowRight className="w-4 h-4" />
+            {isLoading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Mencari...
+              </>
+            ) : (
+              <>
+                Lacak Sekarang <ArrowRight className="w-4 h-4" />
+              </>
+            )}
           </button>
         </form>
+
+        {/* [FIX] Tampilkan loading indicator saat sync sedang berlangsung */}
+        {isLoading && (
+          <div className="flex items-center gap-2 text-xs text-sky-600 font-semibold animate-pulse">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            Mengambil data terbaru dari server...
+          </div>
+        )}
+
+        {/* [FIX] Tampilkan pesan error jika nomor HP tidak ditemukan */}
+        {lookupError && !isLoading && (
+          <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 font-semibold">
+            ⚠️ {lookupError}
+          </div>
+        )}
 
         {/* Empty container space */}
       </div>
@@ -366,7 +468,7 @@ export default function CustomerTracking() {
 
                       {/* Items lists summary */}
                       <div className="p-3 bg-white rounded-xl border border-slate-200 text-[11px] font-mono leading-relaxed text-slate-650 space-y-1">
-                        <div>🛒 Item laundry: {order.items.map(it => `${it.serviceName} (qty: ${it.quantity})`).join(', ')}</div>
+                        <div>🛒 Item laundry: {getOrderItems(order).map((it: any) => `${it.serviceName} (qty: ${it.quantity})`).join(', ')}</div>
                         <div className="flex items-center gap-1 border-t border-slate-100 pt-1 mt-1 text-[10px]">
                           <span>🌸 Pilihan Aroma:</span>
                           <span className="font-bold text-[#0284C7] bg-[#F0F9FF] px-2 py-0.5 rounded-full select-none">
@@ -410,7 +512,7 @@ export default function CustomerTracking() {
                       </div>
 
                       <div className="text-[11px] text-slate-400 font-mono">
-                        Item: {order.items.map(it => it.serviceName).join(', ')}
+                        Item: {getOrderItems(order).map((it: any) => it.serviceName).join(', ')}
                       </div>
 
                       {/* Interactive Customer Rating & Reviews Module */}

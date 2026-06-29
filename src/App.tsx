@@ -36,14 +36,33 @@ export default function App() {
   });
   const [isCustomerOnly, setIsCustomerOnly] = useState<boolean>(() => {
     const queryParams = new URLSearchParams(window.location.search);
+
+    // [FIX] Jika ada ?owner= di URL, simpan ke localStorage agar LaundryService bisa
+    // membaca database owner yang benar tanpa perlu login.
+    const ownerParam = queryParams.get('owner');
+    if (ownerParam && ownerParam.trim() !== '') {
+      localStorage.setItem('laughdry_firebase_uid', ownerParam.trim());
+    }
+
+    // Mode tracking pelanggan: ada ?phone= atau ?invoice= di URL
     if (queryParams.has('phone') || queryParams.has('invoice')) {
       return true;
     }
+
+    // [FIX] Jika ada ?owner= di URL (link tracking dari WhatsApp), selalu customer-only mode.
+    // Owner UID selalu disertakan dalam link tracking, sehingga ini menjadi sinyal yang kuat.
+    if (ownerParam && ownerParam.trim() !== '') {
+      return true;
+    }
+
     if (typeof window !== 'undefined') {
       const hostname = window.location.hostname;
+      // Hostname cocok dengan vercel.app (domain tracking default)
       if (hostname.includes('vercel.app')) {
         return true;
       }
+      // [FIX] Cek juga custom domain tracking yang mungkin tidak mengandung 'vercel.app'
+      // Hostname cocok dengan vercelTrackingUrl yang dikonfigurasi owner di settings
       const s = LaughDryDatabase.getSettings();
       if (s.vercelTrackingUrl) {
         try {
@@ -52,7 +71,7 @@ export default function App() {
             return true;
           }
         } catch (e) {
-          // ignore
+          // ignore URL parse error
         }
       }
     }
@@ -81,6 +100,11 @@ export default function App() {
   const [activeConsole, setActiveConsole] = useState<'owner' | 'karyawan' | 'pelanggan'>(() => {
     const queryParams = new URLSearchParams(window.location.search);
     if (queryParams.has('phone') || queryParams.has('invoice')) {
+      return 'pelanggan';
+    }
+    // [FIX] Jika ada ?owner= di URL, ini adalah link tracking — selalu tampilkan portal pelanggan
+    const ownerParam2 = queryParams.get('owner');
+    if (ownerParam2 && ownerParam2.trim() !== '') {
       return 'pelanggan';
     }
     if (typeof window !== 'undefined') {
@@ -489,12 +513,20 @@ export default function App() {
   const brandColorLight = brandColor + '15';
 
   if (isAuthLoading) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center">
-        <div className="w-10 h-10 border-4 border-slate-700/50 border-t-sky-400 rounded-full animate-spin"></div>
-        <p className="text-slate-400 text-xs mt-4 font-semibold tracking-wider animate-pulse">MEMBUAT JALUR TERENKRIPSI CLOUD...</p>
-      </div>
-    );
+    // [FIX] Jika ini adalah sesi tracking pelanggan, JANGAN tampilkan loading Firebase Auth.
+    // Pelanggan tidak perlu login — langsung render CustomerTracking portal.
+    // Ini juga mencegah race condition di mana isCustomerOnly benar tapi isAuthLoading
+    // menghalangi render guard if (isCustomerOnly) di bawah.
+    if (isCustomerOnly) {
+      // Akan jatuh ke render isCustomerOnly di bawah — biarkan mengalir
+    } else {
+      return (
+        <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center">
+          <div className="w-10 h-10 border-4 border-slate-700/50 border-t-sky-400 rounded-full animate-spin"></div>
+          <p className="text-slate-400 text-xs mt-4 font-semibold tracking-wider animate-pulse">MEMBUAT JALUR TERENKRIPSI CLOUD...</p>
+        </div>
+      );
+    }
   }
 
   // HARD SEPARATION: If isCustomerOnly is true, ONLY render CustomerTracking portal.

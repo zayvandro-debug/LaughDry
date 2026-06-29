@@ -673,6 +673,24 @@ export class LaundryService {
   }
 
   /**
+   * Fetch orders filtered by customer phone number
+   */
+  static async getOrdersByPhone(phone: string): Promise<Order[]> {
+    try {
+      const orders = await this.getOrders();
+      const targetClean = phone.replace(/\D/g, '');
+      if (!targetClean) return [];
+      return orders.filter(o => {
+        const oPhoneClean = o.customerPhone ? o.customerPhone.replace(/\D/g, '') : '';
+        return oPhoneClean === targetClean;
+      });
+    } catch (error) {
+      console.error('getOrdersByPhone failed:', error);
+      return [];
+    }
+  }
+
+  /**
    * Fetch a single customer by ID
    */
   static async getCustomerById(customerId: string): Promise<Customer | null> {
