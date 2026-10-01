@@ -166,6 +166,12 @@ export const ExpenseManagement: React.FC<ExpenseManagementProps> = ({
     return expDate >= oneWeekAgo;
   });
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 8;
+  const totalPages = Math.ceil(filteredBranchExps.length / itemsPerPage) || 1;
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedExpenses = filteredBranchExps.slice((safePage - 1) * itemsPerPage, safePage * itemsPerPage);
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-fadeIn" id="menu-content-expense">
       {/* Form Side */}
@@ -287,7 +293,7 @@ export const ExpenseManagement: React.FC<ExpenseManagementProps> = ({
                 Belum ada pengeluaran rutin tercatat dalam 1 minggu terakhir.
               </div>
             ) : (
-              filteredBranchExps.map(exp => (
+              paginatedExpenses.map(exp => (
                 <div key={exp.id} className={`p-3 border rounded-xl hover:border-slate-300 transition-all flex items-center justify-between gap-3 text-xs ${editingExpense?.id === exp.id ? 'bg-amber-50/50 border-amber-200' : 'bg-white border-slate-150'}`}>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 flex-wrap">
@@ -334,6 +340,41 @@ export const ExpenseManagement: React.FC<ExpenseManagementProps> = ({
               ))
             )}
           </div>
+
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
+              <span className="text-[10px] font-bold text-slate-400">
+                Hal {safePage} / {totalPages} ({filteredBranchExps.length} catatan)
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={safePage <= 1}
+                  className={`px-2 py-0.5 rounded-lg text-xs font-bold transition ${
+                    safePage <= 1
+                      ? 'bg-slate-100 text-slate-300 cursor-not-allowed'
+                      : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 cursor-pointer active:scale-95'
+                  }`}
+                >
+                  ◀
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  disabled={safePage >= totalPages}
+                  className={`px-2 py-0.5 rounded-lg text-xs font-bold transition ${
+                    safePage >= totalPages
+                      ? 'bg-slate-100 text-slate-300 cursor-not-allowed'
+                      : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 cursor-pointer active:scale-95'
+                  }`}
+                >
+                  ▶
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

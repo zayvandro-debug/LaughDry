@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Clock, CheckCircle } from 'lucide-react';
+import { Clock, CheckCircle, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Order, User, OrderStatus } from '../types';
 import { LaughDryDatabase } from '../data/mockDatabase';
 
@@ -31,6 +31,11 @@ export const LaundryQueue: React.FC<LaundryQueueProps> = ({
 }) => {
   const [processGroupBy, setProcessGroupBy] = useState<'queue' | 'laundry' | 'ironing' | 'packing' | 'ready' | 'completed'>('queue');
   const [directPaymentOrderId, setDirectPaymentOrderId] = useState<string | null>(null);
+
+  // Pagination & Search states
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [queueSearch, setQueueSearch] = useState('');
 
   // Cash / QRIS helper states
   const [cashPaymentOrder, setCashPaymentOrder] = useState<Order | null>(null);
@@ -139,7 +144,25 @@ export const LaundryQueue: React.FC<LaundryQueueProps> = ({
     }).slice(0).reverse();
   };
 
-  const displayOrders = getFilteredInProcessOrders();
+  const rawOrders = getFilteredInProcessOrders();
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [processGroupBy, queueSearch, pageSize]);
+
+  const filteredOrders = rawOrders.filter(o => {
+    if (!queueSearch.trim()) return true;
+    const q = queueSearch.toLowerCase();
+    return (
+      o.invoiceNumber.toLowerCase().includes(q) ||
+      o.customerName.toLowerCase().includes(q) ||
+      (o.customerPhone && o.customerPhone.toLowerCase().includes(q))
+    );
+  });
+
+  const totalPages = Math.ceil(filteredOrders.length / pageSize) || 1;
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedOrders = filteredOrders.slice((safePage - 1) * pageSize, safePage * pageSize);
 
   return (
     <div className="space-y-6 animate-fadeIn" id="menu-content-queue">
@@ -163,6 +186,32 @@ export const LaundryQueue: React.FC<LaundryQueueProps> = ({
                 ⚙️ Proses Kerja & Siap Diambil
               </span>
               <span className="text-[9.5px] text-slate-450 font-mono hidden md:inline">Alur: Antrean ➔ Cuci ➔ Setrika/Lipat ➔ Kemas ➔ Siap ➔ Selesai</span>
+            </div>
+
+            {/* Search & Filter Bar */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-0.5">
+              <div className="relative flex-1">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="Cari antrean nota, nama pelanggan, atau HP..."
+                  value={queueSearch}
+                  onChange={(e) => setQueueSearch(e.target.value)}
+                  className="w-full bg-white border border-slate-205 pl-9 pr-3 py-1.5 rounded-xl text-xs font-semibold focus:outline-none focus:border-sky-500 shadow-3xs"
+                />
+              </div>
+              <div className="flex items-center gap-1.5 self-end sm:self-auto text-xs font-bold text-slate-500">
+                <span className="text-[10px] text-slate-400 uppercase font-black">Tampil:</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => setPageSize(Number(e.target.value))}
+                  className="bg-white border border-slate-205 rounded-lg px-2 py-1 text-xs font-bold text-slate-700 outline-none cursor-pointer"
+                >
+                  <option value={10}>10 / hal</option>
+                  <option value={25}>25 / hal</option>
+                  <option value={50}>50 / hal</option>
+                </select>
+              </div>
             </div>
 
             {/* Responsive Tabs Navigation for mobile scrollable, desktop grid - replaces select dropdown with layout transitions */}
@@ -217,16 +266,20 @@ export const LaundryQueue: React.FC<LaundryQueueProps> = ({
                   transition={{ duration: 0.2, ease: "easeOut" }}
                   className="space-y-2 min-h-[50px]"
                 >
-              {displayOrders.length === 0 ? (
+              {filteredOrders.length === 0 ? (
                 <div className="py-12 bg-white rounded-xl border border-slate-150 p-6 text-center space-y-1.5">
                   <div className="mx-auto w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center">
                     <Clock className="w-5 h-5 text-slate-300" />
                   </div>
-                  <p className="text-[11.5px] font-bold text-slate-500">Antrean kosong pada tahap ini.</p>
-                  <p className="text-[9.5px] text-slate-400 leading-normal max-w-xs mx-auto">Mulai layani pelanggan di menu "Basket Baru" untuk menambah cucian!</p>
+                  <p className="text-[11.5px] font-bold text-slate-500">
+                    {queueSearch ? `Tidak ada antrean yang cocok dengan pencarian "${queueSearch}".` : 'Antrean kosong pada tahap ini.'}
+                  </p>
+                  <p className="text-[9.5px] text-slate-400 leading-normal max-w-xs mx-auto">
+                    {queueSearch ? 'Coba periksa ejaan nomor nota atau nama pelanggan.' : 'Mulai layani pelanggan di menu "Basket Baru" untuk menambah cucian!'}
+                  </p>
                 </div>
               ) : (
-                displayOrders.map(o => {
+                paginatedOrders.map(o => {
                   let nextStepLabel = '';
                   if (o.status === OrderStatus.ANTRI) nextStepLabel = 'Cuci 💦';
                   else if (o.status === OrderStatus.DICUCI) nextStepLabel = 'Setrika/Lipat 👔';
@@ -499,6 +552,46 @@ export const LaundryQueue: React.FC<LaundryQueueProps> = ({
                 </motion.div>
               </AnimatePresence>
             </div>
+
+            {/* Pagination Navigation Bar */}
+            {totalPages > 1 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-3 border-t border-slate-200 mt-2 text-xs">
+                <span className="text-[10.5px] font-semibold text-slate-500">
+                  Menampilkan <strong className="text-slate-800 font-bold">{(safePage - 1) * pageSize + 1}</strong> - <strong className="text-slate-800 font-bold">{Math.min(filteredOrders.length, safePage * pageSize)}</strong> dari <strong className="text-slate-800 font-bold">{filteredOrders.length}</strong> antrean
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                    disabled={safePage <= 1}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition ${
+                      safePage <= 1
+                        ? 'bg-slate-100 text-slate-300 cursor-not-allowed'
+                        : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-205 shadow-3xs cursor-pointer active:scale-95'
+                    }`}
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span>Sebelumnya</span>
+                  </button>
+                  <span className="px-2 font-mono font-bold text-slate-700 text-xs">
+                    {safePage} / {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                    disabled={safePage >= totalPages}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1 transition ${
+                      safePage >= totalPages
+                        ? 'bg-slate-100 text-slate-300 cursor-not-allowed'
+                        : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-205 shadow-3xs cursor-pointer active:scale-95'
+                    }`}
+                  >
+                    <span>Berikutnya</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

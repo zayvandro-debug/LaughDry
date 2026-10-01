@@ -429,7 +429,24 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
   const [trendTablePage, setTrendTablePage] = useState<number>(1);
   const [servicesInnerTab, setServicesInnerTab] = useState<'rates' | 'perfumes'>('rates');
   const [ratesTab, setRatesTab] = useState<'kiloan' | 'satuan'>('kiloan');
-  const [settingsInnerTab, setSettingsInnerTab] = useState<'general' | 'receipt' | 'wa'>('general');
+  const [settingsInnerTab, setSettingsInnerTab] = useState<'general' | 'receipt' | 'wa' | 'data'>('general');
+
+  // Pagination states for Owner Dashboard tables
+  const [expensePage, setExpensePage] = useState<number>(1);
+  const [attendancePage, setAttendancePage] = useState<number>(1);
+
+  // Archiving & Cleanup states
+  const [archiveOlderDays, setArchiveOlderDays] = useState<number>(30);
+  const [archivedOrdersList, setArchivedOrdersList] = useState<Order[]>(() => LaughDryDatabase.getArchivedOrders());
+  const [showArchivedOrdersModal, setShowArchivedOrdersModal] = useState<boolean>(false);
+  const [storageStats, setStorageStats] = useState(() => LaughDryDatabase.getStorageMetrics());
+
+  // Factory Reset 2-Step states
+  const [showFactoryResetStep1, setShowFactoryResetStep1] = useState<boolean>(false);
+  const [showFactoryResetStep2, setShowFactoryResetStep2] = useState<boolean>(false);
+  const [resetConfirmInput, setResetConfirmInput] = useState<string>('');
+  const [resetRiskAgreed, setResetRiskAgreed] = useState<boolean>(false);
+  const [isFactoryResetting, setIsFactoryResetting] = useState<boolean>(false);
 
   // Reset trendTablePage when period unit changes
   React.useEffect(() => {
@@ -650,12 +667,14 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     window.addEventListener('laughdry_db_synced', handleDbUpdate);
     window.addEventListener('laughdry_data_changed', handleDbUpdate);
     window.addEventListener('laughdry_perfumes_updated', handleDbUpdate);
+    window.addEventListener('laughdry_archived_orders_updated', handleDbUpdate);
 
     return () => {
       if (unsubscribe) unsubscribe();
       window.removeEventListener('laughdry_db_synced', handleDbUpdate);
       window.removeEventListener('laughdry_data_changed', handleDbUpdate);
       window.removeEventListener('laughdry_perfumes_updated', handleDbUpdate);
+      window.removeEventListener('laughdry_archived_orders_updated', handleDbUpdate);
     };
   }, []);
 
@@ -667,6 +686,8 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     const dbUsers = LaughDryDatabase.getUsers();
     setUsers(dbUsers);
     setPerfumes(LaughDryDatabase.getPerfumes());
+    setStorageStats(LaughDryDatabase.getStorageMetrics());
+    setArchivedOrdersList(LaughDryDatabase.getArchivedOrders());
 
     // Find owner in the database and set form values
     const owner = dbUsers.find(u => u.role === 'owner');
@@ -1725,6 +1746,35 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
       console.error(err);
       triggerToast(`⚠️ Gagal mengembalikan data backup: ${err.message || err}`);
     }
+  };
+
+  const handleImportArchivedJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const content = event.target?.result as string;
+        const result = LaughDryDatabase.importArchivedOrdersJSON(content, 'merge');
+        if (result.success) {
+          const freshArchived = LaughDryDatabase.getArchivedOrders();
+          setArchivedOrdersList(freshArchived);
+          setStorageStats(LaughDryDatabase.getStorageMetrics());
+          triggerToast(`✅ ${result.message}`);
+        } else {
+          triggerToast(`⚠️ Gagal mengimpor arsip: ${result.message}`);
+        }
+      } catch (err: any) {
+        console.error("Archive import error:", err);
+        triggerToast(`❌ Format file tidak valid: ${err.message || err}`);
+      } finally {
+        if (e.target) {
+          e.target.value = '';
+        }
+      }
+    };
+    reader.readAsText(file);
   };
 
   const handleDownloadExpenseTemplate = () => {
@@ -4867,7 +4917,14 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700">
-                  {filteredExpenses.slice(0).reverse().map(e => {
+                  {(() => {
+                    const reversed = [...filteredExpenses].reverse();
+                    const perPage = 10;
+                    const totalPages = Math.ceil(reversed.length / perPage) || 1;
+                    const safePage = Math.min(expensePage, totalPages);
+                    const paginated = reversed.slice((safePage - 1) * perPage, safePage * perPage);
+
+                    return paginated.map(e => {
                     const branchMock = branches.find(b => b.id === e.branchId);
                     const isEditing = editingExpenseId === e.id;
                     const d = new Date(e.date);
@@ -4915,10 +4972,55 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                         </td>
                       </tr>
                     );
-                  })}
+                  });
+                })()}
                 </tbody>
               </table>
             </div>
+
+            {/* Expenses Pagination Footer */}
+            {(() => {
+              const perPage = 10;
+              const totalPages = Math.ceil(filteredExpenses.length / perPage) || 1;
+              const safePage = Math.min(expensePage, totalPages);
+              if (totalPages <= 1) return null;
+              return (
+                <div className="p-3 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs">
+                  <span className="text-[10px] text-slate-500 font-bold">
+                    Menampilkan <strong className="text-slate-800">{(safePage - 1) * perPage + 1}</strong> - <strong className="text-slate-800">{Math.min(filteredExpenses.length, safePage * perPage)}</strong> dari <strong className="text-slate-800">{filteredExpenses.length}</strong> catatan
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setExpensePage(prev => Math.max(1, prev - 1))}
+                      disabled={safePage <= 1}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                        safePage <= 1
+                          ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                          : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-250 cursor-pointer'
+                      }`}
+                    >
+                      ◀ Sebelumnya
+                    </button>
+                    <span className="px-2 font-mono font-bold text-slate-700 text-xs">
+                      {safePage} / {totalPages}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setExpensePage(prev => Math.min(totalPages, prev + 1))}
+                      disabled={safePage >= totalPages}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                        safePage >= totalPages
+                          ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                          : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-250 cursor-pointer'
+                      }`}
+                    >
+                      Berikutnya ▶
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       </div>
@@ -5455,6 +5557,17 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                 }`}
               >
                 💬 Nota WA
+              </button>
+              <button
+                type="button"
+                onClick={() => setSettingsInnerTab('data')}
+                className={`px-3 py-1.5 text-[10.5px] font-bold rounded-md transition-all cursor-pointer ${
+                  settingsInnerTab === 'data'
+                    ? 'bg-white text-slate-900 shadow-xs font-black'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                🗄️ Pengarsipan & Reset
               </button>
             </div>
           </div>
@@ -7368,6 +7481,257 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
             </div>
           )}
 
+          {/* TAB 4: PENGARSIPAN DATA & PEMBERSIHAN BERKALA + RESET PABRIK */}
+          {settingsInnerTab === 'data' && (
+            <div className="space-y-6 font-sans text-xs animate-scaleIn" id="data-archive-cleanup-panel">
+              {/* Card 1: Storage Statistics & Overview */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-150 shadow-sm space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 gap-2">
+                  <div>
+                    <h4 className="font-extrabold text-slate-800 text-sm flex items-center gap-2">
+                      <span className="text-base">🗄️</span>
+                      Kapasitas Penyimpanan &amp; Statistik Data
+                    </h4>
+                    <p className="text-[10.5px] text-slate-400 mt-0.5">
+                      Pantau jumlah rekaman data yang tersimpan di sistem lokal dan status pemakaian memori perangkat.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStorageStats(LaughDryDatabase.getStorageMetrics());
+                      triggerToast("🔄 Statistik kapasitas data diperbarui!");
+                    }}
+                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-[10.5px] transition self-start sm:self-auto cursor-pointer flex items-center gap-1"
+                  >
+                    <span>🔄 Refresh Statistik</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5">
+                  <div className="p-3 bg-sky-50/60 border border-sky-100 rounded-xl text-center">
+                    <span className="text-[9px] font-bold text-sky-700 uppercase block">Pesanan Aktif</span>
+                    <strong className="text-base font-black text-sky-900 font-mono mt-0.5 block">{storageStats.activeOrders}</strong>
+                  </div>
+                  <div className="p-3 bg-purple-50/60 border border-purple-100 rounded-xl text-center">
+                    <span className="text-[9px] font-bold text-purple-700 uppercase block">Diarsipkan</span>
+                    <strong className="text-base font-black text-purple-900 font-mono mt-0.5 block">{storageStats.archivedOrders}</strong>
+                  </div>
+                  <div className="p-3 bg-emerald-50/60 border border-emerald-100 rounded-xl text-center">
+                    <span className="text-[9px] font-bold text-emerald-700 uppercase block">Pelanggan</span>
+                    <strong className="text-base font-black text-emerald-900 font-mono mt-0.5 block">{storageStats.customers}</strong>
+                  </div>
+                  <div className="p-3 bg-amber-50/60 border border-amber-100 rounded-xl text-center">
+                    <span className="text-[9px] font-bold text-amber-700 uppercase block">Pengeluaran</span>
+                    <strong className="text-base font-black text-amber-900 font-mono mt-0.5 block">{storageStats.expenses}</strong>
+                  </div>
+                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-center">
+                    <span className="text-[9px] font-bold text-slate-600 uppercase block">Absensi</span>
+                    <strong className="text-base font-black text-slate-800 font-mono mt-0.5 block">{storageStats.attendance}</strong>
+                  </div>
+                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-center">
+                    <span className="text-[9px] font-bold text-slate-600 uppercase block">Log Audit</span>
+                    <strong className="text-base font-black text-slate-800 font-mono mt-0.5 block">{storageStats.auditLogs}</strong>
+                  </div>
+                  <div className="p-3 bg-indigo-50/60 border border-indigo-100 rounded-xl text-center">
+                    <span className="text-[9px] font-bold text-indigo-700 uppercase block">Memori Lokal</span>
+                    <strong className="text-base font-black text-indigo-900 font-mono mt-0.5 block">~{storageStats.storageUsedKb} KB</strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 2: Pengarsipan Transaksi Selesai (Data Archiving) */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-150 shadow-sm space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 gap-2">
+                  <div>
+                    <h4 className="font-extrabold text-slate-800 text-sm flex items-center gap-2">
+                      <span className="text-base">📦</span>
+                      Pengarsipan Data Pesanan Selesai / Batal
+                    </h4>
+                    <p className="text-[10.5px] text-slate-400 mt-0.5">
+                      Pindahkan pesanan selesai lama ke penyimpanan arsip agar antrean kasir dan kalkulasi laporan tetap cepat dan ringan.
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-black px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 border border-purple-200 self-start sm:self-auto">
+                    {archivedOrdersList.length} Pesanan Terarsip
+                  </span>
+                </div>
+
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <span className="text-[11px] font-bold text-slate-700 block">Kriteria Usia Transaksi untuk Diarsipkan:</span>
+                    <p className="text-[10px] text-slate-400">
+                      Hanya pesanan berstatus Selesai atau Dibatalkan yang lebih tua dari batas hari yang akan dipindahkan.
+                    </p>
+                  </div>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+                    <select
+                      value={archiveOlderDays}
+                      onChange={(e) => setArchiveOlderDays(Number(e.target.value))}
+                      className="w-full sm:w-auto bg-white border border-slate-250 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 outline-none cursor-pointer"
+                    >
+                      <option value={30}>Lebih dari 30 Hari</option>
+                      <option value={60}>Lebih dari 60 Hari</option>
+                      <option value={90}>Lebih dari 90 Hari</option>
+                      <option value={180}>Lebih dari 180 Hari (6 Bulan)</option>
+                    </select>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const res = LaughDryDatabase.archiveCompletedOrders(archiveOlderDays);
+                        loadDatabaseState();
+                        setArchivedOrdersList(LaughDryDatabase.getArchivedOrders());
+                        setStorageStats(LaughDryDatabase.getStorageMetrics());
+                        if (res.archivedCount > 0) {
+                          triggerToast(`📦 Berhasil mengarsipkan ${res.archivedCount} pesanan selesai lama!`);
+                        } else {
+                          triggerToast("ℹ️ Tidak ada pesanan selesai yang memenuhi kriteria usia untuk diarsipkan.");
+                        }
+                      }}
+                      className="w-full sm:w-auto justify-center text-center px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-extrabold rounded-xl text-xs transition shadow-sm cursor-pointer whitespace-nowrap active:scale-95 flex items-center gap-1.5"
+                    >
+                      <span>📦 Arsipkan Sekarang</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row flex-wrap gap-2 pt-1 w-full">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const jsonStr = LaughDryDatabase.exportArchivedOrdersJSON();
+                      const blob = new Blob([jsonStr], { type: 'application/json' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url;
+                      a.download = `laughdry_arsip_pesanan_${new Date().toISOString().split('T')[0]}.json`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                      triggerToast("📥 File cadangan arsip berhasil diunduh!");
+                    }}
+                    className="w-full sm:w-auto justify-center text-center px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 font-bold border border-slate-200 rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer shadow-3xs"
+                  >
+                    <span>📥 Unduh Backup Arsip (JSON)</span>
+                  </button>
+
+                  <label
+                    className="w-full sm:w-auto justify-center text-center px-3.5 py-2 bg-white hover:bg-emerald-50 text-emerald-700 hover:text-emerald-800 font-bold border border-emerald-200 rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer shadow-3xs"
+                    title="Unggah dan pulihkan file cadangan arsip pesanan (.json)"
+                  >
+                    <span>📤 Unggah Backup Arsip (JSON)</span>
+                    <input
+                      type="file"
+                      accept=".json,application/json"
+                      onChange={handleImportArchivedJSON}
+                      className="hidden"
+                    />
+                  </label>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setArchivedOrdersList(LaughDryDatabase.getArchivedOrders());
+                      setShowArchivedOrdersModal(true);
+                    }}
+                    className="w-full sm:w-auto justify-center text-center px-3.5 py-2 bg-white hover:bg-purple-50 text-purple-700 font-bold border border-purple-200 rounded-xl text-xs transition flex items-center gap-1.5 cursor-pointer shadow-3xs"
+                  >
+                    <span>📋 Buka &amp; Pulihkan Pesanan Terarsip ({archivedOrdersList.length})</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Card 3: Pembersihan Berkala (Periodic Cleanup) */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-150 shadow-sm space-y-4">
+                <div className="border-b border-slate-100 pb-3">
+                  <h4 className="font-extrabold text-slate-800 text-sm flex items-center gap-2">
+                    <span className="text-base">🧹</span>
+                    Pembersihan Data Berkala (Periodic Cleanup)
+                  </h4>
+                  <p className="text-[10.5px] text-slate-400 mt-0.5">
+                    Hapus catatan jejak audit dan riwayat absensi lampau yang sudah kadaluarsa agar aplikasi tetap enteng dan bebas penumpukan cache.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-extrabold text-slate-800 text-xs">Pembersihan Log Audit Aktivitas</span>
+                      <span className="text-[10px] text-slate-400 font-mono">{storageStats.auditLogs} Log</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 leading-relaxed">
+                      Menghapus catatan riwayat aktivitas klik dan mutasi kasir yang berusia lebih dari 30 hari.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const cleaned = LaughDryDatabase.cleanOldAuditLogs(30);
+                        loadDatabaseState();
+                        triggerToast(cleaned > 0 ? `🧹 Berhasil membersihkan ${cleaned} log lama!` : "Log aktivitas sudah bersih!");
+                      }}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-lg text-xs transition cursor-pointer active:scale-95"
+                    >
+                      🧹 Bersihkan Log &gt; 30 Hari
+                    </button>
+                  </div>
+
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-extrabold text-slate-800 text-xs">Pembersihan Riwayat Absensi Lampau</span>
+                      <span className="text-[10px] text-slate-400 font-mono">{storageStats.attendance} Rekaman</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 leading-relaxed">
+                      Menghapus catatan absensi shift karyawan yang telah selesai dan berusia lebih dari 60 hari.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const cleaned = LaughDryDatabase.cleanOldAttendance(60);
+                        loadDatabaseState();
+                        triggerToast(cleaned > 0 ? `🧼 Berhasil membersihkan ${cleaned} absensi lampau!` : "Riwayat absensi sudah bersih!");
+                      }}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-lg text-xs transition cursor-pointer active:scale-95"
+                    >
+                      🧼 Bersihkan Absensi &gt; 60 Hari
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 4: FITUR RESET PABRIK (FACTORY RESET) 2 TAHAPAN */}
+              <div className="bg-rose-50/70 border border-rose-200 rounded-2xl p-5 shadow-xs space-y-3">
+                <div className="flex items-start gap-2.5">
+                  <span className="text-xl">🚨</span>
+                  <div className="space-y-1">
+                    <h4 className="font-black text-rose-900 text-xs uppercase tracking-wider">
+                      RESET PABRIK APLIKASI (FACTORY RESET)
+                    </h4>
+                    <p className="text-[11px] text-rose-700 leading-relaxed">
+                      Mengembalikan seluruh aplikasi ke setelan awal bersih (Fresh Slate). Seluruh order antrean, riwayat pelanggan, deposit, pengeluaran, absensi, dan preferensi akan dihapus total. Fitur ini terlindungi dengan <strong>2 tahap konfirmasi</strong> demi keamanan data bisnis Anda.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-2 border-t border-rose-200/60">
+                  <span className="text-[10px] font-bold text-rose-800">
+                    ⚠️ Data yang direset tidak dapat dipulihkan tanpa file backup.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowFactoryResetStep1(true);
+                      setResetConfirmInput('');
+                      setResetRiskAgreed(false);
+                    }}
+                    className="w-full sm:w-auto px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs rounded-xl shadow-md transition cursor-pointer active:scale-95 whitespace-nowrap flex items-center justify-center gap-1.5"
+                  >
+                    <span>🚨 Mulai Reset Pabrik Aplikasi</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
         </div>
       </div>
     )}
@@ -8408,7 +8772,13 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                             </td>
                           </tr>
                         ) : (
-                          filteredRecords.map((r, idx) => {
+                          (() => {
+                            const attPerPage = 10;
+                            const totalAttPages = Math.ceil(filteredRecords.length / attPerPage) || 1;
+                            const safeAttPage = Math.min(attendancePage, totalAttPages);
+                            const paginatedAtt = filteredRecords.slice((safeAttPage - 1) * attPerPage, safeAttPage * attPerPage);
+
+                            return paginatedAtt.map((r, idx) => {
                             const branchName = branches.find(b => b.id === r.branchId)?.name || 'Cabang Utama';
                             let checkInStr = '⏳--';
                             try { if (r.checkIn) checkInStr = new Date(r.checkIn).toLocaleString('id-ID') + ' WIB'; } catch(e) {}
@@ -8512,11 +8882,56 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                                 </td>
                               </tr>
                             );
-                          })
+                          });
+                        })()
                         )}
                       </tbody>
                     </table>
                   </div>
+
+                  {/* Attendance Pagination Controls */}
+                  {(() => {
+                    const attPerPage = 10;
+                    const totalAttPages = Math.ceil(filteredRecords.length / attPerPage) || 1;
+                    const safeAttPage = Math.min(attendancePage, totalAttPages);
+                    if (totalAttPages <= 1) return null;
+                    return (
+                      <div className="p-3 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs">
+                        <span className="text-[10px] text-slate-500 font-bold">
+                          Halaman <strong className="text-slate-800">{safeAttPage}</strong> dari <strong className="text-slate-800">{totalAttPages}</strong> ({filteredRecords.length} log)
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setAttendancePage(prev => Math.max(1, prev - 1))}
+                            disabled={safeAttPage <= 1}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                              safeAttPage <= 1
+                                ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                                : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-250 cursor-pointer'
+                            }`}
+                          >
+                            ◀ Sebelumnya
+                          </button>
+                          <span className="px-2 font-mono font-bold text-slate-700 text-xs">
+                            {safeAttPage} / {totalAttPages}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setAttendancePage(prev => Math.min(totalAttPages, prev + 1))}
+                            disabled={safeAttPage >= totalAttPages}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                              safeAttPage >= totalAttPages
+                                ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                                : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-250 cursor-pointer'
+                            }`}
+                          >
+                            Berikutnya ▶
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </>
             );
@@ -10295,6 +10710,279 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
           )}
         </AnimatePresence>
       </motion.div>
+
+      {/* MODAL: DAFTAR PESANAN TERARSIP & RESTORE */}
+      {showArchivedOrdersModal && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="bg-white rounded-3xl p-6 max-w-2xl w-full border border-slate-150 shadow-2xl space-y-4 max-h-[85vh] flex flex-col font-sans">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h4 className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+                  <span>📦</span> Daftar Pesanan Diarsipkan ({archivedOrdersList.length})
+                </h4>
+                <p className="text-[10.5px] text-slate-400 mt-0.5">
+                  Pesanan selesai yang telah diarsipkan untuk menjaga performa antrean tetap ringan.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowArchivedOrdersModal(false)}
+                className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 font-bold flex items-center justify-center text-xs cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-[160px]">
+              {archivedOrdersList.length === 0 ? (
+                <div className="py-12 text-center text-slate-400 text-xs bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                  Belum ada pesanan yang diarsipkan.
+                </div>
+              ) : (
+                archivedOrdersList.map(o => (
+                  <div key={o.id} className="p-3 bg-slate-50/70 border border-slate-150 rounded-xl flex items-center justify-between gap-3 text-xs">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-slate-800 text-[11px]">{o.invoiceNumber}</span>
+                        <span className="text-[10px] text-slate-400">&bull;</span>
+                        <span className="font-bold text-slate-700 truncate">{o.customerName}</span>
+                        <span className={`text-[8.5px] font-black px-1.5 py-0.2 rounded uppercase ${
+                          o.status === OrderStatus.SELESAI ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                        }`}>
+                          {o.status}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-1 flex items-center gap-2">
+                        <span>💰 Rp {o.totalAmount.toLocaleString('id-ID')}</span>
+                        <span>&bull;</span>
+                        <span>📅 {new Date(o.createdAt).toLocaleDateString('id-ID')}</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const success = LaughDryDatabase.restoreArchivedOrder(o.id);
+                        if (success) {
+                          loadDatabaseState();
+                          setArchivedOrdersList(LaughDryDatabase.getArchivedOrders());
+                          setStorageStats(LaughDryDatabase.getStorageMetrics());
+                          triggerToast(`✅ Pesanan [${o.invoiceNumber}] dipulihkan ke daftar aktif!`);
+                        }
+                      }}
+                      className="px-3 py-1.5 bg-sky-500 hover:bg-sky-600 text-white font-bold text-[10.5px] rounded-lg transition shrink-0 cursor-pointer shadow-3xs"
+                    >
+                      Pulihkan ke Aktif ➔
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                <label
+                  className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold text-xs rounded-xl border border-emerald-200 cursor-pointer flex items-center justify-center gap-1.5 transition shadow-3xs"
+                  title="Unggah file cadangan arsip pesanan (.json)"
+                >
+                  <span>📤 Unggah Backup Arsip (.json)</span>
+                  <input
+                    type="file"
+                    accept=".json,application/json"
+                    onChange={handleImportArchivedJSON}
+                    className="hidden"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const jsonStr = LaughDryDatabase.exportArchivedOrdersJSON();
+                    const blob = new Blob([jsonStr], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `laughdry_arsip_pesanan_${new Date().toISOString().split('T')[0]}.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    triggerToast("📥 File cadangan arsip berhasil diunduh!");
+                  }}
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-3xs"
+                >
+                  <span>📥 Unduh Backup JSON</span>
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowArchivedOrdersModal(false)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold rounded-xl text-xs cursor-pointer text-center"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL RESET PABRIK: TAHAP 1 DARI 2 (PERINGATAN & RISIKO) */}
+      {showFactoryResetStep1 && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full border border-rose-200 shadow-2xl space-y-4 font-sans text-left animate-scaleIn">
+            <div className="flex items-center gap-3 border-b border-rose-100 pb-3">
+              <div className="w-10 h-10 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center text-xl shrink-0">
+                🚨
+              </div>
+              <div>
+                <span className="text-[9.5px] font-black uppercase text-rose-600 tracking-wider">Tahap 1 dari 2</span>
+                <h4 className="font-black text-slate-900 text-sm">Peringatan Risiko Reset Pabrik</h4>
+              </div>
+            </div>
+
+            <p className="text-slate-600 text-xs leading-relaxed">
+              Tindakan ini akan <strong>menghapus seluruh data aplikasi secara permanen</strong> dan mengembalikannya ke kondisi bersih awal (pabrik):
+            </p>
+
+            <div className="p-3 bg-rose-50/60 border border-rose-150 rounded-xl space-y-1.5 text-xs text-rose-900 font-medium">
+              <div className="flex items-center gap-2">
+                <span>❌</span>
+                <span>Seluruh pesanan aktif &amp; antrean cucian dihapus.</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span>❌</span>
+                <span>Seluruh transaksi selesai &amp; data arsip dihapus.</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span>❌</span>
+                <span>Seluruh daftar pelanggan, deposit, &amp; poin member dihapus.</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span>❌</span>
+                <span>Seluruh jurnal pengeluaran operasional dihapus.</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span>❌</span>
+                <span>Seluruh riwayat absensi &amp; log jejak aktivitas dihapus.</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span>⚙️</span>
+                <span>Pengaturan nota struk &amp; WA direset ke setelan awal default.</span>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 flex items-center justify-between text-xs">
+              <span className="text-[10.5px] text-slate-500 font-semibold">Disarankan unduh cadangan dulu:</span>
+              <button
+                type="button"
+                onClick={handleExportBackup}
+                className="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-[10.5px] font-bold text-slate-700 cursor-pointer shadow-3xs"
+              >
+                📥 Unduh Backup JSON
+              </button>
+            </div>
+
+            <div className="flex gap-2 pt-2 border-t border-slate-100 text-xs">
+              <button
+                type="button"
+                onClick={() => setShowFactoryResetStep1(false)}
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowFactoryResetStep1(false);
+                  setShowFactoryResetStep2(true);
+                  setResetConfirmInput('');
+                  setResetRiskAgreed(false);
+                }}
+                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-xl transition cursor-pointer shadow-sm text-center"
+              >
+                Lanjut ke Tahap 2 ➔
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL RESET PABRIK: TAHAP 2 DARI 2 (VERIFIKASI KEAMANAN AKHIR) */}
+      {showFactoryResetStep2 && (
+        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full border-2 border-rose-400 shadow-2xl space-y-4 font-sans text-left animate-scaleIn">
+            <div className="flex items-center gap-3 border-b border-rose-100 pb-3">
+              <div className="w-10 h-10 rounded-2xl bg-rose-600 text-white flex items-center justify-center text-xl shrink-0 font-black">
+                ⚠️
+              </div>
+              <div>
+                <span className="text-[9.5px] font-black uppercase text-rose-600 tracking-wider">Tahap 2 dari 2</span>
+                <h4 className="font-black text-rose-950 text-sm">Verifikasi Keamanan Konfirmasi Akhir</h4>
+              </div>
+            </div>
+
+            <p className="text-slate-600 text-xs leading-relaxed">
+              Ini adalah langkah verifikasi terakhir. Setelah Anda mengonfirmasi, seluruh data transaksi toko akan langsung disapu bersih dan tidak bisa dikembalikan.
+            </p>
+
+            <label className="flex items-start gap-2.5 p-3 bg-amber-50/60 border border-amber-200 rounded-xl cursor-pointer">
+              <input
+                type="checkbox"
+                checked={resetRiskAgreed}
+                onChange={(e) => setResetRiskAgreed(e.target.checked)}
+                className="w-4 h-4 mt-0.5 accent-rose-600 cursor-pointer rounded"
+              />
+              <span className="text-[11px] font-bold text-amber-900 leading-snug">
+                Saya menyadari penuh dan menyetujui bahwa seluruh database akan dikosongkan total kembali ke setelan pabrik.
+              </span>
+            </label>
+
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-slate-700 block">
+                Ketik teks <strong className="text-rose-600 font-mono font-black select-all">RESET PABRIK</strong> di bawah untuk membuka kunci tombol:
+              </label>
+              <input
+                type="text"
+                value={resetConfirmInput}
+                onChange={(e) => setResetConfirmInput(e.target.value)}
+                placeholder="Ketik persis: RESET PABRIK"
+                className="w-full bg-slate-50 border border-slate-300 focus:border-rose-600 focus:bg-white rounded-xl p-2.5 text-xs font-mono font-bold text-slate-900 uppercase tracking-wider outline-none"
+              />
+            </div>
+
+            <div className="flex gap-2 pt-2 border-t border-slate-100 text-xs">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowFactoryResetStep2(false);
+                  setResetConfirmInput('');
+                  setResetRiskAgreed(false);
+                }}
+                disabled={isFactoryResetting}
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition cursor-pointer disabled:opacity-50"
+              >
+                Batal / Urungkan
+              </button>
+              <button
+                type="button"
+                disabled={!resetRiskAgreed || resetConfirmInput.trim() !== 'RESET PABRIK' || isFactoryResetting}
+                onClick={async () => {
+                  try {
+                    setIsFactoryResetting(true);
+                    await LaughDryDatabase.executeFactoryReset();
+                    await loadDatabaseState();
+                    setShowFactoryResetStep2(false);
+                    triggerToast("🎉 APLIKASI BERHASIL DIRESET PABRIK KE SETELAN AWAL BERSIH!");
+                  } catch (e) {
+                    triggerToast("❌ Gagal melakukan reset pabrik.");
+                  } finally {
+                    setIsFactoryResetting(false);
+                  }
+                }}
+                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:bg-slate-300 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-black rounded-xl transition cursor-pointer shadow-md text-center active:scale-95"
+              >
+                {isFactoryResetting ? "⏳ Mereset..." : "🚨 RESET PABRIK SEKARANG"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

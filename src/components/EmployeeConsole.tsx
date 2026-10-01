@@ -663,7 +663,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
           setToastMessage("Berhasil mengambil kontak perangkat!");
           setTimeout(() => setToastMessage(null), 3000);
           return;
-        }np
+        }
       } catch (err: any) {
         console.warn("Contact picker native API error:", err);
         alert("Gagal mengambil kontak dari HP. Pastikan Anda telah memberikan izin akses kontak jika diminta.");
@@ -849,6 +849,8 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   // New filter & search states for Laundry Queue / Completed Transactions
   const [queueSearchQuery, setQueueSearchQuery] = useState('');
   const [queueServiceFilter, setQueueServiceFilter] = useState('all');
+  const [queuePage, setQueuePage] = useState(1);
+  const [queuePageSize, setQueuePageSize] = useState(10);
   const [completedSearchQuery, setCompletedSearchQuery] = useState('');
   const [completedSelectedMonth, setCompletedSelectedMonth] = useState('all');
   const [completedLimit, setCompletedLimit] = useState(50);
@@ -856,6 +858,10 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   const [completedEndDate, setCompletedEndDate] = useState('');
   const [completedScrollTop, setCompletedScrollTop] = useState(0);
   const completedScrollTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    setQueuePage(1);
+  }, [queueSearchQuery, queueServiceFilter, processGroupBy, activeMenuTab]);
 
   useEffect(() => {
     setCompletedLimit(50);
@@ -3569,7 +3575,13 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                               );
                             }
 
-                      return searchedQueueOrders.map(o => {
+                            const queueTotalPages = Math.ceil(searchedQueueOrders.length / queuePageSize) || 1;
+                            const safeQueuePage = Math.min(queuePage, queueTotalPages);
+                            const paginatedQueueOrders = searchedQueueOrders.slice((safeQueuePage - 1) * queuePageSize, safeQueuePage * queuePageSize);
+
+                            return (
+                              <>
+                                {paginatedQueueOrders.map(o => {
                     let nextStepLabel = '';
                     if (o.status === OrderStatus.ANTRI) nextStepLabel = 'Cuci 💦';
                     else if (o.status === OrderStatus.DICUCI) nextStepLabel = 'Setrika/Lipat 👔';
@@ -3878,8 +3890,47 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                         </motion.div>
                       </div>
                     );
-                  });
-                })()}
+                  })}
+
+                  {queueTotalPages > 1 && (
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-3 border-t border-slate-200 mt-2 text-xs bg-slate-50 p-2.5 rounded-xl border">
+                      <span className="text-[10px] font-bold text-slate-500">
+                        Halaman <strong className="text-slate-800">{safeQueuePage}</strong> dari <strong className="text-slate-800">{queueTotalPages}</strong> ({searchedQueueOrders.length} antrean)
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setQueuePage(prev => Math.max(1, prev - 1))}
+                          disabled={safeQueuePage <= 1}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                            safeQueuePage <= 1
+                              ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                              : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-250 shadow-3xs cursor-pointer active:scale-95'
+                          }`}
+                        >
+                          ◀ Sebelumnya
+                        </button>
+                        <span className="px-2 font-mono font-bold text-slate-800 text-xs">
+                          {safeQueuePage} / {queueTotalPages}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setQueuePage(prev => Math.min(queueTotalPages, prev + 1))}
+                          disabled={safeQueuePage >= queueTotalPages}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                            safeQueuePage >= queueTotalPages
+                              ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                              : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-250 shadow-3xs cursor-pointer active:scale-95'
+                          }`}
+                        >
+                          Berikutnya ▶
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
                   </motion.div>
                 </AnimatePresence>
               </div>

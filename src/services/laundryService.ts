@@ -710,6 +710,24 @@ export class LaundryService {
   }
 
   /**
+   * Fetch a single customer by Phone
+   */
+  static async getCustomerByPhone(phone: string): Promise<Customer | null> {
+    try {
+      const customers = await this.getCustomers();
+      const targetClean = phone.replace(/\D/g, '');
+      if (!targetClean) return null;
+      return customers.find(c => {
+        const cPhoneClean = c.phone ? c.phone.replace(/\D/g, '') : '';
+        return cPhoneClean === targetClean;
+      }) || null;
+    } catch (error) {
+      console.error('getCustomerByPhone failed:', error);
+      return null;
+    }
+  }
+
+  /**
    * Fetch templates from Firestore
    */
   static async getTemplates(): Promise<WhatsAppTemplate[]> {

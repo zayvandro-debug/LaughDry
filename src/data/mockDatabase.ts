@@ -1146,6 +1146,287 @@ export class LaughDryDatabase {
     localStorage.removeItem('laughdry_templates');
     localStorage.removeItem('laughdry_settings');
     localStorage.removeItem('laughdry_attendance');
+    localStorage.removeItem('laughdry_archived_orders');
+    localStorage.removeItem('laughdry_perfumes');
+  }
+
+  public static getArchivedOrders(): Order[] {
+    return this.loadKey<Order[]>('archived_orders', []);
+  }
+
+  public static saveArchivedOrders(orders: Order[]): void {
+    this.saveKey('archived_orders', orders);
+    this.debouncedDispatch('laughdry_archived_orders_updated');
+  }
+
+  public static archiveCompletedOrders(olderThanDays: number = 30): { archivedCount: number; remainingCount: number } {
+    const orders = this.getOrders();
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
+    const cutoffTime = cutoffDate.getTime();
+
+    const toArchive: Order[] = [];
+    const toKeep: Order[] = [];
+
+    orders.forEach(o => {
+      const isCompletedOrCancelled = o.status === OrderStatus.SELESAI || o.status === OrderStatus.DIBATALKAN;
+      const orderDateStr = o.completedAt || o.updatedAt || o.createdAt;
+      const orderTime = new Date(orderDateStr).getTime();
+
+      if (isCompletedOrCancelled && !isNaN(orderTime) && orderTime <= cutoffTime) {
+        toArchive.push(o);
+      } else {
+        toKeep.push(o);
+      }
+    });
+
+    if (toArchive.length > 0) {
+      const existingArchived = this.getArchivedOrders();
+      const existingIds = new Set(existingArchived.map(a => a.id));
+      const newArchived = [...existingArchived, ...toArchive.filter(a => !existingIds.has(a.id))];
+      this.saveArchivedOrders(newArchived);
+      this.saveOrders(toKeep);
+      this.logActivity('usr-1', 'Owner', 'owner', 'DATA_ARCHIVE', `Mengarsipkan ${toArchive.length} pesanan selesai/batal yang berusia > ${olderThanDays} hari.`);
+    }
+
+    return { archivedCount: toArchive.length, remainingCount: toKeep.length };
+  }
+
+  public static restoreArchivedOrder(orderId: string): boolean {
+    const archived = this.getArchivedOrders();
+    const orderIndex = archived.findIndex(o => o.id === orderId);
+    if (orderIndex === -1) return false;
+
+    const [orderToRestore] = archived.splice(orderIndex, 1);
+    this.saveArchivedOrders(archived);
+
+    const orders = this.getOrders();
+    this.saveOrders([orderToRestore, ...orders]);
+    this.logActivity('usr-1', 'Owner', 'owner', 'ORDER_RESTORE', `Memulihkan pesanan [${orderToRestore.invoiceNumber}] dari arsip ke daftar aktif.`);
+    return true;
+  }
+
+  public static cleanOldAuditLogs(olderThanDays: number = 30): number {
+    const logs = this.getAuditLogs();
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
+    const cutoffTime = cutoffDate.getTime();
+
+    const initialCount = logs.length;
+    const keptLogs = logs.filter(l => {
+      const logTime = new Date(l.timestamp).getTime();
+      return isNaN(logTime) || logTime > cutoffTime;
+    });
+
+    const deletedCount = initialCount - keptLogs.length;
+    if (deletedCount > 0) {
+      this.saveAuditLogs(keptLogs);
+      this.logActivity('usr-1', 'Owner', 'owner', 'AUDIT_CLEANUP', `Membersihkan ${deletedCount} catatan log aktivitas yang berusia > ${olderThanDays} hari.`);
+    }
+    return deletedCount;
+  }
+
+  public static cleanOldAttendance(olderThanDays: number = 60): number {
+    const attendance = this.getAttendance();
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
+    const cutoffTime = cutoffDate.getTime();
+
+    const initialCount = attendance.length;
+    const kept = attendance.filter(a => {
+      const attTime = new Date(a.checkIn).getTime();
+      return isNaN(attTime) || attTime > cutoffTime;
+    });
+
+    const deletedCount = initialCount - kept.length;
+    if (deletedCount > 0) {
+      this.saveAttendance(kept);
+      this.logActivity('usr-1', 'Owner', 'owner', 'ATTENDANCE_CLEANUP', `Membersihkan ${deletedCount} riwayat absensi yang berusia > ${olderThanDays} hari.`);
+    }
+    return deletedCount;
+  }
+
+  public static getStorageMetrics(): {
+    activeOrders: number;
+    archivedOrders: number;
+    customers: number;
+    expenses: number;
+    auditLogs: number;
+    attendance: number;
+    storageUsedKb: number;
+  } {
+    let totalChars = 0;
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith('laughdry_') || key.startsWith('ld_'))) {
+          const val = localStorage.getItem(key) || '';
+          totalChars += key.length + val.length;
+        }
+      }
+    } catch (e) {}
+
+    return {
+      activeOrders: this.getOrders().length,
+      archivedOrders: this.getArchivedOrders().length,
+      customers: this.getCustomers().length,
+      expenses: this.getExpenses().length,
+      auditLogs: this.getAuditLogs().length,
+      attendance: this.getAttendance().length,
+      storageUsedKb: Math.round((totalChars * 2) / 1024)
+    };
+  }
+
+  public static exportArchivedOrdersJSON(): string {
+    const archived = this.getArchivedOrders();
+    const exportData = {
+      type: "laughdry_archived_orders",
+      version: "2026.1",
+      exportedAt: new Date().toISOString(),
+      count: archived.length,
+      orders: archived
+    };
+    return JSON.stringify(exportData, null, 2);
+  }
+
+  public static importArchivedOrdersJSON(
+    jsonString: string,
+    mode: 'merge' | 'replace' = 'merge'
+  ): { success: boolean; importedCount: number; updatedCount: number; totalCount: number; message: string } {
+    try {
+      if (!jsonString || !jsonString.trim()) {
+        return { success: false, importedCount: 0, updatedCount: 0, totalCount: 0, message: "File JSON kosong." };
+      }
+
+      let parsed: any;
+      try {
+        parsed = JSON.parse(jsonString);
+      } catch (err: any) {
+        return { success: false, importedCount: 0, updatedCount: 0, totalCount: 0, message: "Format file bukan JSON yang valid." };
+      }
+
+      let incomingOrders: Order[] = [];
+      if (Array.isArray(parsed)) {
+        incomingOrders = parsed;
+      } else if (parsed && Array.isArray(parsed.orders)) {
+        incomingOrders = parsed.orders;
+      } else if (parsed && Array.isArray(parsed.archivedOrders)) {
+        incomingOrders = parsed.archivedOrders;
+      } else {
+        return { success: false, importedCount: 0, updatedCount: 0, totalCount: 0, message: "Struktur data JSON tidak mengandung daftar pesanan arsip ('orders' atau array)." };
+      }
+
+      const validOrders = incomingOrders.filter(o => o && typeof o === 'object' && (o.id || o.invoiceNumber));
+
+      if (validOrders.length === 0) {
+        return { success: false, importedCount: 0, updatedCount: 0, totalCount: 0, message: "Tidak ditemukan data pesanan valid di dalam file JSON." };
+      }
+
+      const currentArchived = mode === 'replace' ? [] : [...this.getArchivedOrders()];
+      let importedCount = 0;
+      let updatedCount = 0;
+
+      validOrders.forEach(incoming => {
+        const orderId = incoming.id || `ord-arch-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        const invoiceNumber = incoming.invoiceNumber || `INV-${Date.now().toString().slice(-6)}`;
+        
+        const normalizedOrder: Order = {
+          ...incoming,
+          id: orderId,
+          invoiceNumber,
+          customerName: incoming.customerName || 'Pelanggan Arsip',
+          customerPhone: incoming.customerPhone || '',
+          branchId: incoming.branchId || 'br-1',
+          items: Array.isArray(incoming.items) ? incoming.items : [],
+          totalAmount: Number(incoming.totalAmount) || 0,
+          paymentMethod: incoming.paymentMethod || 'Cash',
+          paymentStatus: incoming.paymentStatus || 'Lunas',
+          status: incoming.status || OrderStatus.SELESAI,
+          notes: incoming.notes || '',
+          createdAt: incoming.createdAt || new Date().toISOString(),
+          updatedAt: incoming.updatedAt || new Date().toISOString()
+        };
+
+        const existingIdx = currentArchived.findIndex(o => o.id === normalizedOrder.id || o.invoiceNumber === normalizedOrder.invoiceNumber);
+        if (existingIdx !== -1) {
+          currentArchived[existingIdx] = normalizedOrder;
+          updatedCount++;
+        } else {
+          currentArchived.push(normalizedOrder);
+          importedCount++;
+        }
+      });
+
+      this.saveArchivedOrders(currentArchived);
+      this.logActivity(
+        'usr-1',
+        'Owner',
+        'owner',
+        'IMPORT_ARCHIVED_ORDERS',
+        `Mengimpor backup arsip JSON: ${importedCount} pesanan baru ditambahkan, ${updatedCount} diperbarui. Total arsip: ${currentArchived.length}.`
+      );
+
+      return {
+        success: true,
+        importedCount,
+        updatedCount,
+        totalCount: currentArchived.length,
+        message: `Berhasil mengimpor arsip! ${importedCount} pesanan baru ditambahkan, ${updatedCount} diperbarui (Total sekarang: ${currentArchived.length} pesanan arsip).`
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        importedCount: 0,
+        updatedCount: 0,
+        totalCount: 0,
+        message: `Terjadi kendala saat membaca data arsip: ${err.message || err}`
+      };
+    }
+  }
+
+  public static async executeFactoryReset(): Promise<void> {
+    // 1. Collect all laughdry keys
+    const keysToRemove: string[] = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && (k.startsWith('laughdry_') || k.startsWith('ld_'))) {
+          keysToRemove.push(k);
+        }
+      }
+      keysToRemove.forEach(k => localStorage.removeItem(k));
+    } catch (e) {}
+
+    // 2. Clear remote Firestore if active
+    if (localStorage.getItem('laughdry_firebase_disabled') !== 'true') {
+      try {
+        await this.purgeAllDatabaseData();
+      } catch (e) {
+        console.warn("Factory reset Firestore notice:", e);
+      }
+    }
+
+    // 3. Reset storage cleanly to baseline (0 orders, 0 customers, 0 expenses)
+    this.resetToSeed();
+    this.saveKey('users', INITIAL_USERS);
+    this.saveKey('branches', INITIAL_BRANCHES);
+    this.saveKey('services', INITIAL_SERVICES);
+    this.saveKey('customers', []);
+    this.saveKey('orders', []);
+    this.saveKey('archived_orders', []);
+    this.saveKey('expenses', []);
+    this.saveKey('deposits', []);
+    this.saveKey('loyalty', []);
+    this.saveKey('attendance', []);
+    this.saveKey('audit_logs', []);
+    this.saveKey('templates', INITIAL_TEMPLATES);
+    this.saveKey('settings', INITIAL_SETTINGS);
+
+    // 4. Dispatch synchronization events
+    this.debouncedDispatch('laughdry_db_synced');
+    this.debouncedDispatch('laughdry_orders_updated');
+    this.debouncedDispatch('laughdry_archived_orders_updated');
+    this.debouncedDispatch('laughdry_data_changed');
   }
 
   public static async purgeAllDatabaseData(): Promise<void> {
