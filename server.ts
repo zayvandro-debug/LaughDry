@@ -1,15 +1,41 @@
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
+import fs from "fs";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Global process error handlers to prevent unhandled crashes
+process.on("uncaughtException", (err) => {
+  console.error("[LaughDry Server] Uncaught exception:", err);
+});
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("[LaughDry Server] Unhandled rejection at:", promise, "reason:", reason);
+});
 
 // In-Memory simulated payments list to track completion timestamps for automatic verification demo
-const mockTransactions = new Map<string, { createdAt: number; amount: number; name: string }>();
+const mockTransactions = new Map();
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = parseInt(process.env.PORT || "3000", 10) || 3000;
 
   app.use(express.json());
+
+  // Cloud Run / Container fast health check endpoints
+  app.get("/health", (_req, res) => {
+    res.status(200).send("OK");
+  });
+  app.head("/health", (_req, res) => {
+    res.status(200).end();
+  });
+  app.get("/api/health", (_req, res) => {
+    res.status(200).json({ status: "ok" });
+  });
+  app.head("/", (_req, res) => {
+    res.status(200).end();
+  });
 
   // Explicit server-side environment-based verification endpoint
   app.get("/api/env-check", (req, res) => {
@@ -61,8 +87,8 @@ async function startServer() {
       }
 
       // Real Sandbox Midtrans Integration using direct request with Basic authentication
-      const isProduction = process.env.MIDTRANS_IS_PRODUCTION === "true";
-      const baseUrl = isProduction 
+      const isProductionMidtrans = process.env.MIDTRANS_IS_PRODUCTION === "true";
+      const baseUrl = isProductionMidtrans 
         ? "https://api.midtrans.com/v2" 
         : "https://api.sandbox.midtrans.com/v2";
 
@@ -90,14 +116,14 @@ async function startServer() {
         body: JSON.stringify(midtransPayload)
       });
 
-      const data = await response.json() as any;
+      const data = await response.json();
 
       if (!response.ok || data.status_code >= "400") {
         throw new Error(data.status_message || `HTTP ${response.status} failed`);
       }
 
       // Extract raw QR code string or image action
-      const qrAction = data.actions?.find((act: any) => act.name === "generate-qr-code");
+      const qrAction = data.actions?.find((act) => act.name === "generate-qr-code");
       const qrCodeUrl = qrAction ? qrAction.url : null;
 
       // In case Midtrans GoPay returns QR string, generate image via QR code generator for HTML rendering
@@ -116,8 +142,8 @@ async function startServer() {
         message: "API Midtrans sukses! QRIS dinamis berhasil digenerate real-time."
       });
 
-    } catch (error: any) {
-      const errorMsg = error.message ? error.message.toString() : error.toString();
+    } catch (error) {
+      const errorMsg = error && error.message ? error.message.toString() : String(error);
       const isConfigIssue = errorMsg.includes("Unknown Merchant") || 
                             errorMsg.includes("Merchant") || 
                             errorMsg.includes("pop id") || 
@@ -161,8 +187,8 @@ async function startServer() {
       console.error("Error generating Midtrans QRIS:", error);
       return res.status(500).json({
         success: false,
-        message: `Gagal memanggil API Midtrans: ${error.message || error}`,
-        details: error.toString()
+        message: `Gagal memanggil API Midtrans: ${error?.message || error}`,
+        details: String(error)
       });
     }
   });
@@ -192,8 +218,8 @@ async function startServer() {
       }
 
       // Real Sandbox Midtrans Status Query
-      const isProduction = process.env.MIDTRANS_IS_PRODUCTION === "true";
-      const baseUrl = isProduction 
+      const isProductionMidtrans = process.env.MIDTRANS_IS_PRODUCTION === "true";
+      const baseUrl = isProductionMidtrans 
         ? "https://api.midtrans.com/v2" 
         : "https://api.sandbox.midtrans.com/v2";
 
@@ -207,7 +233,7 @@ async function startServer() {
         }
       });
 
-      const data = await response.json() as any;
+      const data = await response.json();
 
       if (!response.ok) {
         throw new Error(data.status_message || `HTTP ${response.status} failed`);
@@ -224,8 +250,8 @@ async function startServer() {
         message: isPaid ? "🟢 Pembayaran lunas terverifikasi di Midtrans!" : `Transaksi berstatus: ${txnStatus}`
       });
 
-    } catch (error: any) {
-      const errorMsg = error.message ? error.message.toString() : error.toString();
+    } catch (error) {
+      const errorMsg = error && error.message ? error.message.toString() : String(error);
       const isConfigIssue = errorMsg.includes("Unknown Merchant") || 
                             errorMsg.includes("Merchant") || 
                             errorMsg.includes("pop id") || 
@@ -252,33 +278,68 @@ async function startServer() {
       console.error("Error querying Midtrans status:", error);
       return res.status(500).json({
         success: false,
-        message: `Gagal memverifikasi status Midtrans: ${error.message || error}`
+        message: `Gagal memverifikasi status Midtrans: ${error?.message || error}`
       });
     }
   });
 
-
   // ==========================================
   // VITE DEVELOPMENT MIDDLEWARE & STATIC SERVING
   // ==========================================
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    // Production static serving code in single bundled server
-    const distPath = path.join(process.cwd(), "dist");
+  const distPath = path.join(process.cwd(), "dist");
+  const hasDist = fs.existsSync(path.join(distPath, "index.html"));
+
+  const isCloudRun = Boolean(process.env.K_SERVICE || process.env.K_REVISION || process.env.CLOUD_RUN_JOB);
+  const isProduction = process.env.NODE_ENV === "production" || isCloudRun || hasDist;
+
+  if (isProduction || hasDist) {
+    // Production static serving
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
+      if (req.path.startsWith("/api/")) {
+        return res.status(404).json({ error: "Endpoint not found" });
+      }
+      const indexPath = path.join(distPath, "index.html");
+      if (fs.existsSync(indexPath)) {
+        return res.sendFile(indexPath);
+      }
+      // Resilient fallback HTML to guarantee 200 OK for Cloud Run health probes
+      res.status(200).send(`<!doctype html><html lang="id"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>LaughDry - Laundry POS & CRM</title></head><body><div id="root">Memuat LaughDry POS...</div></body></html>`);
     });
+  } else {
+    // Development mode with Vite middlewares
+    try {
+      const { createServer: createViteServer } = await import("vite");
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: "spa",
+      });
+      app.use(vite.middlewares);
+    } catch (viteErr) {
+      console.warn("[LaughDry Server] Vite middleware unavailable, falling back to static files:", viteErr);
+      app.use(express.static(distPath));
+    }
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[LaughDry FullStack Server] running on http://localhost:${PORT}`);
+  const server = app.listen(PORT, "0.0.0.0", () => {
+    console.log(`[LaughDry FullStack Server] running on http://0.0.0.0:${PORT}`);
+  });
+
+  server.on("error", (err) => {
+    console.error("[LaughDry Server] HTTP Server error:", err);
+  });
+
+  // Graceful shutdown on SIGTERM (used by Cloud Run container lifecycle)
+  process.on("SIGTERM", () => {
+    console.log("[LaughDry Server] Received SIGTERM, shutting down gracefully...");
+    server.close(() => {
+      console.log("[LaughDry Server] HTTP server closed.");
+      process.exit(0);
+    });
   });
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error("[LaughDry Server] Fatal startup error:", err);
+  process.exit(1);
+});

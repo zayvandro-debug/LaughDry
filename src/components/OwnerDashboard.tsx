@@ -50,7 +50,7 @@ import { auth, db, doc, getDoc } from '../lib/firebase';
 import { Network, Link2, Unlink, Copy } from 'lucide-react';
 import { LaughDryDatabase } from '../data/mockDatabase';
 import { LaundryService } from '../services/laundryService';
-import { Service, Expense, Branch, Order, OrderStatus, AuditLog, WhatsAppTemplate, Customer, SettingsVersion } from '../types';
+import { Service, Expense, Branch, Order, OrderStatus, AuditLog, WhatsAppTemplate, Customer, SettingsVersion, User } from '../types';
 import {
   BarChart,
   Bar,
@@ -447,6 +447,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
   const [resetConfirmInput, setResetConfirmInput] = useState<string>('');
   const [resetRiskAgreed, setResetRiskAgreed] = useState<boolean>(false);
   const [isFactoryResetting, setIsFactoryResetting] = useState<boolean>(false);
+  const [isSyncingFirestore, setIsSyncingFirestore] = useState<boolean>(false);
 
   // Reset trendTablePage when period unit changes
   React.useEffect(() => {
@@ -579,6 +580,18 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     password: 'owner',
     email: 'owner@laughdry.co.id'
   });
+
+  useEffect(() => {
+    const owner = users.find(u => u.role === 'owner');
+    if (owner) {
+      setOwnerForm({
+        name: owner.name || 'Andi Owner',
+        username: owner.username || 'owner',
+        password: owner.password || 'owner',
+        email: owner.email || 'owner@laughdry.co.id'
+      });
+    }
+  }, [users]);
 
   const getOwnerName = () => {
     const owner = users.find(u => u.role === 'owner');
@@ -907,6 +920,15 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
   // Cashier CRUD
   const handleSaveCashier = (e: React.FormEvent) => {
     e.preventDefault();
+    const nameVal = (cashierForm.name || '').trim();
+    const usernameVal = (cashierForm.username || '').trim().toLowerCase().replace(/\s/g, '');
+    const passwordVal = (cashierForm.password || '').trim();
+
+    if (!nameVal || !usernameVal || !passwordVal) {
+      triggerToast("⚠️ Semua kolom nama, username, dan password kasir harus diisi!");
+      return;
+    }
+
     const currentUsers = [...LaughDryDatabase.getUsers()];
 
     if (editingCashierId) {
@@ -914,29 +936,39 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
       if (idx !== -1) {
         currentUsers[idx] = {
           ...currentUsers[idx],
-          name: cashierForm.name,
-          username: cashierForm.username,
-          password: cashierForm.password,
-          branchId: cashierForm.branchId,
+          name: nameVal,
+          username: usernameVal,
+          password: passwordVal,
+          branchId: cashierForm.branchId || 'br-1',
         };
-        LaughDryDatabase.logActivity('usr-1', 'Andi Owner', 'owner', 'USER_UPDATE', `Mengubah akun kasir [${cashierForm.username}]`);
+        try {
+          LaundryService.saveFirestoreUser(currentUsers[idx]).catch(err => {
+            console.warn("Sinkronasi kasir ke Firestore deferred:", err);
+          });
+        } catch (e) {}
+        LaughDryDatabase.logActivity('usr-1', 'Andi Owner', 'owner', 'USER_UPDATE', `Mengubah akun kasir [${usernameVal}]`);
       }
     } else {
-      if (currentUsers.some(u => u.username.toLowerCase() === cashierForm.username.toLowerCase())) {
-        alert("Username kasir sudah digunakan!");
+      if (currentUsers.some(u => (u.username || '').toLowerCase() === usernameVal.toLowerCase())) {
+        triggerToast("⚠️ Username kasir sudah digunakan! Silakan gunakan username lain.");
         return;
       }
-      const newCashier = {
+      const newCashier: User = {
         id: `usr-${Date.now()}`,
-        name: cashierForm.name,
+        name: nameVal,
         role: 'karyawan' as const,
-        email: `${cashierForm.username}@laughdry.co.id`,
-        username: cashierForm.username,
-        password: cashierForm.password,
-        branchId: cashierForm.branchId,
+        email: `${usernameVal}@laughdry.co.id`,
+        username: usernameVal,
+        password: passwordVal,
+        branchId: cashierForm.branchId || 'br-1',
       };
       currentUsers.push(newCashier);
-      LaughDryDatabase.logActivity('usr-1', 'Andi Owner', 'owner', 'USER_CREATE', `Membuat akun kasir baru [${cashierForm.username}] untuk cabang ${cashierForm.branchId}`);
+      try {
+        LaundryService.saveFirestoreUser(newCashier).catch(err => {
+          console.warn("Sinkronasi kasir ke Firestore deferred:", err);
+        });
+      } catch (e) {}
+      LaughDryDatabase.logActivity('usr-1', 'Andi Owner', 'owner', 'USER_CREATE', `Membuat akun kasir baru [${usernameVal}] untuk cabang ${cashierForm.branchId || 'br-1'}`);
     }
 
     LaughDryDatabase.saveUsers(currentUsers);
@@ -945,7 +977,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     setEditingCashierId(null);
     setCashierForm({ name: '', username: '', password: '', branchId: 'br-1' });
     loadDatabaseState();
-    triggerToast("Akun kasir berhasil disimpan!");
+    triggerToast("✅ Akun kasir berhasil disimpan!");
   };
 
   const startEditCashier = (u: any) => {
@@ -961,7 +993,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
 
   const executeDeleteCashier = (id: string) => {
     if (id === 'usr-1') {
-      alert("Tidak dapat menghapus akun owner!");
+      triggerToast("⚠️ Tidak dapat menghapus akun owner!");
       return;
     }
     const userToDel = users.find(u => u.id === id);
@@ -969,46 +1001,66 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     const currentUsers = LaughDryDatabase.getUsers().filter(u => u.id !== id);
     LaughDryDatabase.saveUsers(currentUsers);
     setUsers(currentUsers);
+    try {
+      LaundryService.deleteFirestoreUser(id).catch(err => {
+        console.warn("Hapus kasir di Firestore deferred:", err);
+      });
+    } catch (e) {}
     LaughDryDatabase.logActivity('usr-1', 'Andi Owner', 'owner', 'USER_DELETE', `Menghapus akun kasir [${userToDel.username}]`);
     setDeleteConfirmCashier(null);
     loadDatabaseState();
-    triggerToast("Akun kasir berhasil dihapus!");
+    triggerToast("✅ Akun kasir berhasil dihapus!");
   };
 
   const handleSaveOwner = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!ownerForm.name.trim() || !ownerForm.username.trim() || !ownerForm.password.trim() || !ownerForm.email.trim()) {
-      triggerToast("Semua kolom profil owner harus diisi!");
+    const nameVal = (ownerForm.name || '').trim();
+    const usernameVal = (ownerForm.username || '').trim().toLowerCase().replace(/\s/g, '');
+    const passwordVal = (ownerForm.password || '').trim();
+
+    if (!nameVal || !usernameVal || !passwordVal) {
+      triggerToast("⚠️ Nama lengkap, username, dan password profil owner harus diisi!");
       return;
     }
 
     const currentUsers = [...users];
     const ownerIndex = currentUsers.findIndex(u => u.role === 'owner');
-    
+    const existingOwner = ownerIndex !== -1 ? currentUsers[ownerIndex] : null;
+
+    const emailVal = (ownerForm.email || '').trim() || existingOwner?.email || `${usernameVal}@laughdry.co.id`;
+
+    const updatedOwner: User = {
+      ...(existingOwner || { id: 'usr-1', branchId: 'br-1' }),
+      id: existingOwner ? existingOwner.id : 'usr-1',
+      name: nameVal,
+      username: usernameVal,
+      password: passwordVal,
+      email: emailVal,
+      role: 'owner',
+      branchId: existingOwner?.branchId || 'br-1'
+    };
+
     if (ownerIndex !== -1) {
-      const updatedOwner = {
-        ...currentUsers[ownerIndex],
-        name: ownerForm.name.trim(),
-        username: ownerForm.username.trim().toLowerCase().replace(/\s/g, ''),
-        password: ownerForm.password.trim(),
-        email: ownerForm.email.trim()
-      };
       currentUsers[ownerIndex] = updatedOwner;
-      
-      LaughDryDatabase.saveUsers(currentUsers);
-      setUsers(currentUsers);
-      
-      // Persist to Live Firestore database immediately
-      LaundryService.saveFirestoreUser(updatedOwner).catch(err => {
-        console.error("Gagal sinkronasi owner ke Firestore:", err);
-      });
-      
-      LaughDryDatabase.logActivity('usr-1', updatedOwner.name, 'owner', 'OWNER_PROFILE_UPDATE', `Mengubah profil owner menjadi [${updatedOwner.name}]`);
-      triggerToast("✅ Profil & Hak Akses Owner berhasil disimpan ke Database Live!");
-      setShowEditOwner(false);
     } else {
-      triggerToast("Gagal menemukan akun owner di database!");
+      currentUsers.unshift(updatedOwner);
     }
+    
+    LaughDryDatabase.saveUsers(currentUsers);
+    setUsers(currentUsers);
+    
+    // Also persist to Live Firestore immediately
+    try {
+      LaundryService.saveFirestoreUser(updatedOwner).catch(err => {
+        console.warn("Sinkronasi owner ke Firestore offline/deferred:", err);
+      });
+    } catch (err) {
+      console.warn("Gagal sinkronasi owner ke Firestore:", err);
+    }
+    
+    LaughDryDatabase.logActivity('usr-1', updatedOwner.name, 'owner', 'OWNER_PROFILE_UPDATE', `Mengubah profil owner menjadi [${updatedOwner.name}]`);
+    triggerToast("✅ Profil & Hak Akses Owner berhasil disimpan ke Database Live!");
+    setShowEditOwner(false);
   };
 
   const handleTogglePermission = (employeeId: string, permission: string) => {
@@ -2810,10 +2862,8 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
 
   // Helper for physically printing monthly report
   const handlePrintMonthlyReport = () => {
-    const confirmPrint = window.confirm("Konfirmasi Cetak Laporan:\\nApakah Anda ingin mengirimkan laporan transaksi bulanan ke antrean printer kasir fisik?");
-    if (!confirmPrint) return;
-
     try {
+      triggerToast("🖨️ Mengirimkan laporan transaksi bulanan ke printer...");
       const iframe = document.createElement('iframe');
       iframe.style.position = 'fixed';
       iframe.style.bottom = '0';
@@ -5043,20 +5093,29 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
             <div className="flex flex-col sm:flex-row gap-2 self-stretch md:self-auto">
               <button
                 type="button"
+                disabled={isSyncingFirestore}
                 onClick={async () => {
-                  if (confirm("Apakah Anda yakin ingin mensinkronkan ulang semua master data dari Firestore sekarang?")) {
-                    try {
-                      await LaughDryDatabase.syncFromFirestore();
-                      loadDatabaseState();
-                      triggerToast("🔄 Sinkronasi database live berhasil!");
-                    } catch(e) {
-                      triggerToast("❌ Gagal mengunduh sync dari database.");
-                    }
+                  if (isSyncingFirestore) return;
+                  setIsSyncingFirestore(true);
+                  triggerToast("⏳ Sedang menyelaraskan data dengan Cloud Firestore...");
+                  try {
+                    await LaughDryDatabase.syncFromFirestore();
+                    await loadDatabaseState();
+                    triggerToast("✅ Sinkronasi database live Firestore berhasil diperbarui!");
+                  } catch(e: any) {
+                    console.error("Sync Firestore error:", e);
+                    triggerToast("❌ Gagal mengunduh sinkronasi dari database.");
+                  } finally {
+                    setIsSyncingFirestore(false);
                   }
                 }}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-[11px] rounded-xl shadow-lg shadow-indigo-600/20 active:scale-95 transition flex items-center justify-center gap-1.5 cursor-pointer"
+                className={`px-4 py-2 text-white font-extrabold text-[11px] rounded-xl shadow-lg shadow-indigo-600/20 active:scale-95 transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                  isSyncingFirestore ? 'bg-indigo-800 opacity-80 cursor-wait' : 'bg-indigo-600 hover:bg-indigo-500'
+                }`}
+                title="Tarik data master dan transaksi terbaru langsung dari Cloud Firestore"
               >
-                <span>🔄 Sync Live Firestore</span>
+                <span className={isSyncingFirestore ? "animate-spin inline-block" : ""}>🔄</span>
+                <span>{isSyncingFirestore ? 'Sedang Sinkronisasi...' : 'Sync Live Firestore'}</span>
               </button>
             </div>
           </div>
@@ -5496,15 +5555,8 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
             </div>
             <button
               type="button"
-              onClick={async () => {
-                if (confirm("🚨 PERINGATAN: Seluruh data order, pelanggan, pengeluaran &amp; absensi simulasi akan DIHAPUS PERMANEN dari Firebase Firestore untuk live rilis produksi. Apakah Anda yakin?")) {
-                  try {
-                    await executeResetDatabase();
-                    triggerToast("🧹 Database bersih! Berhasil masuk ke Mode Rilis Produksi (Clean Slate).");
-                  } catch (e) {
-                    triggerToast("❌ Gagal membersihkan data live.");
-                  }
-                }
+              onClick={() => {
+                setShowResetDbConfirm(true);
               }}
               className="px-5 py-3 md:py-2.5 bg-red-650 hover:bg-rose-600 text-white font-black text-xs rounded-xl shadow-lg shadow-red-650/25 active:scale-95 transition flex items-center justify-center gap-2 whitespace-nowrap cursor-pointer hover:border hover:border-red-500"
             >
@@ -7758,11 +7810,12 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
               {!showEditOwner && (
                 <button
                   onClick={() => {
-                    const owner = users.find(u => u.role === 'owner') || { name: 'Andi Owner', username: 'owner', password: 'owner' };
+                    const owner = users.find(u => u.role === 'owner') || { name: 'Andi Owner', username: 'owner', password: 'owner', email: 'owner@laughdry.co.id' };
                     setOwnerForm({
-                      name: owner.name,
-                      username: owner.username,
-                      password: owner.password || 'owner'
+                      name: owner.name || 'Andi Owner',
+                      username: owner.username || 'owner',
+                      password: owner.password || 'owner',
+                      email: owner.email || 'owner@laughdry.co.id'
                     });
                     setShowEditOwner(true);
                     setShowAddCashier(false);
@@ -7794,12 +7847,12 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
             <form onSubmit={handleSaveOwner} className="bg-slate-950 text-slate-100 p-5 rounded-2xl border border-slate-800 shadow-xl space-y-4 text-xs font-sans animate-scaleIn">
               <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
                 <h4 className="font-bold text-sky-400 text-sm flex items-center gap-2">
-                  <span>⚙️ Pengaturan Profil & Kredensial Database Owner</span>
+                  <span>⚙️ Pengaturan Profil &amp; Kredensial Database Owner</span>
                 </h4>
                 <button
                   type="button"
                   onClick={() => setShowEditOwner(false)}
-                  className="p-1 px-2.5 bg-slate-900 hover:bg-slate-800 text-slate-400 text-[10px] rounded transition"
+                  className="p-1 px-2.5 bg-slate-900 hover:bg-slate-800 text-slate-400 text-[10px] rounded transition cursor-pointer"
                 >
                   ✕ Batal
                 </button>
@@ -7809,7 +7862,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                 Ubah informasi profil owner utama yang terdaftar dalam database pengguna. Perubahan nama akan otomatis menyesuaikan semua label izin/hak akses, riwayat aktivitas, serta otorisasi di seluruh modul kasir laundry.
               </p>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="space-y-1">
                   <label className="text-slate-300 font-semibold block">Nama Lengkap Owner:</label>
                   <input
@@ -7833,6 +7886,17 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                   />
                 </div>
                 <div className="space-y-1">
+                  <label className="text-slate-300 font-semibold block">E-mail Terdaftar:</label>
+                  <input
+                    type="email"
+                    required
+                    value={ownerForm.email}
+                    onChange={(e) => setOwnerForm({ ...ownerForm, email: e.target.value })}
+                    placeholder="owner@laughdry.co.id"
+                    className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white focus:border-sky-500 focus:outline-none"
+                  />
+                </div>
+                <div className="space-y-1">
                   <label className="text-slate-300 font-semibold block">Password Akun:</label>
                   <input
                     type="password"
@@ -7849,13 +7913,13 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                 <button
                   type="button"
                   onClick={() => setShowEditOwner(false)}
-                  className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-xl font-semibold transition"
+                  className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-xl font-semibold transition cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-sky-400 hover:bg-sky-500 text-slate-950 font-extrabold rounded-xl transition"
+                  className="px-4 py-2 bg-sky-400 hover:bg-sky-500 text-slate-950 font-extrabold rounded-xl transition cursor-pointer active:scale-95 shadow-sm"
                 >
                   Simpan Profil Owner
                 </button>
