@@ -16,7 +16,9 @@ import {
   BookOpen,
   Info,
   Sun,
-  Moon
+  Moon,
+  ArrowLeftRight,
+  Users
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Capacitor } from '@capacitor/core';
@@ -27,6 +29,7 @@ import OwnerDashboard from './components/OwnerDashboard';
 import EmployeeConsole from './components/EmployeeConsole';
 import CustomerTracking from './components/CustomerTracking';
 import PRDDocument from './components/PRDDocument';
+import RoleSelectionScreen, { OwnerRoleIllustration, CashierRoleIllustration } from './components/RoleSelectionScreen';
 import logoImg from './assets/images/logo_laughdry_1781839107009.jpg';
 import { LaughDryDatabase } from './data/mockDatabase';
 
@@ -136,6 +139,21 @@ export default function App() {
     }
     const isApp = Capacitor.isNativePlatform() || window.location.search.includes('platform=android');
     return isApp ? 'karyawan' : 'owner';
+  });
+
+  // User Role Selection State: after successful email login, directs to user options (Owner vs Kasir)
+  const [selectedRole, setSelectedRole] = useState<'owner' | 'karyawan' | null>(() => {
+    const queryParams = new URLSearchParams(window.location.search);
+    if (queryParams.has('phone') || queryParams.has('invoice') || queryParams.get('owner')) {
+      return null;
+    }
+    if (typeof window !== 'undefined') {
+      const saved = sessionStorage.getItem('laughdry_active_role');
+      if (saved === 'owner' || saved === 'karyawan') {
+        return saved;
+      }
+    }
+    return null;
   });
   const [currentTime, setCurrentTime] = useState<string>('');
   const [isSyncing, setIsSyncing] = useState<boolean>(true);
@@ -610,7 +628,30 @@ export default function App() {
   }
 
   if (!firebaseUser && activeConsole !== 'pelanggan') {
-    return <FirebaseGate onSignedIn={(user) => setFirebaseUser(user)} />;
+    return (
+      <FirebaseGate 
+        onSignedIn={(user) => {
+          setFirebaseUser(user);
+          setSelectedRole(null);
+          sessionStorage.removeItem('laughdry_active_role');
+        }} 
+      />
+    );
+  }
+
+  // Setelah berhasil login menggunakan email, tampilan mengarahkan ke opsi user (Owner vs Kasir)
+  if (firebaseUser && !selectedRole && activeConsole !== 'pelanggan') {
+    return (
+      <RoleSelectionScreen
+        userEmail={firebaseUser.email || 'Pengguna Terverifikasi'}
+        onSelectRole={(role) => {
+          setSelectedRole(role);
+          setActiveConsole(role);
+          sessionStorage.setItem('laughdry_active_role', role);
+        }}
+        onSignOut={() => setShowSignOutConfirmModal(true)}
+      />
+    );
   }
 
   return (
@@ -849,6 +890,22 @@ export default function App() {
                 <span className="font-mono text-[9px] md:text-[10.5px] font-bold text-white tracking-normal md:tracking-widest">{currentTime}</span>
               </div>
 
+              {/* Switch Role Option Button */}
+              {firebaseUser && (
+                <button
+                  onClick={() => {
+                    setSelectedRole(null);
+                    sessionStorage.removeItem('laughdry_active_role');
+                  }}
+                  className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-sky-300 font-bold text-[9px] md:text-[10px] px-2.5 py-1.5 rounded-xl border border-sky-500/25 cursor-pointer transition select-none"
+                  title="Pilih Opsi Pengguna: Owner atau Kasir"
+                  id="switch-role-option-header-btn"
+                >
+                  <ArrowLeftRight className="w-3 h-3 text-sky-400" />
+                  <span className="hidden sm:inline">Opsi User</span>
+                </button>
+              )}
+
               {/* Sign Out Button */}
               {firebaseUser && (
                 <button
@@ -892,34 +949,56 @@ export default function App() {
 
           {/* Action Selector Grid Tab */}
           <div className="flex items-center gap-1.5 md:gap-2 shrink-0">
+            {/* Opsi User / Ganti Peran Button */}
+            <button
+              onClick={() => {
+                setSelectedRole(null);
+                sessionStorage.removeItem('laughdry_active_role');
+              }}
+              className="flex items-center justify-center gap-1.5 py-1.5 px-2 md:py-2 md:px-3 rounded-xl text-[10.5px] md:text-xs font-bold transition-all bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200"
+              title="Kembali ke Layar Pilihan Opsi User (Owner / Kasir)"
+              id="role-switch-choose-options"
+            >
+              <ArrowLeftRight className="w-3.5 h-3.5 text-sky-600" />
+              <span className="hidden sm:inline">Opsi User</span>
+            </button>
+
             {/* Owner Button */}
             <button
-              onClick={() => setActiveConsole('owner')}
-              className={`flex items-center justify-center gap-1 md:gap-2 p-2 md:py-2 md:px-3.5 rounded-xl text-[10.5px] md:text-xs font-bold transition-all ${
+              onClick={() => {
+                setActiveConsole('owner');
+                setSelectedRole('owner');
+                sessionStorage.setItem('laughdry_active_role', 'owner');
+              }}
+              className={`flex items-center justify-center gap-1.5 md:gap-2 p-1.5 md:py-1.5 md:px-3.5 rounded-xl text-[10.5px] md:text-xs font-bold transition-all ${
                 activeConsole === 'owner'
                   ? 'bg-[#1E293B] text-[#38BDF8] shadow-md shadow-[#38BDF8]/10 scale-[1.02]'
                   : 'bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100'
               }`}
               id="role-switch-owner"
-              title="Dasbor Owner"
+              title="Opsi Owner: Orang dengan buku catatan dan alat tulis"
             >
-              <LayoutDashboard className="w-4 h-4 md:w-4 md:h-4" />
+              <OwnerRoleIllustration className="w-5 h-5 shrink-0 rounded-full" />
               <span className="hidden md:inline">Dasbor Owner</span>
             </button>
 
             {/* Employee/Kasir Button */}
             <button
-              onClick={() => setActiveConsole('karyawan')}
-              className={`flex items-center justify-center gap-1 md:gap-2 p-2 md:py-2 md:px-3.5 rounded-xl text-[10.5px] md:text-xs font-bold transition-all ${
+              onClick={() => {
+                setActiveConsole('karyawan');
+                setSelectedRole('karyawan');
+                sessionStorage.setItem('laughdry_active_role', 'karyawan');
+              }}
+              className={`flex items-center justify-center gap-1.5 md:gap-2 p-1.5 md:py-1.5 md:px-3.5 rounded-xl text-[10.5px] md:text-xs font-bold transition-all ${
                 activeConsole === 'karyawan'
                   ? 'bg-[#1E293B] text-[#38BDF8] shadow-md shadow-[#38BDF8]/10 scale-[1.02]'
                   : 'bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100'
               }`}
               id="role-switch-employee"
-              title="POS Karyawan"
+              title="Opsi Kasir: Orang dengan mesin kasir dan tumpukan laundry"
             >
-              <Smartphone className="w-4 h-4 md:w-4 md:h-4" />
-              <span className="hidden md:inline">POS Karyawan</span>
+              <CashierRoleIllustration className="w-5 h-5 shrink-0 rounded-full" />
+              <span className="hidden md:inline">POS Kasir</span>
             </button>
 
             {/* Customer Tracking Button - Web only */}
@@ -1065,10 +1144,24 @@ export default function App() {
 
                     <button
                       type="submit"
-                      className="w-full py-3 bg-slate-900 text-white rounded-xl text-xs font-extrabold hover:bg-slate-800 transition shadow-lg active:scale-[0.98]"
+                      className="w-full py-3 bg-slate-900 text-white rounded-xl text-xs font-extrabold hover:bg-slate-800 transition shadow-lg active:scale-[0.98] cursor-pointer"
                     >
                       Log In Sebagai Owner ➔
                     </button>
+
+                    <div className="pt-2 text-center">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedRole(null);
+                          sessionStorage.removeItem('laughdry_active_role');
+                        }}
+                        className="text-[11px] text-slate-500 hover:text-slate-800 font-bold transition inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <ArrowLeftRight className="w-3 h-3 text-sky-600" />
+                        <span>Ganti Opsi Pengguna (Pilih Kasir)</span>
+                      </button>
+                    </div>
                   </form>
                 </div>
               )}
@@ -1140,8 +1233,19 @@ export default function App() {
                       Mulai Tugas Shift Kasir ➔
                     </button>
                     
-                    <div className="text-center">
+                    <div className="flex flex-col items-center gap-1.5 pt-1">
                       <span className="inline-block text-[9px] text-sky-600 bg-sky-50/70 border border-sky-100/50 px-2 py-0.5 rounded font-black uppercase tracking-wider">rian / rian123</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedRole(null);
+                          sessionStorage.removeItem('laughdry_active_role');
+                        }}
+                        className="text-[11px] text-slate-500 hover:text-slate-800 font-bold transition inline-flex items-center gap-1 cursor-pointer pt-1"
+                      >
+                        <ArrowLeftRight className="w-3 h-3 text-sky-600" />
+                        <span>Ganti Opsi Pengguna (Pilih Owner)</span>
+                      </button>
                     </div>
                   </form>
                 </div>
@@ -1210,6 +1314,7 @@ export default function App() {
                   localStorage.removeItem('laughdry_skip_demo_seeds');
                   localStorage.removeItem('laughdry_owner_name_registered');
                   localStorage.removeItem('laughdry_firebase_quota_exceeded_timestamp');
+                  sessionStorage.removeItem('laughdry_active_role');
                   LaughDryDatabase.resetToSeed();
                   setShowSignOutConfirmModal(false);
                   window.location.reload();

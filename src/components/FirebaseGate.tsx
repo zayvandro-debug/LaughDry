@@ -272,11 +272,12 @@ export default function FirebaseGate({ onSignedIn }: FirebaseGateProps) {
         
         localStorage.removeItem('laughdry_firebase_disabled');
         localStorage.setItem('laughdry_firebase_uid', result.user.uid);
+        sessionStorage.removeItem('laughdry_active_role');
         await registerEmailMapping(result.user);
-        setSuccessMsg('Autentikasi akun Gmail berhasil! Membuka gerbang utama...');
+        setSuccessMsg('Autentikasi akun Gmail berhasil! Mengarahkan ke opsi pengguna (Owner / Kasir)...');
         setTimeout(() => {
           onSignedIn(result.user);
-        }, 1200);
+        }, 1000);
       }
     } catch (err: any) {
       console.warn("Google Sign-In failed/blocked:", err);
@@ -446,11 +447,12 @@ export default function FirebaseGate({ onSignedIn }: FirebaseGateProps) {
         
         localStorage.removeItem('laughdry_firebase_disabled');
         localStorage.setItem('laughdry_firebase_uid', userCredential.user.uid);
+        sessionStorage.removeItem('laughdry_active_role');
         await registerEmailMapping(userCredential.user);
-        setSuccessMsg('Autentikasi berhasil! Selamat datang kembali...');
+        setSuccessMsg('Autentikasi berhasil! Mengarahkan ke opsi pengguna (Owner / Kasir)...');
         setTimeout(() => {
           onSignedIn(userCredential.user);
-        }, 1200);
+        }, 1000);
       }
     } catch (err: any) {
       console.warn("Firebase auth error (non-fatal info):", err);

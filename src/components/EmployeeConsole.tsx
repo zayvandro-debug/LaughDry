@@ -818,8 +818,8 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     setShowStampCardModal(false);
   };
 
-  // Catalog filter by category tab (Kiloan / Satuan)
-  const [serviceCategoryTab, setServiceCategoryTab] = useState<'all' | 'kiloan' | 'satuan'>('kiloan');
+  // Catalog filter by category tab (Kiloan / Satuan / Antar Jemput)
+  const [serviceCategoryTab, setServiceCategoryTab] = useState<'all' | 'kiloan' | 'satuan' | 'antar_jemput'>('kiloan');
 
   // Edit in-progress order states
   const [showEditOrderModal, setShowEditOrderModal] = useState(false);
@@ -1921,6 +1921,8 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     } else {
       const formattedName = service.category === 'kiloan'
         ? `${service.name}-${service.promiseName || 'Reguler'}`
+        : (service.category === 'antar_jemput' || service.category === 'antar jemput')
+        ? `${service.name}${service.promiseName ? ` (${service.promiseName})` : ''}`
         : `${service.name}-${service.promiseName || 'Sedang'}`;
 
       const newItem: OrderItem = {
@@ -3000,29 +3002,29 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
             
             {/* Tabbed Navigation for Service Categories */}
             <div className="flex border-b border-slate-150 pb-1 gap-1">
-              {(['kiloan', 'satuan'] as const).map((tab) => (
+              {(['kiloan', 'satuan', 'antar_jemput'] as const).map((tab) => (
                 <button
                   key={tab}
                   type="button"
                   onClick={() => setServiceCategoryTab(tab)}
-                  className={`flex-1 py-2 px-3 text-center border-b-2 text-[11px] font-extrabold uppercase tracking-wider transition cursor-pointer ${
+                  className={`flex-1 py-2 px-2 text-center border-b-2 text-[11px] font-extrabold uppercase tracking-wider transition cursor-pointer whitespace-nowrap ${
                     serviceCategoryTab === tab
                       ? 'border-sky-500 text-sky-700 font-black'
                       : 'border-transparent text-slate-400 hover:text-slate-600 hover:border-slate-200'
                   }`}
                 >
-                  {tab === 'kiloan' ? '🧺 Jasa Kiloan' : '🧥 Jasa Satuan'}
+                  {tab === 'kiloan' ? '🧺 Jasa Kiloan' : tab === 'satuan' ? '🧥 Jasa Satuan' : '🛵 Antar Jemput'}
                 </button>
               ))}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-2 max-h-56 overflow-y-auto pt-1">
               {(() => {
-                const displayedServices = services.filter(s => s.isActive && s.category === serviceCategoryTab);
+                const displayedServices = services.filter(s => s.isActive && (s.category === serviceCategoryTab || (serviceCategoryTab === 'antar_jemput' && s.category === 'antar jemput')));
                 if (displayedServices.length === 0) {
                   return (
                     <div className="col-span-2 text-center p-6 text-slate-400 text-[11px] font-bold bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
-                      <p>🚫 Belum ada katalog layanan laundry {serviceCategoryTab !== 'all' ? `kategori ${serviceCategoryTab}` : ''} aktif di sistem.</p>
+                      <p>🚫 Belum ada katalog layanan laundry {serviceCategoryTab !== 'all' ? `kategori ${serviceCategoryTab === 'antar_jemput' ? 'Antar Jemput' : serviceCategoryTab}` : ''} aktif di sistem.</p>
                       <p className="text-[9.5px] font-normal text-slate-400 mt-1 font-sans">Silakan masuk ke Dashboard Owner untuk mengelola daftar jasa!</p>
                     </div>
                   );
@@ -3064,7 +3066,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                           ✨ {groupName}
                         </span>
                         <span className="text-[10px] text-slate-400 font-normal mt-0.5">
-                          {groupItems.length} Janji Penyelesaian ({firstItem.category === 'kiloan' ? 'Kiloan' : 'Satuan'})
+                          {groupItems.length} Pilihan ({firstItem.category === 'kiloan' ? 'Kiloan' : (firstItem.category === 'antar_jemput' || firstItem.category === 'antar jemput' ? 'Antar Jemput' : 'Satuan')})
                         </span>
                       </div>
                       <span className="text-[9.5px] bg-sky-100/65 text-sky-850 group-hover:bg-sky-200 group-hover:text-sky-900 px-2 py-1 rounded-lg transition font-black tracking-tight shrink-0">
@@ -6515,6 +6517,16 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                     Layanan laundry satuan tidak membutuhkan janji estimasi selesai manual per item, melainkan disesuaikan terpusat pada antrean cabang.
                   </p>
                 </div>
+              ) : (selectedCatalogService.category === 'antar_jemput' || selectedCatalogService.category === 'antar jemput') ? (
+                <div className="bg-purple-50/50 p-3 rounded-2xl border border-purple-100 space-y-1">
+                  <span className="text-purple-700 font-bold text-[8px] uppercase tracking-wide block">1. Jenis Layanan Antar Jemput</span>
+                  <p className="font-extrabold text-purple-900 text-[11.5px] leading-snug flex items-center gap-1.5">
+                    <span>🛵 Layanan Kurir Antar Jemput</span>
+                  </p>
+                  <p className="text-[9.5px] text-purple-600 font-normal leading-normal">
+                    Layanan kurir penjemputan atau pengantaran pakaian laundry pelanggan langsung ke lokasi.
+                  </p>
+                </div>
               ) : (
                 <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 space-y-1">
                   <span className="text-slate-400 font-bold text-[8px] uppercase tracking-wide block">1. Jenis Layanan & Waktu Penyelesaian</span>
@@ -6533,10 +6545,10 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                 <span className="text-slate-400 font-bold text-[8px] uppercase tracking-wide block">2. Ukuran Barang & Tipe Satuan</span>
                 <p className="font-extrabold text-[#0F172A] text-[11.5px] leading-snug uppercase tracking-wide flex items-center gap-1.5">
                   <span>📦 Per {selectedCatalogService.unit}</span>
-                  <span className="text-slate-400 font-normal font-mono">({selectedCatalogService.category === 'kiloan' ? 'Kiloan / Berat' : 'Satuan / Pcs'})</span>
+                  <span className="text-slate-400 font-normal font-mono">({selectedCatalogService.category === 'kiloan' ? 'Kiloan / Berat' : (selectedCatalogService.category === 'antar_jemput' || selectedCatalogService.category === 'antar jemput' ? 'Antar Jemput' : 'Satuan / Pcs')})</span>
                 </p>
                 <p className="text-[9.5px] text-slate-400 font-normal leading-normal">
-                  Satuan ukuran {selectedCatalogService.unit} digunakan sebagai pengali timbangan fisik pakaian kotor saat didaftarkan kasir karyawan.
+                  Satuan ukuran {selectedCatalogService.unit} digunakan sebagai pengali jumlah transaksi saat didaftarkan kasir karyawan.
                 </p>
               </div>
 
@@ -6851,6 +6863,10 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                             <span className="bg-rose-50 text-rose-700 font-black px-1.5 py-0.5 rounded border border-rose-150 text-[8.5px] uppercase">
                               📏 Ukuran {pName}
                             </span>
+                          ) : (variant.category === 'antar_jemput' || variant.category === 'antar jemput') ? (
+                            <span className="bg-purple-50 text-purple-700 font-black px-1.5 py-0.5 rounded border border-purple-150 text-[8.5px] uppercase">
+                              🛵 {pName || 'Antar Jemput'}
+                            </span>
                           ) : (
                             <>
                               <span className="font-bold text-[#0F172A] text-xs truncate">{pName}</span>
@@ -6862,7 +6878,9 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                         </div>
                         {/* Category & measurement info */}
                         <div className="text-[9px] text-slate-400 font-medium mt-0.5 flex items-center gap-1 flex-wrap">
-                          <span className="capitalize bg-slate-100 px-1 rounded text-slate-500">{variant.category}</span>
+                          <span className="capitalize bg-slate-100 px-1 rounded text-slate-500">
+                            {variant.category === 'antar_jemput' || variant.category === 'antar jemput' ? 'Antar Jemput' : variant.category}
+                          </span>
                           <span>&bull;</span>
                           <span>Per {variant.unit}</span>
                         </div>

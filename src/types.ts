@@ -26,9 +26,9 @@ export interface Branch {
 export interface Service {
   id: string;
   name: string;
-  category: 'kiloan' | 'satuan';
+  category: 'kiloan' | 'satuan' | 'antar_jemput' | 'antar jemput';
   price: number;
-  unit: string; // 'kg' for kiloan, 'pcs' / 'sheet' etc. for satuan
+  unit: string; // 'kg' for kiloan, 'pcs' for satuan, 'trip'/'km' for antar jemput
   estimateHours: number; // Janji penyelesaian (contoh: 48 jam untuk reguler, 6 jam ekspres)
   isActive: boolean;
   workflowSteps?: string[]; // Custom workflow steps, e.g. ['Antri', 'Dicuci', 'Disetrika/Dilipat', 'Dikemas', 'Siap Diambil', 'Selesai']

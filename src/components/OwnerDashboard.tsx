@@ -387,7 +387,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [serviceForm, setServiceForm] = useState({
     name: '',
-    category: 'kiloan' as 'kiloan' | 'satuan',
+    category: 'kiloan' as 'kiloan' | 'satuan' | 'antar_jemput',
     price: 0,
     unit: 'kg',
     estimateHours: 48,
@@ -428,7 +428,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
   const [trendType, setTrendType] = useState<'day' | 'week' | 'month'>('month');
   const [trendTablePage, setTrendTablePage] = useState<number>(1);
   const [servicesInnerTab, setServicesInnerTab] = useState<'rates' | 'perfumes'>('rates');
-  const [ratesTab, setRatesTab] = useState<'kiloan' | 'satuan'>('kiloan');
+  const [ratesTab, setRatesTab] = useState<'kiloan' | 'satuan' | 'antar_jemput'>('kiloan');
   const [settingsInnerTab, setSettingsInnerTab] = useState<'general' | 'receipt' | 'wa' | 'data'>('general');
 
   // Pagination states for Owner Dashboard tables
@@ -732,12 +732,15 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     const currentServices = [...services];
     
     const isSatuan = serviceForm.category === 'satuan';
-    const computedHours = isSatuan ? 0 : (serviceForm.promiseDurationUnit === 'Hari' 
+    const isAntarJemput = serviceForm.category === 'antar_jemput' || serviceForm.category === 'antar jemput';
+    const computedHours = (isSatuan || isAntarJemput) ? 0 : (serviceForm.promiseDurationUnit === 'Hari' 
       ? Number(serviceForm.promiseDurationVal) * 24 
       : Number(serviceForm.promiseDurationVal));
 
-    const durationText = isSatuan ? '' : `${serviceForm.promiseDurationVal} ${serviceForm.promiseDurationUnit}`;
-    const finalPromiseName = isSatuan ? serviceForm.sizeOption : serviceForm.promiseName;
+    const durationText = (isSatuan || isAntarJemput) ? '' : `${serviceForm.promiseDurationVal} ${serviceForm.promiseDurationUnit}`;
+    const finalPromiseName = isSatuan 
+      ? serviceForm.sizeOption 
+      : (isAntarJemput ? (serviceForm.promiseName || 'Antar Jemput') : serviceForm.promiseName);
 
     if (editingServiceId) {
       const idx = currentServices.findIndex(s => s.id === editingServiceId);
@@ -823,7 +826,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
       unit: srv.unit,
       estimateHours: srv.estimateHours,
       workflowSteps: srv.workflowSteps || ['Antri', 'Dicuci', 'Disetrika/Dilipat', 'Dikemas', 'Siap Diambil', 'Selesai'],
-      promiseName: srv.category === 'satuan' ? 'Reguler' : (srv.promiseName || 'Reguler'),
+      promiseName: srv.category === 'satuan' ? 'Reguler' : (srv.promiseName || (srv.category === 'antar_jemput' || srv.category === 'antar jemput' ? 'Antar Jemput' : 'Reguler')),
       promiseDurationVal: initialVal,
       promiseDurationUnit: initialUnit,
       sizeOption: srv.category === 'satuan' ? (srv.promiseName || 'Sedang') : 'Sedang'
@@ -4055,13 +4058,16 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                     setServiceForm({ 
                       name: '', 
                       category: ratesTab, 
-                      price: 0, 
-                      unit: ratesTab === 'kiloan' ? 'kg' : 'pcs', 
-                      estimateHours: 48, 
-                      workflowSteps: ['Antri', 'Dicuci', 'Disetrika/Dilipat', 'Dikemas', 'Siap Diambil', 'Selesai'],
-                      promiseName: 'Reguler',
+                      price: ratesTab === 'antar_jemput' ? 10000 : (ratesTab === 'satuan' ? 15000 : 8000), 
+                      unit: ratesTab === 'antar_jemput' ? 'trip' : (ratesTab === 'satuan' ? 'pcs' : 'kg'), 
+                      estimateHours: ratesTab === 'antar_jemput' ? 0 : 48, 
+                      workflowSteps: ratesTab === 'antar_jemput' 
+                        ? ['Penjemputan', 'Proses', 'Pengantaran', 'Selesai']
+                        : ['Antri', 'Dicuci', 'Disetrika/Dilipat', 'Dikemas', 'Siap Diambil', 'Selesai'],
+                      promiseName: ratesTab === 'antar_jemput' ? 'Antar Jemput' : 'Reguler',
                       promiseDurationVal: 2,
-                      promiseDurationUnit: 'Hari'
+                      promiseDurationUnit: 'Hari',
+                      sizeOption: 'Sedang'
                     });
                     setShowAddService(true);
                   }}
@@ -4072,12 +4078,12 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                 </button>
               </div>
 
-              {/* Tab Selector untuk Kiloan vs Satuan */}
-              <div className="flex border-b border-slate-200 pb-0.5" id="rates-category-tabs">
+              {/* Tab Selector untuk Kiloan vs Satuan vs Antar Jemput */}
+              <div className="flex border-b border-slate-200 pb-0.5 overflow-x-auto" id="rates-category-tabs">
                 <button
                   type="button"
                   onClick={() => setRatesTab('kiloan')}
-                  className={`px-4 py-2 text-xs font-bold transition-all cursor-pointer border-b-2 -mb-[2px] ${
+                  className={`px-4 py-2 text-xs font-bold transition-all cursor-pointer border-b-2 -mb-[2px] whitespace-nowrap ${
                     ratesTab === 'kiloan'
                       ? 'border-emerald-600 text-emerald-800 font-black'
                       : 'border-transparent text-slate-400 hover:text-slate-600'
@@ -4089,7 +4095,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                 <button
                   type="button"
                   onClick={() => setRatesTab('satuan')}
-                  className={`px-4 py-2 text-xs font-bold transition-all cursor-pointer border-b-2 -mb-[2px] ${
+                  className={`px-4 py-2 text-xs font-bold transition-all cursor-pointer border-b-2 -mb-[2px] whitespace-nowrap ${
                     ratesTab === 'satuan'
                       ? 'border-emerald-600 text-emerald-800 font-black'
                       : 'border-transparent text-slate-400 hover:text-slate-600'
@@ -4097,6 +4103,18 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                   id="tab-rates-satuan"
                 >
                   🧥 Layanan Satuan
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRatesTab('antar_jemput')}
+                  className={`px-4 py-2 text-xs font-bold transition-all cursor-pointer border-b-2 -mb-[2px] whitespace-nowrap ${
+                    ratesTab === 'antar_jemput'
+                      ? 'border-emerald-600 text-emerald-800 font-black'
+                      : 'border-transparent text-slate-400 hover:text-slate-600'
+                  }`}
+                  id="tab-rates-antar-jemput"
+                >
+                  🛵 Layanan Antar Jemput
                 </button>
               </div>
 
@@ -4114,7 +4132,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                     required
                     value={serviceForm.name}
                     onChange={(e) => setServiceForm({ ...serviceForm, name: e.target.value })}
-                    placeholder="Contoh: Bed Cover Large (Satuan)"
+                    placeholder={serviceForm.category === 'antar_jemput' ? 'Contoh: Ongkir Antar Jemput Wilayah Kota' : 'Contoh: Bed Cover Large (Satuan)'}
                     className="w-full bg-white border border-slate-200 rounded-lg p-2.5 focus:border-emerald-600 focus:outline-none"
                     id="service-name-input"
                   />
@@ -4128,7 +4146,13 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                     className="w-full bg-white border border-slate-200 hover:border-slate-350 rounded-lg p-2.5 text-left focus:outline-none transition cursor-pointer flex justify-between items-center text-xs text-slate-800 font-bold"
                     id="service-category-input-btn"
                   >
-                    <span>{serviceForm.category === 'kiloan' ? '🧺 Laundry Kiloan (Berat kg)' : '🧥 Laundry Satuan (Per Biji)'}</span>
+                    <span>
+                      {serviceForm.category === 'kiloan' 
+                        ? '🧺 Laundry Kiloan (Berat kg)' 
+                        : serviceForm.category === 'satuan' 
+                        ? '🧥 Laundry Satuan (Per Biji)' 
+                        : '🛵 Antar Jemput (Per Trip/KM)'}
+                    </span>
                     <span className="text-slate-400 text-[10px]">▼ Ubah</span>
                   </button>
                 </div>
@@ -4155,7 +4179,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                     className="w-full bg-white border border-slate-200 hover:border-slate-350 rounded-lg p-2.5 text-left focus:outline-none transition cursor-pointer flex justify-between items-center text-xs text-slate-800 font-bold"
                     id="service-unit-input-btn"
                   >
-                    <span>📦 Per {serviceForm.unit || 'kg'} ({serviceForm.category === 'kiloan' ? 'Kiloan' : 'Satuan'})</span>
+                    <span>📦 Per {serviceForm.unit || (serviceForm.category === 'antar_jemput' ? 'trip' : serviceForm.category === 'satuan' ? 'pcs' : 'kg')} ({serviceForm.category === 'kiloan' ? 'Kiloan' : serviceForm.category === 'satuan' ? 'Satuan' : 'Antar Jemput'})</span>
                     <span className="text-slate-400 text-[10px]">▼ Ubah</span>
                   </button>
                 </div>
@@ -4173,6 +4197,21 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                       <span>📏 Ukuran {serviceForm.sizeOption || 'Sedang'}</span>
                       <span className="text-slate-400 text-[10px]">▼ Ubah</span>
                     </button>
+                  </div>
+                ) : serviceForm.category === 'antar_jemput' ? (
+                  <div className="space-y-2 md:col-span-2 bg-purple-50/50 p-3.5 rounded-2xl border border-purple-200/50">
+                    <label className="text-purple-800 font-bold block text-xs">🛵 Opsi / Keterangan Antar Jemput:</label>
+                    <input
+                      type="text"
+                      value={serviceForm.promiseName}
+                      onChange={(e) => setServiceForm({ ...serviceForm, promiseName: e.target.value })}
+                      placeholder="Contoh: Dalam Kota, Luar Kota, Reguler Pick-up"
+                      className="w-full bg-white border border-purple-200 rounded-lg p-2.5 focus:border-purple-600 focus:outline-none text-xs"
+                      id="service-promise-name-input"
+                    />
+                    <p className="text-[10px] text-slate-500">
+                      Tarif dihitung per satuan ukuran yang Anda pilih (contoh: <strong>per trip</strong>, <strong>per km</strong>, atau <strong>per order</strong>).
+                    </p>
                   </div>
                 ) : (
                   <>
@@ -4307,8 +4346,14 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                   {/* Service Group Header */}
                   <div className="p-5 select-none space-y-3">
                     <div className="flex items-center justify-between gap-2">
-                      <span className={`px-2 py-0.5 rounded-full font-extrabold text-[9px] uppercase tracking-wider ${representative.category === 'kiloan' ? 'bg-cyan-50 text-cyan-700' : 'bg-pink-50 text-pink-700'}`}>
-                        {representative.category}
+                      <span className={`px-2 py-0.5 rounded-full font-extrabold text-[9px] uppercase tracking-wider ${
+                        representative.category === 'kiloan' 
+                          ? 'bg-cyan-50 text-cyan-700' 
+                          : (representative.category === 'antar_jemput' || representative.category === 'antar jemput')
+                          ? 'bg-purple-50 text-purple-700'
+                          : 'bg-pink-50 text-pink-700'
+                      }`}>
+                        {representative.category === 'antar_jemput' || representative.category === 'antar jemput' ? 'Antar Jemput' : representative.category}
                       </span>
                       <span className="text-[10px] text-slate-400 font-extrabold font-sans uppercase flex items-center gap-1">
                         📦 {groupItems.length} Variasi Jasa
@@ -4343,8 +4388,14 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                   {/* Header */}
                   <div className="p-3 sm:p-4 bg-slate-50 border-b border-slate-150 flex items-center justify-between">
                     <div>
-                      <span className={`px-1.5 py-0.5 rounded-full font-extrabold text-[8.5px] uppercase tracking-wider ${representative.category === 'kiloan' ? 'bg-cyan-50 text-cyan-700' : 'bg-pink-50 text-pink-700'}`}>
-                        {representative.category}
+                      <span className={`px-1.5 py-0.5 rounded-full font-extrabold text-[8.5px] uppercase tracking-wider ${
+                        representative.category === 'kiloan' 
+                          ? 'bg-cyan-50 text-cyan-700' 
+                          : (representative.category === 'antar_jemput' || representative.category === 'antar jemput')
+                          ? 'bg-purple-50 text-purple-700'
+                          : 'bg-pink-50 text-pink-700'
+                      }`}>
+                        {representative.category === 'antar_jemput' || representative.category === 'antar jemput' ? 'Antar Jemput' : representative.category}
                       </span>
                       <h4 className="font-extrabold text-slate-800 text-xs sm:text-sm mt-0.5">
                         Detail Jasa: {viewingServiceGroupName}
@@ -4361,7 +4412,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                   {/* Body */}
                   <div className="p-3 sm:p-4 max-h-[50vh] overflow-y-auto space-y-3">
                     <h5 className="text-[8.5px] sm:text-[9.5px] font-black uppercase text-slate-400 tracking-wider">
-                      Rincian {representative.category === 'kiloan' ? 'Janji Selesai' : 'Ukuran Satuan'}:
+                      Rincian {representative.category === 'kiloan' ? 'Janji Selesai' : (representative.category === 'antar_jemput' || representative.category === 'antar jemput' ? 'Tarif Antar Jemput' : 'Ukuran Satuan')}:
                     </h5>
                     <div className="space-y-2.5">
                       {groupItems.map(s => (
@@ -4369,7 +4420,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                           <div className="flex items-start justify-between gap-2 text-[11px]">
                             <div className="space-y-0.5">
                               <span className="px-1.5 py-0.5 rounded-md font-bold text-[8.5px] sm:text-[9px] uppercase bg-amber-50 text-amber-700 border border-amber-200">
-                                {s.promiseName || (s.category === 'kiloan' ? 'Reguler' : 'Sedang')}
+                                {s.promiseName || (s.category === 'kiloan' ? 'Reguler' : (s.category === 'antar_jemput' || s.category === 'antar jemput' ? 'Antar Jemput' : 'Sedang'))}
                               </span>
                               {s.category === 'kiloan' && (
                                 <span className="text-[10px] text-slate-505 font-medium flex items-center gap-1 mt-0.5">
@@ -10545,6 +10596,23 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                       <span className="text-[9.5px] font-normal text-slate-400 block">Dihitung per biji/pcs pakaian atau karpet</span>
                     </div>
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setServiceForm({ ...serviceForm, category: 'antar_jemput', unit: 'trip' });
+                      setActivePopupField(null);
+                    }}
+                    className={`p-3.5 border rounded-2xl text-left font-bold text-xs transition cursor-pointer flex gap-3 items-center ${
+                      serviceForm.category === 'antar_jemput' ? 'border-emerald-600 bg-emerald-50/45 text-emerald-950' : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    <span className="text-lg">🛵</span>
+                    <div>
+                      <span className="block font-black text-[11px]">Tarif Antar Jemput</span>
+                      <span className="text-[9.5px] font-normal text-slate-400 block">Dihitung per trip penjemputan/pengantaran, km, atau per order</span>
+                    </div>
+                  </button>
                 </div>
               </div>
             )}
@@ -10558,8 +10626,8 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                   <h4 className="font-extrabold text-[#0F172A] text-sm">Pilih Unit Pengukuran</h4>
                   <p className="text-slate-500 font-semibold text-[10.5px] leading-tight">Gunakan standar ukuran pengali transaksi:</p>
                 </div>
-                <div className="grid grid-cols-2 gap-2 pt-2">
-                  {['kg', 'pcs', 'lembar', 'pasang', 'meter', 'lusin'].map(u => (
+                <div className="grid grid-cols-3 gap-2 pt-2">
+                  {['kg', 'pcs', 'trip', 'km', 'order', 'lembar', 'pasang', 'meter', 'lusin'].map(u => (
                     <button
                       key={u}
                       type="button"

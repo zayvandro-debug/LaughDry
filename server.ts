@@ -286,25 +286,26 @@ async function startServer() {
   // ==========================================
   // VITE DEVELOPMENT MIDDLEWARE & STATIC SERVING
   // ==========================================
-  const distPath = path.join(process.cwd(), "dist");
-  const hasDist = fs.existsSync(path.join(distPath, "index.html"));
-
   const isCloudRun = Boolean(process.env.K_SERVICE || process.env.K_REVISION || process.env.CLOUD_RUN_JOB);
-  const isProduction = process.env.NODE_ENV === "production" || isCloudRun || hasDist;
+  const isProduction = process.env.NODE_ENV === "production" || isCloudRun;
 
-  if (isProduction || hasDist) {
+  if (isProduction) {
     // Production static serving
+    const distPath = path.resolve(__dirname, "dist");
+    const indexPath = path.join(distPath, "index.html");
     app.use(express.static(distPath));
     app.get("*", (req, res) => {
       if (req.path.startsWith("/api/")) {
         return res.status(404).json({ error: "Endpoint not found" });
       }
-      const indexPath = path.join(distPath, "index.html");
       if (fs.existsSync(indexPath)) {
         return res.sendFile(indexPath);
       }
-      // Resilient fallback HTML to guarantee 200 OK for Cloud Run health probes
-      res.status(200).send(`<!doctype html><html lang="id"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>LaughDry - Laundry POS & CRM</title></head><body><div id="root">Memuat LaughDry POS...</div></body></html>`);
+      const rootIndex = path.resolve(__dirname, "index.html");
+      if (fs.existsSync(rootIndex)) {
+        return res.sendFile(rootIndex);
+      }
+      res.status(404).send("Application build not found");
     });
   } else {
     // Development mode with Vite middlewares
@@ -317,6 +318,7 @@ async function startServer() {
       app.use(vite.middlewares);
     } catch (viteErr) {
       console.warn("[LaughDry Server] Vite middleware unavailable, falling back to static files:", viteErr);
+      const distPath = path.resolve(__dirname, "dist");
       app.use(express.static(distPath));
     }
   }

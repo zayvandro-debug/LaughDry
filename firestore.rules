@@ -84,7 +84,7 @@ service cloud.firestore {
         && data.keys().size() >= 7
         && data.id is string
         && data.name is string && data.name.size() <= 150
-        && data.category is string && (data.category == 'kiloan' || data.category == 'satuan')
+        && data.category is string && (data.category == 'kiloan' || data.category == 'satuan' || data.category == 'antar_jemput' || data.category == 'antar jemput')
         && data.price is number && data.price >= 0
         && data.unit is string && data.unit.size() <= 20
         && data.estimateHours is int && data.estimateHours >= 0
