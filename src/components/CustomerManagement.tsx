@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, Phone, Star, UserCheck, BookOpen, Smartphone } from 'lucide-react';
 import { Customer, User } from '../types';
 import { LaughDryDatabase } from '../data/mockDatabase';
+import { pickDeviceContact } from '../utils/contactPicker';
 
 interface CustomerManagementProps {
   customers: Customer[];
@@ -56,37 +57,27 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({
   const [customerModalForm, setCustomerModalForm] = useState({ name: '', phone: '', address: '' });
 
   const handlePickContact = async () => {
-    if ('contacts' in navigator && 'ContactsManager' in window) {
-      try {
-        const props = ['name', 'tel'];
-        const opts = { multiple: false };
-        const contacts = await (navigator as any).contacts.select(props, opts);
-        if (contacts && contacts.length > 0) {
-          const contact = contacts[0];
-          const rawName = contact.name && contact.name[0] ? contact.name[0] : '';
-          const rawPhone = contact.tel && contact.tel[0] ? contact.tel[0] : '';
-          
-          let cleanPhone = rawPhone.replace(/[^\d+]/g, '');
-          if (cleanPhone.startsWith('+62')) {
-            cleanPhone = '0' + cleanPhone.slice(3);
-          } else if (cleanPhone.startsWith('62')) {
-            cleanPhone = '0' + cleanPhone.slice(2);
-          }
-          
-          setCustomerModalForm(prev => ({
-            ...prev,
-            name: rawName || prev.name,
-            phone: cleanPhone || prev.phone
-          }));
-          onShowToast("Berhasil mengambil kontak perangkat!");
-          return;
+    try {
+      onShowToast("📱 Membuka kontak HP...");
+      const res = await pickDeviceContact();
+      if (res.success) {
+        setCustomerModalForm(prev => ({
+          ...prev,
+          name: res.name || prev.name,
+          phone: res.phone || prev.phone,
+          address: res.address || prev.address
+        }));
+        onShowToast("✅ Berhasil mengambil kontak dari HP!");
+      } else if (res.error) {
+        if (!res.error.toLowerCase().includes('dibatalkan')) {
+          alert(res.error);
+        } else {
+          onShowToast(res.error);
         }
-      } catch (err: any) {
-        console.warn("Contact picker native API error:", err);
-        alert("Gagal mengambil kontak dari HP. Pastikan Anda telah memberikan izin akses kontak jika diminta.");
       }
-    } else {
-      alert("Browser/perangkat Anda tidak mendukung fitur mengambil kontak otomatis (Contact Picker API). Silakan gunakan Google Chrome di HP Android atau ketik nomor secara manual.");
+    } catch (err: any) {
+      console.warn("Contact picker error:", err);
+      alert("Gagal mengambil kontak dari HP: " + (err.message || 'Pastikan izin kontak telah diberikan.'));
     }
   };
   const [topUpCustomer, setTopUpCustomer] = useState<Customer | null>(null);

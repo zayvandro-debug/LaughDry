@@ -52,6 +52,7 @@ import { Geolocation as CapGeolocation } from '@capacitor/geolocation';
 import { App as CapApp } from '@capacitor/app';
 import { Preferences as CapPreferences } from '@capacitor/preferences';
 import { requestAppPermissions } from '../utils/request-permissions';
+import { pickDeviceContact } from '../utils/contactPicker';
 import { Capacitor } from '@capacitor/core';
 import { BleClient } from '@capacitor-community/bluetooth-le';
 import AttendanceMap from './AttendanceMap';
@@ -638,38 +639,29 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   });
 
   const handlePickContactEC = async () => {
-    if ('contacts' in navigator && 'ContactsManager' in window) {
-      try {
-        const props = ['name', 'tel'];
-        const opts = { multiple: false };
-        const contacts = await (navigator as any).contacts.select(props, opts);
-        if (contacts && contacts.length > 0) {
-          const contact = contacts[0];
-          const rawName = contact.name && contact.name[0] ? contact.name[0] : '';
-          const rawPhone = contact.tel && contact.tel[0] ? contact.tel[0] : '';
-          
-          let cleanPhone = rawPhone.replace(/[^\d+]/g, '');
-          if (cleanPhone.startsWith('+62')) {
-            cleanPhone = '0' + cleanPhone.slice(3);
-          } else if (cleanPhone.startsWith('62')) {
-            cleanPhone = '0' + cleanPhone.slice(2);
-          }
-          
-          setCustomerForm(prev => ({
-            ...prev,
-            name: rawName || prev.name,
-            phone: cleanPhone || prev.phone
-          }));
-          setToastMessage("Berhasil mengambil kontak perangkat!");
-          setTimeout(() => setToastMessage(null), 3000);
-          return;
+    try {
+      setToastMessage("📱 Membuka kontak HP...");
+      const res = await pickDeviceContact();
+      if (res.success) {
+        setCustomerForm(prev => ({
+          ...prev,
+          name: res.name || prev.name,
+          phone: res.phone || prev.phone,
+          address: res.address || prev.address
+        }));
+        setToastMessage("✅ Berhasil mengambil kontak dari HP!");
+        setTimeout(() => setToastMessage(null), 3000);
+      } else if (res.error) {
+        if (!res.error.toLowerCase().includes('dibatalkan')) {
+          alert(res.error);
+        } else {
+          setToastMessage(res.error);
+          setTimeout(() => setToastMessage(null), 2500);
         }
-      } catch (err: any) {
-        console.warn("Contact picker native API error:", err);
-        alert("Gagal mengambil kontak dari HP. Pastikan Anda telah memberikan izin akses kontak jika diminta.");
       }
-    } else {
-      alert("Browser/perangkat Anda tidak mendukung fitur mengambil kontak otomatis (Contact Picker API). Silakan gunakan Google Chrome di HP Android atau ketik nomor secara manual.");
+    } catch (err: any) {
+      console.warn("Contact picker native API error:", err);
+      alert("Gagal mengambil kontak dari HP: " + (err.message || 'Pastikan izin kontak telah diberikan.'));
     }
   };
 
@@ -761,16 +753,27 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   useEffect(() => {
     if (customEntryDate) {
       const entryDateObj = new Date(customEntryDate);
-      const maxEstHours = cartItems.reduce((max, item) => {
-        const srvCheck = services.find(s => s.id === item.serviceId);
-        return Math.max(max, srvCheck ? srvCheck.estimateHours : 48);
-      }, 48);
+      if (isNaN(entryDateObj.getTime())) return;
+
+      const serviceHoursList = cartItems
+        .map(item => {
+          const srvCheck = services.find(s => s.id === item.serviceId);
+          if (srvCheck && typeof srvCheck.estimateHours === 'number' && srvCheck.estimateHours > 0) {
+            return srvCheck.estimateHours;
+          }
+          return null;
+        })
+        .filter((h): h is number => h !== null);
+
+      // If items have specified turnaround (e.g. 6h Express, 12h, 24h, 48h), use the max of those.
+      // If no valid positive estimate hours found in cart, default to 24 hours (1 day).
+      const maxEstHours = serviceHoursList.length > 0 ? Math.max(...serviceHoursList) : 24;
       
       // Calculate completion date: Tanggal Masuk + estimated max hours
       const completionDateObj = new Date(entryDateObj.getTime() + maxEstHours * 3600000);
       setCustomCompletionDate(toDateTimeLocalString(completionDateObj));
     }
-  }, [customEntryDate, cartItems]);
+  }, [customEntryDate, cartItems, services]);
 
   // NEW: Loyalty Point redemption for free 3kg wash
   const handleRedeemLoyalty = () => {
@@ -2025,10 +2028,17 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
 
     // Calculate completion estimated date based on service max estimation hours or custom date picker choices
     const entryDate = customEntryDate ? new Date(customEntryDate) : new Date();
-    const maxEstHours = cartItems.reduce((max, item) => {
-      const srvMock = services.find(s => s.id === item.serviceId);
-      return Math.max(max, srvMock ? srvMock.estimateHours : 48);
-    }, 48);
+    const serviceHoursList = cartItems
+      .map(item => {
+        const srvMock = services.find(s => s.id === item.serviceId);
+        if (srvMock && typeof srvMock.estimateHours === 'number' && srvMock.estimateHours > 0) {
+          return srvMock.estimateHours;
+        }
+        return null;
+      })
+      .filter((h): h is number => h !== null);
+
+    const maxEstHours = serviceHoursList.length > 0 ? Math.max(...serviceHoursList) : 24;
 
     const completionDate = customCompletionDate 
       ? new Date(customCompletionDate) 
@@ -3187,24 +3197,50 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                 </div>
 
                 {/* NEW: Date Picker Inputs (Tanggal Masuk & Estimasi Selesai) */}
-                <div className="grid grid-cols-2 gap-2 bg-amber-50/40 p-3 rounded-2xl border border-amber-200/50">
-                  <div className="space-y-1">
-                    <label className="text-amber-800 font-bold block text-[9px] uppercase tracking-wider">📅 Tanggal Masuk:</label>
-                    <input
-                      type="datetime-local"
-                      value={customEntryDate}
-                      onChange={(e) => setCustomEntryDate(e.target.value)}
-                      className="w-full bg-white border border-amber-200 p-1.5 rounded-xl focus:outline-none focus:border-amber-500 font-bold text-slate-800 text-xs shadow-xs"
-                    />
+                <div className="bg-amber-50/40 p-3 rounded-2xl border border-amber-200/50 space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-amber-800 font-bold block text-[9px] uppercase tracking-wider">📅 Tanggal Masuk:</label>
+                      <input
+                        type="datetime-local"
+                        value={customEntryDate}
+                        onChange={(e) => setCustomEntryDate(e.target.value)}
+                        className="w-full bg-white border border-amber-200 p-1.5 rounded-xl focus:outline-none focus:border-amber-500 font-bold text-slate-800 text-xs shadow-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-amber-800 font-bold block text-[9px] uppercase tracking-wider">⏳ Estimasi Selesai:</label>
+                      <input
+                        type="datetime-local"
+                        value={customCompletionDate}
+                        onChange={(e) => setCustomCompletionDate(e.target.value)}
+                        className="w-full bg-white border border-amber-200 p-1.5 rounded-xl focus:outline-none focus:border-amber-500 font-bold text-slate-800 text-xs shadow-xs"
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-amber-800 font-bold block text-[9px] uppercase tracking-wider">⏳ Estimasi Selesai:</label>
-                    <input
-                      type="datetime-local"
-                      value={customCompletionDate}
-                      onChange={(e) => setCustomCompletionDate(e.target.value)}
-                      className="w-full bg-white border border-amber-200 p-1.5 rounded-xl focus:outline-none focus:border-amber-500 font-bold text-slate-800 text-xs shadow-xs"
-                    />
+                  {/* Preset estimasi cepat (termasuk di bawah 2 hari: 6 jam, 12 jam, 1 hari) */}
+                  <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                    <span className="text-[9px] text-amber-900/70 font-semibold">Ubah Cepat:</span>
+                    {[
+                      { label: '6 Jam', hours: 6 },
+                      { label: '12 Jam', hours: 12 },
+                      { label: '1 Hari (24 Jam)', hours: 24 },
+                      { label: '2 Hari (48 Jam)', hours: 48 },
+                      { label: '3 Hari (72 Jam)', hours: 72 },
+                    ].map(preset => (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        onClick={() => {
+                          const baseDate = customEntryDate ? new Date(customEntryDate) : new Date();
+                          const target = new Date(baseDate.getTime() + preset.hours * 3600000);
+                          setCustomCompletionDate(toDateTimeLocalString(target));
+                        }}
+                        className="px-2 py-0.5 text-[9.5px] font-bold rounded-lg bg-white border border-amber-200 text-amber-900 hover:bg-amber-100 hover:border-amber-300 transition shadow-2xs cursor-pointer active:scale-95"
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
 
@@ -6532,7 +6568,9 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                   <span className="text-slate-400 font-bold text-[8px] uppercase tracking-wide block">1. Jenis Layanan & Waktu Penyelesaian</span>
                   <p className="font-extrabold text-[#0F172A] text-[11.5px] leading-snug flex items-center gap-1.5">
                     <span>🚀 {selectedCatalogService.estimateHours} Jam Selesai</span>
-                    <span className="text-slate-400 font-normal">({Math.ceil(selectedCatalogService.estimateHours / 24)} Hari Kerja)</span>
+                    <span className="text-slate-400 font-normal">
+                      ({selectedCatalogService.promiseDurationText || (selectedCatalogService.estimateHours < 24 ? `${selectedCatalogService.estimateHours} Jam` : `${Math.ceil(selectedCatalogService.estimateHours / 24)} Hari Kerja`)})
+                    </span>
                   </p>
                   <p className="text-[9.5px] text-slate-400 font-normal leading-normal">
                     Sistem otomatis menghitung batas janji pengerjaan dari waktu penerimaan kasir, memastikan keterlambatan terpantau di dashboard branch.
