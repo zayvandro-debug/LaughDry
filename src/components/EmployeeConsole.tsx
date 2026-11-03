@@ -387,7 +387,18 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   const [cartItems, setCartItems] = useState<OrderItem[]>([]);
   const [notes, setNotes] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'Cash' | 'QRIS' | 'Transfer' | 'Deposit'>('Cash');
-  const [paidStatus, setPaidStatus] = useState<'Lunas' | 'Belum Lunas'>('Belum Lunas');
+  const [paidStatus, setPaidStatus] = useState<'Lunas' | 'Belum Lunas' | 'Bayar DP'>('Belum Lunas');
+  const [dpAmountInput, setDpAmountInput] = useState<string>('');
+  const [dpPaymentMethod, setDpPaymentMethod] = useState<'Cash' | 'QRIS' | 'Transfer' | 'Deposit'>('Cash');
+
+  // State for Grouped Service Picker (Bertingkat & Ringkas: Nama Layanan -> Janji Layanan)
+  const [groupedServicePickerTarget, setGroupedServicePickerTarget] = useState<{
+    mode: 'add_to_edit_order' | 'change_edit_order_item' | 'change_cart_item';
+    itemIndex?: number;
+    cartItemId?: string;
+  } | null>(null);
+  const [pickerSelectedGroupName, setPickerSelectedGroupName] = useState<string | null>(null);
+  const [pickerCategoryFilter, setPickerCategoryFilter] = useState<'all' | 'kiloan' | 'satuan' | 'antar_jemput'>('all');
 
   // Interactive Payment Choice Popup (Cash, Transfer, Deposit)
   const [showPaymentChoiceModal, setShowPaymentChoiceModal] = useState(false);
@@ -545,6 +556,12 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       t += justifyRowPrefix("TOTAL CHARGE", `Rp ${(invoice.totalAmount || 0).toLocaleString('id-ID')}`, 32) + "\n";
       t += justifyRowPrefix("Metode Bayar", invoice.paymentMethod || 'Cash', 32) + "\n";
       t += justifyRowPrefix("Status Bayar", invoice.paymentStatus || 'Belum Lunas', 32) + "\n";
+      if (invoice.paymentStatus === 'Bayar DP') {
+        const dpVal = invoice.paidAmount || invoice.downPaymentAmount || 0;
+        const remaining = invoice.remainingAmount ?? (invoice.totalAmount - dpVal);
+        t += justifyRowPrefix("Bayar DP", `Rp ${dpVal.toLocaleString('id-ID')}`, 32) + "\n";
+        t += justifyRowPrefix("SISA TAGIHAN", `Rp ${remaining.toLocaleString('id-ID')}`, 32) + "\n";
+      }
       t += sep;
     }
 
@@ -1973,6 +1990,36 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     setCartItems(cartItems.filter(item => item.id !== id));
   };
 
+  const replaceCartService = (cartItemId: string, newServiceId: string) => {
+    const newSrv = services.find(s => s.id === newServiceId);
+    if (!newSrv) return;
+
+    const formattedName = newSrv.category === 'kiloan'
+      ? `${newSrv.name}-${newSrv.promiseName || 'Reguler'}`
+      : (newSrv.category === 'antar_jemput' || newSrv.category === 'antar jemput')
+      ? `${newSrv.name}${newSrv.promiseName ? ` (${newSrv.promiseName})` : ''}`
+      : `${newSrv.name}-${newSrv.promiseName || 'Sedang'}`;
+
+    const isKiloan = newSrv.category === 'kiloan';
+
+    setCartItems(prev => prev.map(item => {
+      if (item.id === cartItemId) {
+        const qty = isKiloan ? Math.max(item.quantity, 3.0) : item.quantity;
+        const billingQty = isKiloan ? Math.max(qty, 3.0) : qty;
+        return {
+          ...item,
+          serviceId: newSrv.id,
+          serviceName: formattedName,
+          price: newSrv.price,
+          quantity: parseFloat(qty.toFixed(2)),
+          subtotal: parseFloat((billingQty * newSrv.price).toFixed(2))
+        };
+      }
+      return item;
+    }));
+    showToast(`Layanan diubah menjadi [${formattedName}]`);
+  };
+
   // Transaction Total Calculator with discount rules
   const cartSubtotal = cartItems.reduce((s, i) => s + i.subtotal, 0);
   const manualDiscountAmount = manualDiscountType === 'percentage' 
@@ -2012,9 +2059,25 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     // If payment method is deposit, verify limits (taking into account already spent deposit if editing)
     const originalPaidWithDeposit = isEditingExisting && existingOrder && existingOrder.paymentMethod === 'Deposit' ? existingOrder.totalAmount : 0;
     const availableBalance = selectedCustomer.depositBalance + originalPaidWithDeposit;
-    if (paymentMethod === 'Deposit' && availableBalance < totalCartAmount) {
+    if (paidStatus === 'Lunas' && paymentMethod === 'Deposit' && availableBalance < totalCartAmount) {
       alert(`Saldo deposit pelanggan tidak cukup! Saldo saat ini (termasuk dana dibatalkan): Rp ${availableBalance.toLocaleString()}`);
       return;
+    }
+
+    if (paidStatus === 'Bayar DP') {
+      const dpVal = parseInt(dpAmountInput, 10) || 0;
+      if (dpVal <= 0) {
+        alert("⚠️ Masukkan nominal DP (Uang Muka) yang valid dan lebih dari Rp 0!");
+        return;
+      }
+      if (dpVal >= totalCartAmount) {
+        alert("⚠️ Nominal DP sama dengan atau melebihi total tagihan! Silakan pilih opsi 'Bayar Lunas'.");
+        return;
+      }
+      if (dpPaymentMethod === 'Deposit' && availableBalance < dpVal) {
+        alert(`Saldo deposit pelanggan tidak cukup untuk membayar DP! Saldo saat ini: Rp ${availableBalance.toLocaleString()}, Nominal DP: Rp ${dpVal.toLocaleString()}`);
+        return;
+      }
     }
 
     setShowCheckoutConfirmModal(true);
@@ -2050,6 +2113,18 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     const invoiceNum = isEditingExisting && existingOrder ? existingOrder.invoiceNumber : `LK-${orders.length + 1}`;
     const orderId = isEditingExisting && existingOrder ? existingOrder.id : `ord-${Date.now()}`;
 
+    const dpVal = Math.min(Math.max(0, parseInt(dpAmountInput, 10) || 0), totalCartAmount);
+    const isDP = paidStatus === 'Bayar DP' && dpVal > 0 && dpVal < totalCartAmount;
+    const finalPaymentStatus: 'Lunas' | 'Belum Lunas' | 'Bayar DP' = 
+      (paymentMethod === 'Deposit' || paidStatus === 'Lunas') 
+        ? 'Lunas' 
+        : (isDP ? 'Bayar DP' : 'Belum Lunas');
+    const finalPaidAmount = finalPaymentStatus === 'Lunas' 
+      ? totalCartAmount 
+      : (finalPaymentStatus === 'Bayar DP' ? dpVal : 0);
+    const finalRemainingAmount = totalCartAmount - finalPaidAmount;
+    const finalPaymentMethod = finalPaymentStatus === 'Bayar DP' ? dpPaymentMethod : paymentMethod;
+
     const newOrder: Order = {
       id: orderId,
       invoiceNumber: invoiceNum,
@@ -2059,23 +2134,26 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       branchId: currentUser.branchId, // Rian's active branch
       items: cartItems,
       totalAmount: totalCartAmount,
-      paymentMethod,
-      paymentStatus: (paymentMethod === 'Deposit' || paidStatus === 'Lunas') ? 'Lunas' : 'Belum Lunas',
+      paymentMethod: finalPaymentMethod,
+      paymentStatus: finalPaymentStatus,
+      paidAmount: finalPaidAmount,
+      remainingAmount: finalRemainingAmount,
+      downPaymentAmount: finalPaymentStatus === 'Bayar DP' ? dpVal : undefined,
       status: isEditingExisting && existingOrder ? existingOrder.status : OrderStatus.ANTRI,
       notes,
       perfume: perfumeSelection,
       createdAt: isEditingExisting && existingOrder ? existingOrder.createdAt : entryDate.toISOString(),
       updatedAt: entryDate.toISOString(),
       estimatedCompletion: completionDate.toISOString(),
-      paymentDate: (paymentMethod === 'Deposit' || paidStatus === 'Lunas')
+      paymentDate: finalPaymentStatus === 'Lunas'
         ? (isEditingExisting && existingOrder ? (existingOrder.paymentDate || existingOrder.createdAt) : entryDate.toISOString())
-        : undefined,
+        : (finalPaymentStatus === 'Bayar DP' ? entryDate.toISOString() : undefined),
       pointsEarned: earnedPoints,
       cashierId: currentUser.id,
       cashierName: currentUser.name
     };
 
-    // Save and Deduct Deposit balance if paymentMethod === Deposit
+    // Save and Deduct Deposit balance if paid via Deposit
     const updatedCustomers = customers.map(c => {
       if (c.id === selectedCustomer.id) {
         let depositVal = c.depositBalance;
@@ -2084,15 +2162,17 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
         // Revert old values
         if (isEditingExisting && existingOrder) {
           if (existingOrder.paymentMethod === 'Deposit') {
-            depositVal += existingOrder.totalAmount;
+            depositVal += (existingOrder.paidAmount !== undefined ? existingOrder.paidAmount : existingOrder.totalAmount);
           }
           const oldPointsEarned = existingOrder.pointsEarned !== undefined ? existingOrder.pointsEarned : 1;
           pointsVal = Math.max(0, pointsVal - oldPointsEarned);
         }
 
         // Apply new values
-        if (paymentMethod === 'Deposit') {
+        if (finalPaymentStatus === 'Lunas' && paymentMethod === 'Deposit') {
           depositVal -= totalCartAmount;
+        } else if (finalPaymentStatus === 'Bayar DP' && dpPaymentMethod === 'Deposit') {
+          depositVal -= dpVal;
         }
         pointsVal = Math.max(0, pointsVal - (isLoyaltyRedeemed ? 10 : 0) + earnedPoints);
 
@@ -2406,17 +2486,22 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     const orderToPaid = orders.find(o => o.id === orderId);
     if (!orderToPaid) return false;
 
+    const isDP = orderToPaid.paymentStatus === 'Bayar DP';
+    const amountToPay = isDP 
+      ? (orderToPaid.remainingAmount ?? (orderToPaid.totalAmount - (orderToPaid.paidAmount || 0)))
+      : orderToPaid.totalAmount;
+
     // Save and Deduct Deposit balance if paymentMethod === Deposit
     if (chosenMethod === 'Deposit') {
       const custId = orderToPaid.customerId;
       const currentCustomers = LaughDryDatabase.getCustomers();
       const customerToUpdate = currentCustomers.find(c => c.id === custId);
       if (customerToUpdate) {
-        if (customerToUpdate.depositBalance < orderToPaid.totalAmount) {
-          alert(`Saldo Deposit pelanggan tidak mencukupi! Saldo saat ini: Rp ${customerToUpdate.depositBalance.toLocaleString('id-ID')}, Total Tagihan: Rp ${orderToPaid.totalAmount.toLocaleString('id-ID')}`);
+        if (customerToUpdate.depositBalance < amountToPay) {
+          alert(`Saldo Deposit pelanggan tidak mencukupi! Saldo saat ini: Rp ${customerToUpdate.depositBalance.toLocaleString('id-ID')}, Tagihan yang harus dibayar: Rp ${amountToPay.toLocaleString('id-ID')}`);
           return false;
         }
-        customerToUpdate.depositBalance -= orderToPaid.totalAmount;
+        customerToUpdate.depositBalance -= amountToPay;
         LaughDryDatabase.saveCustomers(currentCustomers);
       } else {
         alert("Pelanggan tidak ditemukan untuk melakukan pembayaran deposit!");
@@ -2432,6 +2517,8 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
           status: nextStatus,
           paymentStatus: 'Lunas' as const,
           paymentMethod: chosenMethod,
+          paidAmount: o.totalAmount,
+          remainingAmount: 0,
           updatedAt: new Date().toISOString(),
           paymentDate: new Date().toISOString(),
           completedAt: nextStatus === OrderStatus.SELESAI ? new Date().toISOString() : o.completedAt
@@ -2448,9 +2535,9 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       try {
         LaundryService.triggerPushNotification({
           title: `Pelunasan POS: ${orderToPaid.invoiceNumber}`,
-          body: `Pelunasan tunda piutang ${orderToPaid.invoiceNumber} senilai Rp ${orderToPaid.totalAmount.toLocaleString('id-ID')} diterima lunas oleh Kasir ${currentUser.name} via ${chosenMethod}.`,
+          body: `Pelunasan ${isDP ? 'sisa tagihan DP' : 'tunda piutang'} ${orderToPaid.invoiceNumber} senilai Rp ${amountToPay.toLocaleString('id-ID')} diterima lunas oleh Kasir ${currentUser.name} via ${chosenMethod}.`,
           invoiceNumber: orderToPaid.invoiceNumber,
-          amount: orderToPaid.totalAmount,
+          amount: amountToPay,
           cashierName: currentUser.name
         });
       } catch (e) {
@@ -2458,9 +2545,9 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       }
     }
 
-    LaughDryDatabase.logActivity(currentUser.id, currentUser.name, currentUser.role, 'STATUS_TRANSITION', `Membayar order ord-${orderId.substring(4)} dengan metode pembayaran [${chosenMethod}], Status Laundry Tetap [${orderToPaid.status}]`);
+    LaughDryDatabase.logActivity(currentUser.id, currentUser.name, currentUser.role, 'STATUS_TRANSITION', `Pelunasan order ${orderToPaid.invoiceNumber} senilai Rp ${amountToPay.toLocaleString()} dengan metode [${chosenMethod}]. Status bayar LUNAS.`);
     loadDB();
-    showToast(`Pembayaran Rp ${orderToPaid.totalAmount.toLocaleString('id-ID')} Berhasil Diterima via ${chosenMethod}`);
+    showToast(`✅ Pelunasan Rp ${amountToPay.toLocaleString('id-ID')} Berhasil Diterima via ${chosenMethod}! Status LUNAS.`);
     
     // Clear state
     setPaymentTransitionOrderId(null);
@@ -2505,19 +2592,97 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     setShowEditOrderModal(true);
   };
 
+  const handleEditOrderItemChangeService = (idx: number, newServiceId: string) => {
+    const selSrv = services.find(s => s.id === newServiceId);
+    if (!selSrv) return;
+
+    const formattedName = selSrv.category === 'kiloan'
+      ? `${selSrv.name}-${selSrv.promiseName || 'Reguler'}`
+      : (selSrv.category === 'antar_jemput' || selSrv.category === 'antar jemput')
+      ? `${selSrv.name}${selSrv.promiseName ? ` (${selSrv.promiseName})` : ''}`
+      : `${selSrv.name}-${selSrv.promiseName || 'Sedang'}`;
+
+    const isKiloan = selSrv.category === 'kiloan';
+    const updated = [...editingOrderItems];
+    const currentQty = updated[idx]?.quantity || 1;
+    const newQty = isKiloan ? Math.max(currentQty, 3.0) : currentQty;
+    const billingQty = isKiloan ? Math.max(newQty, 3.0) : newQty;
+
+    updated[idx] = {
+      ...updated[idx],
+      serviceId: selSrv.id,
+      serviceName: formattedName,
+      price: selSrv.price,
+      quantity: Number(newQty.toFixed(2)),
+      subtotal: Math.round(selSrv.price * billingQty)
+    };
+    setEditingOrderItems(updated);
+    showToast(`✅ Layanan diubah menjadi: ${formattedName}`);
+  };
+
+  const handleRemoveOrderItem = (idx: number) => {
+    const itemToRemove = editingOrderItems[idx];
+    const updated = editingOrderItems.filter((_, i) => i !== idx);
+    setEditingOrderItems(updated);
+    showToast(`🗑️ Layanan "${itemToRemove?.serviceName || 'Layanan'}" berhasil dihapus.`);
+  };
+
+  const handleAddServiceToEditingOrder = (srvId: string) => {
+    if (!srvId) return;
+    const selSrv = services.find(s => s.id === srvId);
+    if (!selSrv) return;
+
+    const isKiloan = selSrv.category === 'kiloan';
+    const initQty = isKiloan ? 3.0 : 1.0;
+    const billingQty = isKiloan ? Math.max(initQty, 3.0) : initQty;
+
+    const formattedName = selSrv.category === 'kiloan'
+      ? `${selSrv.name}-${selSrv.promiseName || 'Reguler'}`
+      : (selSrv.category === 'antar_jemput' || selSrv.category === 'antar jemput')
+      ? `${selSrv.name}${selSrv.promiseName ? ` (${selSrv.promiseName})` : ''}`
+      : `${selSrv.name}-${selSrv.promiseName || 'Sedang'}`;
+
+    const newItem: OrderItem = {
+      id: 'item_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+      serviceId: selSrv.id,
+      serviceName: formattedName,
+      price: selSrv.price,
+      quantity: initQty,
+      subtotal: Math.round(selSrv.price * billingQty)
+    };
+
+    setEditingOrderItems(prev => [...prev, newItem]);
+    showToast(`➕ Berhasil menambahkan [${formattedName}] ke pesanan!`);
+  };
+
   const handleSaveEditedOrder = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingOrder) return;
 
     if (editingOrderItems.length === 0) {
-      alert("Setidaknya harus ada 1 rincian layanan dalam pesanan!");
+      alert("⚠️ Setidaknya harus ada 1 rincian layanan dalam pesanan! Silakan pilih layanan pengganti melalui tombol Tambah Layanan.");
       return;
     }
 
+    const serviceHoursList = editingOrderItems
+      .map(item => {
+        const srv = services.find(s => s.id === item.serviceId);
+        if (srv && typeof srv.estimateHours === 'number' && srv.estimateHours > 0) {
+          return srv.estimateHours;
+        }
+        return null;
+      })
+      .filter((h): h is number => h !== null);
+
+    const maxEstHours = serviceHoursList.length > 0 ? Math.max(...serviceHoursList) : 24;
+    const entryDateObj = new Date(editingOrder.createdAt || new Date());
+    const newEstCompletion = new Date(entryDateObj.getTime() + maxEstHours * 3600000).toISOString();
+
+    const newTotalAmount = editingOrderItems.reduce((sum, item) => sum + item.subtotal, 0);
+    const countVal = editingClothesCount === '' ? undefined : parseInt(editingClothesCount, 10);
+
     const updatedOrders = orders.map(o => {
       if (o.id === editingOrder.id) {
-        const newTotalAmount = editingOrderItems.reduce((sum, item) => sum + item.subtotal, 0);
-        const countVal = editingClothesCount === '' ? undefined : parseInt(editingClothesCount, 10);
         return {
           ...o,
           perfume: editingOrderPerfume,
@@ -2525,6 +2690,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
           clothesCount: isNaN(countVal as number) ? undefined : countVal,
           items: editingOrderItems,
           totalAmount: newTotalAmount,
+          estimatedCompletion: newEstCompletion,
           updatedAt: new Date().toISOString()
         };
       }
@@ -2533,11 +2699,17 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
 
     LaughDryDatabase.saveOrders(updatedOrders);
     setOrders(updatedOrders);
-    LaughDryDatabase.logActivity(currentUser.id, currentUser.name, currentUser.role, 'ORDER_EDIT', `Mengedit rincian order ${editingOrder.invoiceNumber}`);
+    LaughDryDatabase.logActivity(
+      currentUser.id,
+      currentUser.name,
+      currentUser.role,
+      'ORDER_EDIT',
+      `Mengedit rincian layanan pesanan ${editingOrder.invoiceNumber} (${editingOrderItems.length} layanan, Total Rp ${newTotalAmount.toLocaleString()})`
+    );
     loadDB();
     setShowEditOrderModal(false);
     setEditingOrder(null);
-    showToast(`Order ${editingOrder.invoiceNumber} berhasil diperbarui!`);
+    showToast(`✅ Order ${editingOrder.invoiceNumber} berhasil diperbarui!`);
   };
 
   const handleDeleteOrder = (orderId: string) => {
@@ -3112,45 +3284,85 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
             )}
 
             {/* Cart Items list */}
-            <div className="divide-y divide-slate-100 max-h-56 overflow-y-auto">
+            <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto space-y-2">
               {cartItems.length === 0 ? (
                 <div className="py-8 text-center text-xs text-slate-400">Keranjang masih kosong. Klik tarif layanan untuk menambahkan.</div>
               ) : (
-                cartItems.map(item => (
-                  <div key={item.id} className="py-2.5 flex justify-between gap-2 text-xs">
-                    <div className="space-y-1">
-                      <div className="font-semibold text-slate-800">{item.serviceName}</div>
-                      <div className="text-[10px] text-slate-400">@Rp {item.price.toLocaleString()}</div>
-                      
-                      {/* Qty counters */}
-                      <div className="flex items-center gap-2 mt-1">
+                cartItems.map(item => {
+                  const srv = services.find(s => s.id === item.serviceId);
+                  const isKiloan = srv ? srv.category === 'kiloan' : item.serviceName.toLowerCase().includes('kilo');
+                  return (
+                    <div key={item.id} className="p-2.5 bg-slate-50/80 rounded-xl border border-slate-150 flex flex-col gap-2 text-xs">
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="space-y-0.5 min-w-0 flex-1">
+                          <div className="font-extrabold text-slate-900 text-xs truncate">{item.serviceName}</div>
+                          <div className="text-[10px] text-slate-500 font-mono">
+                            @Rp {item.price.toLocaleString()} / {srv?.unit || (isKiloan ? 'kg' : 'pcs')}
+                            {isKiloan && <span className="ml-1 text-amber-700 font-bold">(Min. 3 kg)</span>}
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0">
+                          <div className="font-black text-slate-900 font-mono text-xs">Rp {item.subtotal.toLocaleString()}</div>
+                        </div>
+                      </div>
+
+                      {/* Controls: Ganti Layanan, Qty adjustment, Hapus Button */}
+                      <div className="flex items-center justify-between gap-1.5 flex-wrap pt-1 border-t border-slate-150/70">
+                        {/* Inline Ganti Layanan Trigger Button */}
+                        <div className="flex items-center gap-1 flex-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setGroupedServicePickerTarget({ mode: 'change_cart_item', cartItemId: item.id });
+                              setPickerSelectedGroupName(null);
+                              setPickerCategoryFilter('all');
+                            }}
+                            className="px-2 py-1 bg-sky-50 hover:bg-sky-100 text-sky-850 border border-sky-200 rounded-lg text-[9.5px] font-extrabold transition flex items-center gap-1 cursor-pointer active:scale-95 shadow-3xs"
+                            title="Ganti jenis layanan ini secara ringkas & bertingkat"
+                          >
+                            <span>🔄 Ganti Layanan</span>
+                          </button>
+                        </div>
+
+                        {/* Qty counters */}
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => updateCartQty(item.id, Math.max(0.1, Number((item.quantity - 0.5).toFixed(2))))}
+                            className="w-6 h-6 bg-white hover:bg-slate-200 border border-slate-200 rounded-md flex items-center justify-center font-bold text-xs cursor-pointer active:scale-95"
+                          >
+                            -
+                          </button>
+                          <span className="font-mono font-black text-slate-800 px-1 text-xs min-w-[32px] text-center">
+                            {item.quantity}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => updateCartQty(item.id, Number((item.quantity + 0.5).toFixed(2)))}
+                            className="w-6 h-6 bg-white hover:bg-slate-200 border border-slate-200 rounded-md flex items-center justify-center font-bold text-xs cursor-pointer active:scale-95"
+                          >
+                            +
+                          </button>
+                        </div>
+
+                        {/* Hapus Button */}
                         <button
-                          onClick={() => updateCartQty(item.id, item.quantity - 0.5)}
-                          className="w-5 h-5 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-[10px]"
+                          type="button"
+                          onClick={() => {
+                            removeFromCart(item.id);
+                            showToast(`Layanan [${item.serviceName}] dihapus dari keranjang.`);
+                          }}
+                          className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-lg font-bold text-[10.5px] transition flex items-center gap-1 cursor-pointer active:scale-95 shrink-0"
+                          title="Hapus layanan ini dari keranjang"
                         >
-                          -
-                        </button>
-                        <span className="font-mono font-bold text-slate-800">{item.quantity}</span>
-                        <button
-                          onClick={() => updateCartQty(item.id, item.quantity + 0.5)}
-                          className="w-5 h-5 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center font-bold text-[10px]"
-                        >
-                          +
+                          <span>🗑️</span>
+                          <span>Hapus</span>
                         </button>
                       </div>
                     </div>
-
-                    <div className="text-right space-y-1">
-                      <div className="font-bold text-slate-900">Rp {item.subtotal.toLocaleString()}</div>
-                      <button
-                        onClick={() => removeFromCart(item.id)}
-                        className="text-[10px] text-red-500 hover:underline"
-                      >
-                        Hapus
-                      </button>
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
 
@@ -3281,51 +3493,210 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                 </div>
 
                 {/* Clickable Payment Status Mechanism */}
-                <div className="space-y-2 bg-slate-50 p-3 rounded-2xl border border-slate-150">
-                  <label className="text-slate-500 font-bold block text-[11px] uppercase tracking-wider">Status Pembayaran:</label>
-                  
-                  {paidStatus === 'Belum Lunas' ? (
-                    <div className="space-y-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowPaymentChoiceModal(true);
-                        }}
-                        className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-dashed border-rose-300 rounded-xl text-xs font-black transition cursor-pointer text-center animate-pulse shadow-sm"
-                        id="payment-status-unpaid-trigger"
-                      >
-                        🔴 BELUM LUNAS (Klik untuk Melunasi)
-                      </button>
-                      <p className="text-[8.5px] text-slate-400 text-center font-normal leading-tight">
-                        Default dicatat Belum Lunas. Klik tombol merah di atas untuk melunasi langsung.
+                <div className="space-y-2.5 bg-slate-50 p-3.5 rounded-2xl border border-slate-150">
+                  <div className="flex items-center justify-between">
+                    <label className="text-slate-600 font-extrabold block text-[11px] uppercase tracking-wider">
+                      Status & Opsi Pembayaran:
+                    </label>
+                    <span className="text-[10px] text-slate-400 font-semibold">Pilih cara bayar</span>
+                  </div>
+
+                  {/* 3-Way Segmented Tabs: Belum Lunas, Bayar DP, Bayar Lunas */}
+                  <div className="grid grid-cols-3 gap-1 bg-slate-200/70 p-1 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPaidStatus('Belum Lunas');
+                      }}
+                      className={`py-1.5 px-2 rounded-lg text-[10.5px] font-extrabold transition cursor-pointer text-center ${
+                        paidStatus === 'Belum Lunas'
+                          ? 'bg-rose-500 text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/60'
+                      }`}
+                    >
+                      🔴 Belum Lunas
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPaidStatus('Bayar DP');
+                        if (!dpAmountInput) {
+                          setDpAmountInput(Math.round(totalCartAmount * 0.5).toString());
+                        }
+                      }}
+                      className={`py-1.5 px-2 rounded-lg text-[10.5px] font-extrabold transition cursor-pointer text-center ${
+                        paidStatus === 'Bayar DP'
+                          ? 'bg-amber-500 text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/60'
+                      }`}
+                      id="btn-option-bayar-dp"
+                    >
+                      🟠 Bayar DP
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPaidStatus('Lunas');
+                        setShowPaymentChoiceModal(true);
+                      }}
+                      className={`py-1.5 px-2 rounded-lg text-[10.5px] font-extrabold transition cursor-pointer text-center ${
+                        paidStatus === 'Lunas'
+                          ? 'bg-emerald-500 text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/60'
+                      }`}
+                    >
+                      🟢 Bayar Lunas
+                    </button>
+                  </div>
+
+                  {/* Mode 1: Belum Lunas Display */}
+                  {paidStatus === 'Belum Lunas' && (
+                    <div className="space-y-1.5 p-2.5 bg-rose-50/60 border border-rose-200 rounded-xl text-center animate-fadeIn">
+                      <div className="text-xs font-black text-rose-700">
+                        🔴 PEMBAYARAN BELUM LUNAS
+                      </div>
+                      <p className="text-[9.5px] text-slate-500 font-medium leading-normal">
+                        Tagihan sebesar <strong>Rp {totalCartAmount.toLocaleString()}</strong> akan dibayarkan nanti saat cucian selesai atau diambil.
                       </p>
                     </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="flex gap-2">
-                        <div 
-                          className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 bg-sky-50 text-sky-800 border border-sky-300 rounded-xl text-xs font-black text-center"
-                        >
-                          🟢 LUNAS (Metode: {paymentMethod === 'Transfer' ? '📩 Transfer' : paymentMethod === 'Deposit' ? '💳 Deposit' : '💵 Cash'})
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setPaidStatus('Belum Lunas');
-                            setPaymentMethod('Cash');
-                          }}
-                          className="py-2.5 px-3 bg-slate-200 hover:bg-slate-300 border border-slate-300 rounded-xl text-[10.5px] font-bold text-slate-700 transition"
-                          title="Batalkan pelunasan"
-                        >
-                          Reset
-                        </button>
+                  )}
+
+                  {/* Mode 2: Bayar DP (Down Payment) Tools */}
+                  {paidStatus === 'Bayar DP' && (
+                    <div className="space-y-2.5 p-3 bg-amber-50/80 border border-amber-300 rounded-xl animate-fadeIn text-xs" id="tools-bayar-dp">
+                      <div className="flex items-center justify-between pb-1.5 border-b border-amber-200">
+                        <span className="font-extrabold text-amber-900 text-xs flex items-center gap-1">
+                          <span>🟠</span> Tools Bayar DP (Uang Muka)
+                        </span>
+                        <span className="text-[9px] bg-amber-200/80 text-amber-900 font-bold px-1.5 py-0.5 rounded">
+                          Bayar Sebagian
+                        </span>
                       </div>
+
+                      {/* DP Input Nominal */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase text-amber-900 block">
+                          Nominal Uang DP (Rp):
+                        </label>
+                        <div className="relative">
+                          <span className="absolute left-3 top-2.5 font-bold text-amber-700 text-xs">Rp</span>
+                          <input
+                            type="number"
+                            min="1000"
+                            max={Math.max(1, totalCartAmount - 1)}
+                            value={dpAmountInput}
+                            onChange={(e) => setDpAmountInput(e.target.value)}
+                            placeholder="Contoh: 20000"
+                            className="w-full pl-9 pr-3 py-2 bg-white border border-amber-300 rounded-xl text-xs font-black text-slate-900 focus:outline-none focus:ring-1 focus:ring-amber-500 font-mono shadow-xs"
+                            id="input-dp-amount"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Quick Percentage Chips */}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[9px] text-amber-900 font-bold">Preset DP:</span>
+                        {[
+                          { label: '25%', ratio: 0.25 },
+                          { label: '50%', ratio: 0.5 },
+                          { label: '75%', ratio: 0.75 },
+                        ].map((chip) => {
+                          const val = Math.round(totalCartAmount * chip.ratio);
+                          return (
+                            <button
+                              key={chip.label}
+                              type="button"
+                              onClick={() => setDpAmountInput(val.toString())}
+                              className="px-2 py-0.5 bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg text-[9.5px] font-bold transition cursor-pointer active:scale-95 shadow-3xs"
+                            >
+                              {chip.label} (Rp {val.toLocaleString()})
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* DP Calculation Status Banner */}
+                      {(() => {
+                        const dpVal = parseInt(dpAmountInput, 10) || 0;
+                        const remaining = Math.max(0, totalCartAmount - dpVal);
+                        return (
+                          <div className="bg-white p-2.5 rounded-xl border border-amber-200 space-y-1 font-mono">
+                            <div className="flex justify-between text-[10.5px]">
+                              <span className="text-slate-500">Total Tagihan:</span>
+                              <span className="font-bold text-slate-800">Rp {totalCartAmount.toLocaleString()}</span>
+                            </div>
+                            <div className="flex justify-between text-[10.5px] text-amber-700 font-bold">
+                              <span>Dibayar Sekarang (DP):</span>
+                              <span>Rp {dpVal.toLocaleString()}</span>
+                            </div>
+                            <div className="flex justify-between text-[11px] pt-1 border-t border-slate-150 font-black text-rose-600">
+                              <span>Sisa Tagihan Nanti:</span>
+                              <span>Rp {remaining.toLocaleString()}</span>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Payment Method Selector for DP */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase text-amber-900 block">
+                          Metode Pembayaran DP:
+                        </label>
+                        <div className="grid grid-cols-4 gap-1">
+                          {(['Cash', 'QRIS', 'Transfer', 'Deposit'] as const).map((method) => {
+                            const isSel = dpPaymentMethod === method;
+                            const isDeposit = method === 'Deposit';
+                            const dpVal = parseInt(dpAmountInput, 10) || 0;
+                            const depositDisabled = isDeposit && (!selectedCustomer || selectedCustomer.depositBalance < dpVal);
+
+                            return (
+                              <button
+                                key={method}
+                                type="button"
+                                disabled={depositDisabled}
+                                onClick={() => setDpPaymentMethod(method)}
+                                className={`py-1.5 px-1 rounded-lg text-[9.5px] font-black transition cursor-pointer text-center border ${
+                                  isSel
+                                    ? 'bg-amber-500 border-amber-600 text-white shadow-xs'
+                                    : depositDisabled
+                                    ? 'bg-slate-100 border-slate-200 text-slate-350 cursor-not-allowed'
+                                    : 'bg-white hover:bg-amber-100 border-amber-200 text-amber-900'
+                                }`}
+                              >
+                                {method === 'Cash' ? '💵 Cash' : method === 'QRIS' ? '📱 QRIS' : method === 'Transfer' ? '🏦 Trf' : '💳 Depo'}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {dpPaymentMethod === 'Deposit' && selectedCustomer && (
+                          <p className="text-[9px] text-indigo-700 font-bold mt-0.5">
+                            Saldo Deposit: Rp {selectedCustomer.depositBalance.toLocaleString()}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Mode 3: Lunas Display */}
+                  {paidStatus === 'Lunas' && (
+                    <div className="space-y-2 p-3 bg-emerald-50/80 border border-emerald-300 rounded-xl animate-fadeIn text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-extrabold text-emerald-800 text-xs flex items-center gap-1">
+                          <span>🟢</span> LUNAS DIBAYAR PENUH
+                        </span>
+                        <span className="font-black text-emerald-700 bg-white px-2 py-0.5 rounded-md border border-emerald-200 text-[10px]">
+                          {paymentMethod === 'Transfer' ? '🏦 Transfer' : paymentMethod === 'Deposit' ? '💳 Deposit' : paymentMethod === 'QRIS' ? '📱 QRIS' : '💵 Cash'}
+                        </span>
+                      </div>
+                      <p className="text-[9.5px] text-emerald-700 font-medium leading-normal">
+                        Seluruh tagihan <strong>Rp {totalCartAmount.toLocaleString()}</strong> dibayar lunas pada saat transaksi dibuat.
+                      </p>
                       <button
                         type="button"
                         onClick={() => setShowPaymentChoiceModal(true)}
-                        className="w-full text-center text-[10.5px] text-sky-600 hover:text-sky-700 font-extrabold hover:underline cursor-pointer pt-0.5"
+                        className="w-full py-1.5 bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-extrabold text-[10px] rounded-lg transition cursor-pointer text-center shadow-3xs"
                       >
-                        Ubah Metode Pelunasan (Cash / Transfer / Deposit)
+                        Ubah Saluran Pelunasan (Cash / Transfer / QRIS / Deposit)
                       </button>
                     </div>
                   )}
@@ -3365,10 +3736,22 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                       </span>
                     </div>
                   )}
-                  {paymentMethod === 'Deposit' && selectedCustomer && (
+                  {paymentMethod === 'Deposit' && selectedCustomer && paidStatus === 'Lunas' && (
                     <div className="flex justify-between text-indigo-700 text-[11px] font-bold">
                       <span>Bayar via Deposit Pelanggan:</span>
                       <span>- Rp {totalCartAmount.toLocaleString()}</span>
+                    </div>
+                  )}
+                  {paidStatus === 'Bayar DP' && (
+                    <div className="space-y-1 bg-amber-50 p-2.5 rounded-xl border border-amber-200 text-xs font-bold text-amber-900 font-mono">
+                      <div className="flex justify-between">
+                        <span>Uang Muka (Bayar DP):</span>
+                        <span>- Rp {(parseInt(dpAmountInput, 10) || 0).toLocaleString()} ({dpPaymentMethod})</span>
+                      </div>
+                      <div className="flex justify-between text-rose-600 font-black border-t border-amber-200/60 pt-1">
+                        <span>Sisa Tagihan Belum Lunas:</span>
+                        <span>Rp {Math.max(0, totalCartAmount - (parseInt(dpAmountInput, 10) || 0)).toLocaleString()}</span>
+                      </div>
                     </div>
                   )}
                   <div className="flex justify-between border-t border-slate-200 pt-2 font-black text-slate-800 text-sm">
@@ -3432,6 +3815,9 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                         setPerfumeSelection(perfumes[0]?.name || 'Floral');
                         setCustomEntryDate('');
                         setCustomCompletionDate('');
+                        setPaidStatus('Belum Lunas');
+                        setDpAmountInput('');
+                        setDpPaymentMethod('Cash');
                         showToast("Formulir transaksi berhasil di-reset untuk pelanggan baru.");
                       }
                     }}
@@ -3685,13 +4071,18 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                               </p>
                               <div className="flex items-center gap-1.5 mt-0.5 text-[10px]">
                                 <span className={`font-black tracking-tight ${
-                                  o.paymentStatus === 'Lunas' ? 'text-emerald-600' : 'text-rose-600'
+                                  o.paymentStatus === 'Lunas' ? 'text-emerald-600' : o.paymentStatus === 'Bayar DP' ? 'text-amber-600' : 'text-rose-600'
                                 }`}>
                                   Rp {o.totalAmount.toLocaleString('id-ID')}
                                 </span>
                                 <span className="text-slate-300">|</span>
                                 <span className="text-slate-400">Bayar: </span>
                                 <span className="font-semibold text-slate-700">{o.paymentMethod}</span>
+                                {o.paymentStatus === 'Bayar DP' && (
+                                  <span className="text-[8px] font-black bg-amber-100 text-amber-800 border border-amber-250 px-1.5 py-0.2 rounded-md">
+                                    DP: Rp {(o.paidAmount || o.downPaymentAmount || 0).toLocaleString()} (Sisa: Rp {(o.remainingAmount ?? (o.totalAmount - (o.paidAmount || 0))).toLocaleString()})
+                                  </span>
+                                )}
                                 {o.clothesCount !== undefined && o.clothesCount > 0 && (
                                   <span className="text-[8px] font-black bg-indigo-50 text-indigo-700 border border-indigo-150 px-1 py-0.25 rounded-md flex items-center gap-0.5">
                                     👕 {o.clothesCount} Pcs
@@ -3742,14 +4133,35 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                                 ✏️
                               </button>
 
-                              {o.paymentStatus !== 'Lunas' && (
+                              {/* Prominent Payment Button: Orange for Bayar DP, Green for Lunas, Red/Emerald for Belum Lunas */}
+                              {o.paymentStatus === 'Bayar DP' ? (
                                 <button
                                   type="button"
                                   onClick={() => setDirectPaymentOrderId(o.id)}
-                                  className="px-2 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-[9.5px] font-black transition flex items-center gap-1 cursor-pointer shadow-xs"
-                                  title="Bayar Instan"
+                                  className="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[9.5px] font-black transition flex items-center gap-1 cursor-pointer shadow-xs active:scale-95 animate-pulse"
+                                  title="Bayar sisa tagihan DP"
+                                  id={`btn-bayar-dp-${o.id}`}
                                 >
-                                  💵 Bayar
+                                  <span>💳</span>
+                                  <span>Bayar Sisa: Rp {(o.remainingAmount ?? (o.totalAmount - (o.paidAmount || 0))).toLocaleString('id-ID')}</span>
+                                </button>
+                              ) : o.paymentStatus === 'Lunas' ? (
+                                <div
+                                  className="px-2 py-1.5 bg-emerald-500 text-white rounded-lg text-[9.5px] font-black flex items-center gap-1 shadow-xs select-none cursor-default"
+                                  title="Pembayaran telah lunas"
+                                >
+                                  <span>🟢</span>
+                                  <span>Lunas</span>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setDirectPaymentOrderId(o.id)}
+                                  className="px-2 py-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-lg text-[9.5px] font-black transition flex items-center gap-1 cursor-pointer shadow-xs active:scale-95"
+                                  title="Bayar tagihan"
+                                >
+                                  <span>💵</span>
+                                  <span>Bayar</span>
                                 </button>
                               )}
 
@@ -3760,6 +4172,8 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                                   className={`px-3 py-1 font-bold rounded-lg text-[9.5px] transition flex flex-col items-center justify-center gap-0.5 shadow-xs border cursor-pointer min-w-[125px] ${
                                     o.paymentStatus === 'Lunas'
                                       ? 'bg-emerald-50 hover:bg-emerald-100/80 border-emerald-300 text-emerald-800'
+                                      : o.paymentStatus === 'Bayar DP'
+                                      ? 'bg-amber-50 hover:bg-amber-100/80 border-amber-300 text-amber-900'
                                       : 'bg-rose-50 hover:bg-rose-100/80 border-rose-300 text-rose-800'
                                   }`}
                                 >
@@ -3770,9 +4184,13 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                                     </span>
                                   )}
                                   <span className={`text-[8px] font-extrabold px-1.5 py-0.25 rounded ${
-                                    o.paymentStatus === 'Lunas' ? 'bg-emerald-600 text-white' : 'bg-rose-600 text-white'
+                                    o.paymentStatus === 'Lunas'
+                                      ? 'bg-emerald-600 text-white'
+                                      : o.paymentStatus === 'Bayar DP'
+                                      ? 'bg-amber-500 text-white'
+                                      : 'bg-rose-600 text-white'
                                   }`}>
-                                    {o.paymentStatus === 'Lunas' ? 'Lunas' : 'Belum Lunas'}
+                                    {o.paymentStatus === 'Lunas' ? 'Lunas' : o.paymentStatus === 'Bayar DP' ? 'Bayar DP' : 'Belum Lunas'}
                                   </span>
                                 </button>
                               )}
@@ -3864,19 +4282,21 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                                   <span>📅 Est Selesai:</span>
                                   <span className="text-slate-700 font-bold">{new Date(o.estimatedCompletion).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}</span>
                                 </div>
-                                <div className="pt-1 border-t border-slate-150 flex items-center justify-between text-[10px] font-extrabold">
+                                <div className="pt-1 border-t border-slate-150 flex items-center justify-between text-[10px] font-extrabold flex-wrap gap-1">
                                   <div className="flex items-center gap-1">
                                     <span className="text-slate-400 font-bold">Total:</span>
                                     <span className={`font-black ${
-                                      o.paymentStatus === 'Lunas' ? 'text-emerald-600' : 'text-rose-600'
+                                      o.paymentStatus === 'Lunas' ? 'text-emerald-600' : o.paymentStatus === 'Bayar DP' ? 'text-amber-600' : 'text-rose-600'
                                     }`}>Rp {o.totalAmount.toLocaleString('id-ID')}</span>
                                   </div>
                                   <span className={`px-1.5 py-0.2 rounded text-[7.5px] font-black uppercase ${
                                     o.paymentStatus === 'Lunas' 
                                       ? 'bg-emerald-50 text-emerald-700 border border-emerald-150' 
+                                      : o.paymentStatus === 'Bayar DP'
+                                      ? 'bg-amber-50 text-amber-800 border border-amber-300'
                                       : 'bg-rose-50 text-rose-600 border border-rose-150'
                                   }`}>
-                                    {o.paymentStatus}
+                                    {o.paymentStatus === 'Bayar DP' ? `DP: Sisa Rp ${(o.remainingAmount ?? (o.totalAmount - (o.paidAmount || 0))).toLocaleString()}` : o.paymentStatus}
                                   </span>
                                 </div>
                               </div>
@@ -3884,17 +4304,39 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
 
                             {/* Actions Segment - Horizontally aligned processes */}
                             <div className="flex items-stretch gap-1.5">
-                              {o.paymentStatus !== 'Lunas' && (
+                              {o.paymentStatus === 'Bayar DP' ? (
                                 <button
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     setDirectPaymentOrderId(o.id);
                                   }}
-                                  className="px-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-[9.5px] font-extrabold transition flex items-center justify-center gap-1 shadow-sm active:scale-[0.98] cursor-pointer flex-shrink-0"
+                                  className="px-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[9.5px] font-extrabold transition flex items-center justify-center gap-1 shadow-sm active:scale-[0.98] cursor-pointer flex-shrink-0 animate-pulse"
+                                  title="Bayar Sisa DP"
+                                >
+                                  <span>💳</span>
+                                  <span>Bayar Sisa: Rp {(o.remainingAmount ?? (o.totalAmount - (o.paidAmount || 0))).toLocaleString()}</span>
+                                </button>
+                              ) : o.paymentStatus === 'Lunas' ? (
+                                <div
+                                  className="px-2 py-1.5 bg-emerald-500 text-white rounded-lg text-[9.5px] font-black flex items-center justify-center gap-1 shadow-xs select-none cursor-default flex-shrink-0"
+                                  title="Pembayaran telah lunas"
+                                >
+                                  <span>🟢</span>
+                                  <span>Lunas</span>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDirectPaymentOrderId(o.id);
+                                  }}
+                                  className="px-2.5 bg-rose-500 hover:bg-rose-600 text-white rounded-lg text-[9.5px] font-extrabold transition flex items-center justify-center gap-1 shadow-sm active:scale-[0.98] cursor-pointer flex-shrink-0"
                                   title="Bayar"
                                 >
-                                  💵 Bayar
+                                  <span>💵</span>
+                                  <span>Bayar</span>
                                 </button>
                               )}
 
@@ -6921,6 +7363,11 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                           </span>
                           <span>&bull;</span>
                           <span>Per {variant.unit}</span>
+                          {cartItems.some(it => it.serviceId === variant.id) && (
+                            <span className="bg-emerald-100 text-emerald-800 font-black px-1.5 py-0.25 rounded text-[8.5px]">
+                              ✅ Di Keranjang
+                            </span>
+                          )}
                         </div>
                         {/* Price Display */}
                         <div className="text-xs font-bold text-sky-700 mt-1">
@@ -6930,6 +7377,22 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
 
                       {/* Action buttons inside variant card */}
                       <div className="flex flex-col gap-1 shrink-0 justify-end">
+                        {cartItems.some(it => it.serviceId === variant.id) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const match = cartItems.find(it => it.serviceId === variant.id);
+                              if (match) {
+                                removeFromCart(match.id);
+                                showToast(`[${variant.name}] dihapus dari keranjang.`);
+                              }
+                            }}
+                            className="px-2 py-0.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold rounded-lg text-[8.5px] transition cursor-pointer active:scale-95"
+                            title="Hapus dari keranjang"
+                          >
+                            🗑️ Hapus
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => {
@@ -6948,7 +7411,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                           }}
                           className="px-2.5 py-1 bg-sky-500 hover:bg-sky-600 text-slate-950 font-extrabold rounded-lg text-[9px] transition shadow-2xs flex items-center justify-center gap-0.5 cursor-pointer"
                         >
-                          + Pilih
+                          {cartItems.some(it => it.serviceId === variant.id) ? '+ Tambah' : '+ Pilih'}
                         </button>
                       </div>
                     </div>
@@ -7253,156 +7716,207 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
             </div>
 
             {/* List Item & Services Editor */}
-            <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <label className="text-[10px] font-extrabold text-slate-600 uppercase tracking-tight block">Daftar Layanan pada Transaksi:</label>
+            <div className="space-y-3">
+              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 pb-1 border-b border-slate-100">
+                <div>
+                  <label className="text-[10.5px] font-extrabold text-slate-800 uppercase tracking-tight block">
+                    📋 Rincian Layanan Pesanan ({editingOrderItems.length} Layanan):
+                  </label>
+                  <span className="text-[10px] text-slate-400">
+                    Bebas merubah jenis layanan, menghapus, atau menambah layanan baru
+                  </span>
+                </div>
                 
-                <select
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      const selSrv = services.find(s => s.id === e.target.value);
-                      if (selSrv) {
-                        const exists = editingOrderItems.find(it => it.serviceId === selSrv.id);
-                        if (exists) {
-                          alert("Layanan ini sudah diinput pada keranjang transaksi!");
-                        } else {
-                          const formattedName = selSrv.category === 'kiloan'
-                            ? `${selSrv.name}-${selSrv.promiseName || 'Reguler'}`
-                            : `${selSrv.name}-${selSrv.promiseName || 'Sedang'}`;
-
-                          const newItem: OrderItem = {
-                            id: 'item_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
-                            serviceId: selSrv.id,
-                            serviceName: formattedName,
-                            price: selSrv.price,
-                            quantity: 1,
-                            subtotal: selSrv.price
-                          };
-                          setEditingOrderItems([...editingOrderItems, newItem]);
-                        }
-                      }
-                      e.target.value = "";
-                    }
+                {/* Add Service Selector - Compact Grouped Trigger */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGroupedServicePickerTarget({ mode: 'add_to_edit_order' });
+                    setPickerSelectedGroupName(null);
+                    setPickerCategoryFilter('all');
                   }}
-                  className="bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-800 font-extrabold p-1 px-2.5 rounded-lg text-[10px] focus:outline-none cursor-pointer"
+                  className="bg-sky-500 hover:bg-sky-600 text-slate-950 font-black py-1.5 px-3 rounded-xl text-xs focus:outline-none cursor-pointer shadow-xs transition flex items-center gap-1.5 active:scale-95 shrink-0"
+                  id="btn-trigger-add-service-grouped"
                 >
-                  <option value="">➕ Tambah Jasa Cucian...</option>
-                  <optgroup label="🧺 LAYANAN KILOAN" className="font-bold text-sky-850 bg-sky-50">
-                    {services.filter(s => s.category === 'kiloan').map(s => (
-                      <option key={s.id} value={s.id} className="font-semibold text-slate-800 bg-white">
-                        {s.name} - Rp {s.price.toLocaleString()}/{s.unit}
-                      </option>
-                    ))}
-                  </optgroup>
-                  <optgroup label="🧥 LAYANAN SATUAN" className="font-bold text-indigo-850 bg-indigo-50">
-                    {services.filter(s => s.category !== 'kiloan').map(s => (
-                      <option key={s.id} value={s.id} className="font-semibold text-slate-800 bg-white">
-                        {s.name} - Rp {s.price.toLocaleString()}/{s.unit}
-                      </option>
-                    ))}
-                  </optgroup>
-                </select>
+                  <span>➕</span>
+                  <span>Tambah Layanan Baru</span>
+                </button>
               </div>
 
-              <div className="border border-slate-200 rounded-2xl overflow-hidden max-h-48 overflow-y-auto">
-                <table className="w-full text-left font-sans text-xs">
-                  <thead>
-                    <tr className="bg-slate-50 text-slate-500 border-b border-slate-100 text-[9.5px] uppercase font-bold">
-                      <th className="p-2.5">Layanan</th>
-                      <th className="p-2.5">Tarif</th>
-                      <th className="p-2.5 text-center">Jumlah / Qty</th>
-                      <th className="p-2.5 text-right">Subtotal</th>
-                      <th className="p-2.5 text-center">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-slate-700">
-                    {editingOrderItems.map((it, idx) => (
-                      <tr key={`edit-item-${idx}`} className="hover:bg-slate-50/50">
-                        <td className="p-2.5 font-bold text-slate-900">{it.serviceName}</td>
-                        <td className="p-2.5 text-slate-500 font-mono">Rp {it.price.toLocaleString()}</td>
-                        <td className="p-2.5 text-center">
-                          <div className="flex items-center justify-center gap-1">
+              {/* Service Items Cards List */}
+              <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
+                {editingOrderItems.map((it, idx) => {
+                  const srv = services.find(s => s.id === it.serviceId);
+                  const isKiloan = srv ? srv.category === 'kiloan' : it.serviceName.toLowerCase().includes('kilo');
+                  const isAntar = srv ? (srv.category === 'antar_jemput' || srv.category === 'antar jemput') : it.serviceName.toLowerCase().includes('antar');
+
+                  return (
+                    <div 
+                      key={it.id || `edit-item-${idx}`} 
+                      className="p-3 bg-slate-50 hover:bg-slate-100/70 rounded-2xl border border-slate-200 space-y-2.5 transition"
+                    >
+                      {/* Top: Name, Badge, Unit price & Delete button */}
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="space-y-0.5 flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className={`text-[8.5px] font-black uppercase px-1.5 py-0.5 rounded ${
+                              isKiloan ? 'bg-sky-100 text-sky-800' : isAntar ? 'bg-purple-100 text-purple-800' : 'bg-amber-100 text-amber-800'
+                            }`}>
+                              {isKiloan ? '🧺 Kiloan' : isAntar ? '🛵 Antar Jemput' : '🧥 Satuan'}
+                            </span>
+                            <span className="font-extrabold text-slate-900 text-xs truncate">
+                              {it.serviceName}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-500 font-mono">
+                            Tarif: Rp {it.price.toLocaleString()} / {srv?.unit || (isKiloan ? 'kg' : 'pcs')}
+                            {isKiloan && <span className="ml-1 text-amber-700 font-bold">(Minimal 3 kg)</span>}
+                          </div>
+                        </div>
+
+                        {/* Hapus Button: prominent and easy to tap */}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveOrderItem(idx)}
+                          className="px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 rounded-xl text-xs font-bold transition flex items-center gap-1 active:scale-95 cursor-pointer shrink-0 shadow-3xs"
+                          title="Hapus layanan ini"
+                        >
+                          <span>🗑️</span>
+                          <span>Hapus</span>
+                        </button>
+                      </div>
+
+                      {/* Middle: Compact Grouped Change Service Trigger */}
+                      <div className="flex items-center justify-between gap-2 bg-white p-2 rounded-xl border border-slate-150">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-[10px] text-slate-500 font-bold shrink-0">🔄 Layanan:</span>
+                          <span className="text-[11px] font-extrabold text-slate-800 truncate">{it.serviceName}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setGroupedServicePickerTarget({ mode: 'change_edit_order_item', itemIndex: idx });
+                            setPickerSelectedGroupName(null);
+                            setPickerCategoryFilter('all');
+                          }}
+                          className="px-2.5 py-1 bg-sky-50 hover:bg-sky-100 text-sky-850 border border-sky-200 rounded-lg text-[10.5px] font-bold transition flex items-center gap-1 cursor-pointer active:scale-95 shrink-0"
+                          title="Ganti jenis layanan ini"
+                        >
+                          <span>🔄 Ganti Layanan</span>
+                        </button>
+                      </div>
+
+                      {/* Bottom: Qty controls and Subtotal */}
+                      <div className="flex justify-between items-center gap-2 pt-1 border-t border-slate-200/60">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] text-slate-500 font-bold">Jumlah / Berat:</span>
+                          <div className="flex items-center gap-1">
                             <button
                               type="button"
                               onClick={() => {
-                                const newQty = Math.max(0.1, it.quantity - 0.5);
+                                const newQty = Math.max(0.1, Number((it.quantity - 0.5).toFixed(2)));
+                                const billingQty = isKiloan ? Math.max(newQty, 3.0) : newQty;
                                 const updated = [...editingOrderItems];
                                 updated[idx] = {
                                   ...updated[idx],
-                                  quantity: Number(newQty.toFixed(2)),
-                                  subtotal: Math.round(updated[idx].price * newQty)
+                                  quantity: newQty,
+                                  subtotal: Math.round(updated[idx].price * billingQty)
                                 };
                                 setEditingOrderItems(updated);
                               }}
-                              className="w-4.5 h-4.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 font-bold rounded flex items-center justify-center text-[10px]"
+                              className="w-6 h-6 bg-white hover:bg-slate-200 border border-slate-250 font-black rounded-lg flex items-center justify-center text-xs active:scale-95 cursor-pointer"
                             >
                               -
                             </button>
                             <input
                               type="number"
                               step="0.1"
+                              min="0.1"
                               value={it.quantity}
                               onChange={(e) => {
                                 const val = parseFloat(e.target.value) || 0;
+                                const billingQty = isKiloan ? Math.max(val, 3.0) : val;
                                 const updated = [...editingOrderItems];
                                 updated[idx] = {
                                   ...updated[idx],
                                   quantity: val,
-                                  subtotal: Math.round(updated[idx].price * val)
+                                  subtotal: Math.round(updated[idx].price * billingQty)
                                 };
                                 setEditingOrderItems(updated);
                               }}
-                              className="w-10 bg-slate-50 text-center rounded border border-slate-200 font-bold text-[11px] focus:outline-none"
+                              className="w-14 bg-white text-center rounded-lg border border-slate-250 font-black text-xs py-0.5 focus:outline-none focus:border-sky-500 font-mono"
                             />
                             <button
                               type="button"
                               onClick={() => {
-                                const newQty = it.quantity + 0.5;
+                                const newQty = Number((it.quantity + 0.5).toFixed(2));
+                                const billingQty = isKiloan ? Math.max(newQty, 3.0) : newQty;
                                 const updated = [...editingOrderItems];
                                 updated[idx] = {
                                   ...updated[idx],
-                                  quantity: Number(newQty.toFixed(2)),
-                                  subtotal: Math.round(updated[idx].price * newQty)
+                                  quantity: newQty,
+                                  subtotal: Math.round(updated[idx].price * billingQty)
                                 };
                                 setEditingOrderItems(updated);
                               }}
-                              className="w-4.5 h-4.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 font-bold rounded flex items-center justify-center text-[10px]"
+                              className="w-6 h-6 bg-white hover:bg-slate-200 border border-slate-250 font-black rounded-lg flex items-center justify-center text-xs active:scale-95 cursor-pointer"
                             >
                               +
                             </button>
+                            <span className="text-[10px] text-slate-500 font-semibold ml-1">
+                              {srv?.unit || (isKiloan ? 'kg' : 'pcs')}
+                            </span>
                           </div>
-                        </td>
-                        <td className="p-2.5 text-right font-black text-slate-900 font-mono">
-                          Rp {it.subtotal.toLocaleString()}
-                        </td>
-                        <td className="p-2.5 text-center">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const updated = editingOrderItems.filter((_, i) => i !== idx);
-                              setEditingOrderItems(updated);
-                            }}
-                            className="p-1 text-red-600 hover:text-red-800 transition rgb"
-                            title="Hapus Item"
-                          >
-                            ❌
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                    {editingOrderItems.length === 0 && (
-                      <tr>
-                        <td colSpan={5} className="p-4 text-center text-slate-400 font-medium font-semibold">Belum ada layanan di keranjang ini.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+                        </div>
+
+                        {/* Subtotal */}
+                        <div className="text-right">
+                          <span className="text-[9px] text-slate-400 block">Subtotal:</span>
+                          <span className="font-black text-slate-900 font-mono text-xs">
+                            Rp {it.subtotal.toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Empty State when all services were deleted */}
+                {editingOrderItems.length === 0 && (
+                  <div className="p-4 bg-amber-50/70 border border-dashed border-amber-200 rounded-2xl text-center space-y-2">
+                    <p className="text-xs font-bold text-amber-900">
+                      ⚠️ Semua layanan pada pesanan ini telah dihapus.
+                    </p>
+                    <p className="text-[10px] text-amber-700">
+                      Silakan pilih layanan baru di atas atau klik salah satu layanan di bawah untuk menambahkan:
+                    </p>
+                    <div className="flex gap-1.5 flex-wrap justify-center pt-1">
+                      {services.filter(s => s.isActive).slice(0, 3).map(s => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() => handleAddServiceToEditingOrder(s.id)}
+                          className="px-2.5 py-1 bg-white hover:bg-amber-100 border border-amber-300 rounded-xl text-[10px] font-bold text-amber-900 transition cursor-pointer active:scale-95 shadow-3xs"
+                        >
+                          ➕ {s.name} ({s.promiseName || s.category}) - Rp {s.price.toLocaleString()}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Total Summary Row */}
               <div className="flex justify-between items-center p-3 bg-red-50 border border-red-100 rounded-2xl">
-                <span className="font-extrabold text-red-700 tracking-wider text-[10px] uppercase">Rincian Estimasi Total Transaksi Baru:</span>
-                <strong className="text-red-600 font-black text-xs font-mono">
+                <div>
+                  <span className="font-extrabold text-red-700 tracking-wider text-[10px] uppercase block">
+                    Total Estimasi Transaksi Baru:
+                  </span>
+                  <span className="text-[9.5px] text-red-500">
+                    {editingOrderItems.length} layanan terdaftar
+                  </span>
+                </div>
+                <strong className="text-red-600 font-black text-sm font-mono">
                   Rp {editingOrderItems.reduce((sum, item) => sum + item.subtotal, 0).toLocaleString()}
                 </strong>
               </div>
@@ -7583,23 +8097,48 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
               }
 
               if (confirmPaymentMethodName === 'Cash') {
+                const isDP = transitionOrder.paymentStatus === 'Bayar DP';
+                const targetPayable = (isDP && transitionOrder.remainingAmount !== undefined)
+                  ? transitionOrder.remainingAmount
+                  : transitionOrder.totalAmount;
                 const rcv = parseInt(cashReceivedInput, 10) || 0;
-                const refund = rcv - transitionOrder.totalAmount;
+                const refund = rcv - targetPayable;
                 const isShort = refund < 0;
 
                 return (
                   <div className="space-y-4">
                     <div>
-                      <span className="text-[10px] font-black uppercase text-emerald-600 tracking-wider">Kasir Tunai / Cash</span>
+                      <span className="text-[10px] font-black uppercase text-emerald-600 tracking-wider">
+                        {isDP ? 'Pelunasan Sisa DP (Cash)' : 'Kasir Tunai / Cash'}
+                      </span>
                       <h4 className="font-extrabold text-slate-900 text-base">💵 Pembayaran Tunai (Cash)</h4>
                       <p className="text-[11px] text-slate-500 font-semibold mt-1">
                         Nomor Nota: <span className="font-mono font-bold text-sky-850">{transitionOrder.invoiceNumber}</span>
                       </p>
                     </div>
 
-                    <div className="p-3 bg-slate-50 rounded-2xl border border-slate-150 text-center">
-                      <span className="text-[9px] text-slate-400 font-bold block uppercase tracking-wider">Total Tagihan</span>
-                      <span className="text-slate-850 font-black text-lg font-mono">Rp {transitionOrder.totalAmount.toLocaleString('id-ID')}</span>
+                    <div className="p-3 bg-slate-50 rounded-2xl border border-slate-150 text-center space-y-1">
+                      {isDP ? (
+                        <>
+                          <div className="flex justify-between items-center text-[11px] text-slate-500 font-semibold px-2">
+                            <span>Total Nota:</span>
+                            <span className="font-mono font-bold">Rp {transitionOrder.totalAmount.toLocaleString('id-ID')}</span>
+                          </div>
+                          <div className="flex justify-between items-center text-[11px] text-amber-600 font-semibold px-2">
+                            <span>Sudah Dibayar (DP):</span>
+                            <span className="font-mono font-bold">Rp {(transitionOrder.paidAmount || 0).toLocaleString('id-ID')}</span>
+                          </div>
+                          <div className="flex justify-between items-center text-xs font-black text-red-600 px-2 pt-1 border-t border-slate-200">
+                            <span>Sisa Tagihan Dilunasi:</span>
+                            <span className="text-base font-mono">Rp {targetPayable.toLocaleString('id-ID')}</span>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-[9px] text-slate-400 font-bold block uppercase tracking-wider">Total Tagihan</span>
+                          <span className="text-slate-850 font-black text-lg font-mono">Rp {transitionOrder.totalAmount.toLocaleString('id-ID')}</span>
+                        </>
+                      )}
                     </div>
 
                     <div className="space-y-1">
@@ -7618,13 +8157,13 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                       <div className="flex flex-wrap gap-1.5">
                         <button
                           type="button"
-                          onClick={() => setCashReceivedInput(transitionOrder.totalAmount.toString())}
+                          onClick={() => setCashReceivedInput(targetPayable.toString())}
                           className="px-2.5 py-1 bg-emerald-550 hover:bg-emerald-600 text-white font-extrabold rounded-lg text-[10px] cursor-pointer"
                         >
-                          💵 Uang Pas: Rp {transitionOrder.totalAmount.toLocaleString('id-ID')}
+                          💵 Uang Pas: Rp {targetPayable.toLocaleString('id-ID')}
                         </button>
                         {(() => {
-                          const options = [50000, 100000, 200000].filter(v => v > transitionOrder.totalAmount);
+                          const options = [50000, 100000, 200000].filter(v => v > targetPayable);
                           return options.map(val => (
                             <button
                               key={val}
@@ -7662,7 +8201,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                       </button>
                       <button
                         type="button"
-                        disabled={!cashReceivedInput || (parseInt(cashReceivedInput, 10) || 0) < transitionOrder.totalAmount}
+                        disabled={!cashReceivedInput || (parseInt(cashReceivedInput, 10) || 0) < targetPayable}
                         onClick={() => {
                           executeReadyToSelesai(paymentTransitionOrderId, 'Cash');
                         }}
@@ -7676,6 +8215,11 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
               }
 
               if (confirmPaymentMethodName === 'QRIS') {
+                const isDP = transitionOrder.paymentStatus === 'Bayar DP';
+                const targetPayable = (isDP && transitionOrder.remainingAmount !== undefined)
+                  ? transitionOrder.remainingAmount
+                  : transitionOrder.totalAmount;
+
                 return (
                   <div className="space-y-4">
                     <div className="text-center space-y-1">
@@ -7689,8 +8233,15 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                     </div>
 
                     <div className="p-3 bg-slate-50 rounded-2xl border border-slate-150 text-center">
-                      <span className="text-[9.5px] text-slate-400 font-bold block uppercase tracking-wider">Total Pembayaran</span>
-                      <span className="text-emerald-800 font-black text-lg font-mono">Rp {transitionOrder.totalAmount.toLocaleString('id-ID')}</span>
+                      <span className="text-[9.5px] text-slate-400 font-bold block uppercase tracking-wider">
+                        {isDP ? 'Sisa Tagihan Dilunasi (Pelunasan DP)' : 'Total Pembayaran'}
+                      </span>
+                      <span className="text-emerald-800 font-black text-lg font-mono">Rp {targetPayable.toLocaleString('id-ID')}</span>
+                      {isDP && (
+                        <div className="text-[10px] text-slate-500 font-bold mt-1">
+                          Total Nota: Rp {transitionOrder.totalAmount.toLocaleString('id-ID')} (Sudah DP: Rp {(transitionOrder.paidAmount || 0).toLocaleString('id-ID')})
+                        </div>
+                      )}
                     </div>
 
                     {/* QR Code Illustration */}
@@ -7843,14 +8394,41 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
               </button>
             </div>
 
-            <div className="my-4 p-3 bg-slate-50 border border-slate-150 rounded-2xl text-xs space-y-1">
-              <div className="font-bold text-slate-800">
-                Invoice: <span className="font-mono text-sky-800">{orders.find(o => o.id === directPaymentOrderId)?.invoiceNumber}</span>
-              </div>
-              <div className="text-slate-500 font-bold">
-                Total Tagihan: <span className="text-emerald-700 font-black">Rp {orders.find(o => o.id === directPaymentOrderId)?.totalAmount.toLocaleString()}</span>
-              </div>
-            </div>
+            {(() => {
+              const targetOrder = orders.find(o => o.id === directPaymentOrderId);
+              const isDP = targetOrder?.paymentStatus === 'Bayar DP';
+              const sisa = targetOrder ? (targetOrder.remainingAmount ?? (targetOrder.totalAmount - (targetOrder.paidAmount || 0))) : 0;
+              return (
+                <div className="my-4 p-3 bg-slate-50 border border-slate-150 rounded-2xl text-xs space-y-1.5">
+                  <div className="flex justify-between items-center font-bold text-slate-800">
+                    <span>Invoice:</span>
+                    <span className="font-mono text-sky-800">{targetOrder?.invoiceNumber}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-slate-500 font-bold">
+                    <span>Total Tagihan:</span>
+                    <span className="text-slate-800 font-black">Rp {targetOrder?.totalAmount.toLocaleString('id-ID')}</span>
+                  </div>
+                  {isDP && (
+                    <>
+                      <div className="flex justify-between items-center text-amber-600 font-bold">
+                        <span>Sudah Bayar DP:</span>
+                        <span className="font-mono font-black">Rp {(targetOrder?.paidAmount || 0).toLocaleString('id-ID')}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-red-600 font-black pt-1 border-t border-slate-200">
+                        <span>Sisa Tagihan Dilunasi:</span>
+                        <span className="text-sm font-mono">Rp {sisa.toLocaleString('id-ID')}</span>
+                      </div>
+                    </>
+                  )}
+                  {!isDP && (
+                    <div className="flex justify-between items-center text-emerald-700 font-black pt-1 border-t border-slate-200">
+                      <span>Jumlah Tagihan:</span>
+                      <span className="text-sm font-mono">Rp {targetOrder?.totalAmount.toLocaleString('id-ID')}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             <span className="text-[9px] text-slate-400 font-bold uppercase block mb-2">Pilih Metode Pembayaran:</span>
             <div className="grid grid-cols-2 gap-2">
@@ -7862,7 +8440,10 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
               ].map((opt) => {
                 const targetOrder = orders.find(o => o.id === directPaymentOrderId);
                 const orderCust = targetOrder ? customers.find(c => c.id === targetOrder.customerId) : null;
-                const isDepositDisabled = opt.key === 'Deposit' && (!orderCust || orderCust.depositBalance < (targetOrder?.totalAmount || 0));
+                const payableAmount = targetOrder?.paymentStatus === 'Bayar DP'
+                  ? (targetOrder.remainingAmount ?? (targetOrder.totalAmount - (targetOrder.paidAmount || 0)))
+                  : (targetOrder?.totalAmount || 0);
+                const isDepositDisabled = opt.key === 'Deposit' && (!orderCust || orderCust.depositBalance < payableAmount);
 
                 return (
                   <button
@@ -7915,6 +8496,275 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
             >
               Batal
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* 7. POPUP PILIH LAYANAN BERTINGKAT & RINGKAS (Grouped Service Picker) */}
+      {/* Langkah 1: Kelompokkan Nama Layanan -> Langkah 2: Pilih Janji Layanan / Kecepatan */}
+      {/* ========================================================= */}
+      {groupedServicePickerTarget && (
+        <div className="fixed inset-0 bg-slate-950/65 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50 animate-fadeIn font-sans" id="grouped-service-picker-modal">
+          <div className="bg-white rounded-3xl max-w-lg w-full border border-slate-100 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-100 bg-gradient-to-r from-sky-50 via-white to-slate-50 flex items-center justify-between">
+              <div className="min-w-0 pr-2">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-sky-500"></span>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-sky-700 bg-sky-100/70 px-2 py-0.5 rounded-full">
+                    {pickerSelectedGroupName ? 'Langkah 2: Pilih Janji Layanan' : 'Langkah 1: Pilih Jenis Layanan'}
+                  </span>
+                </div>
+                <h4 className="font-extrabold text-slate-900 text-sm sm:text-base mt-1 truncate">
+                  {pickerSelectedGroupName ? `✨ ${pickerSelectedGroupName}` : 'Pilih Layanan Laundry'}
+                </h4>
+                <p className="text-[10px] text-slate-500 font-semibold mt-0.5">
+                  {pickerSelectedGroupName 
+                    ? 'Tentukan kecepatan & janji selesai yang diinginkan pelanggan:' 
+                    : 'Kelompok layanan diringkas berdasarkan jenis cucian:'}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setGroupedServicePickerTarget(null);
+                  setPickerSelectedGroupName(null);
+                  setPickerCategoryFilter('all');
+                }}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center font-bold text-xs shrink-0 cursor-pointer transition"
+                title="Tutup"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Category Filter Tabs (visible when picking group) */}
+            {!pickerSelectedGroupName && (
+              <div className="px-4 pt-3 pb-2 border-b border-slate-100 flex gap-1.5 overflow-x-auto bg-slate-50/50">
+                {[
+                  { key: 'all', label: 'Semua Layanan' },
+                  { key: 'kiloan', label: '🧺 Kiloan' },
+                  { key: 'satuan', label: '🧥 Satuan' },
+                  { key: 'antar_jemput', label: '🛵 Antar Jemput' }
+                ].map(tab => (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => setPickerCategoryFilter(tab.key as any)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer ${
+                      pickerCategoryFilter === tab.key
+                        ? 'bg-sky-500 text-white shadow-xs font-extrabold'
+                        : 'bg-white hover:bg-slate-100 text-slate-600 border border-slate-200'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Modal Body */}
+            <div className="p-4 sm:p-5 overflow-y-auto space-y-3 flex-1">
+              {/* STAGE 1: Grouped Service Names */}
+              {!pickerSelectedGroupName && (() => {
+                const activeServices = services.filter(s => {
+                  if (!s.isActive) return false;
+                  if (pickerCategoryFilter === 'all') return true;
+                  if (pickerCategoryFilter === 'antar_jemput') return s.category === 'antar_jemput' || s.category === 'antar jemput';
+                  return s.category === pickerCategoryFilter;
+                });
+
+                if (activeServices.length === 0) {
+                  return (
+                    <div className="text-center p-8 text-slate-400 text-xs font-bold bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                      Tidak ada layanan aktif dalam kategori ini.
+                    </div>
+                  );
+                }
+
+                // Group by clean base name
+                const grouped: Record<string, Service[]> = {};
+                activeServices.forEach(s => {
+                  const baseName = s.name.trim();
+                  if (!grouped[baseName]) grouped[baseName] = [];
+                  grouped[baseName].push(s);
+                });
+
+                return (
+                  <div className="grid grid-cols-1 gap-2.5">
+                    {Object.entries(grouped).map(([groupName, variants]) => {
+                      const firstSrv = variants[0];
+                      const isKiloan = variants.some(v => v.category === 'kiloan');
+                      const isAntar = variants.some(v => v.category === 'antar_jemput' || v.category === 'antar jemput');
+                      const minPrice = Math.min(...variants.map(v => v.price));
+                      const maxPrice = Math.max(...variants.map(v => v.price));
+                      const priceLabel = minPrice === maxPrice 
+                        ? `Rp ${minPrice.toLocaleString('id-ID')}` 
+                        : `Rp ${minPrice.toLocaleString('id-ID')} - ${maxPrice.toLocaleString('id-ID')}`;
+
+                      return (
+                        <button
+                          key={groupName}
+                          type="button"
+                          onClick={() => setPickerSelectedGroupName(groupName)}
+                          className="w-full text-left p-3.5 bg-white hover:bg-sky-50/60 border border-slate-200 hover:border-sky-300 rounded-2xl transition cursor-pointer flex items-center justify-between gap-3 group shadow-3xs"
+                        >
+                          <div className="min-w-0 space-y-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className={`text-[8.5px] font-black uppercase px-2 py-0.5 rounded-full ${
+                                isKiloan ? 'bg-sky-100 text-sky-850' : isAntar ? 'bg-purple-100 text-purple-850' : 'bg-amber-100 text-amber-850'
+                              }`}>
+                                {isKiloan ? '🧺 Kiloan' : isAntar ? '🛵 Antar Jemput' : '🧥 Satuan'}
+                              </span>
+                              <span className="text-[10px] font-extrabold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">
+                                {variants.length} Janji Layanan
+                              </span>
+                            </div>
+
+                            <h5 className="font-extrabold text-slate-900 text-sm group-hover:text-sky-800 transition">
+                              {groupName}
+                            </h5>
+
+                            <div className="flex items-center gap-2 text-[10.5px] text-slate-500">
+                              <span>Mulai {priceLabel} / {firstSrv.unit || (isKiloan ? 'kg' : 'pcs')}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-sky-600 group-hover:translate-x-1 transition shrink-0 bg-sky-50 px-3 py-2 rounded-xl">
+                            <span>Pilih</span>
+                            <span>➔</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+              {/* STAGE 2: Choose Promise / Variant */}
+              {pickerSelectedGroupName && (() => {
+                const variants = services.filter(s => s.name.trim() === pickerSelectedGroupName && s.isActive);
+                const isKiloan = variants.some(v => v.category === 'kiloan');
+
+                return (
+                  <div className="space-y-3">
+                    <button
+                      type="button"
+                      onClick={() => setPickerSelectedGroupName(null)}
+                      className="text-xs font-bold text-sky-600 hover:text-sky-800 flex items-center gap-1 transition cursor-pointer"
+                    >
+                      <span>←</span>
+                      <span>Kembali ke Daftar Layanan</span>
+                    </button>
+
+                    <div className="grid grid-cols-1 gap-2.5">
+                      {variants.map((v) => {
+                        const promiseLabel = v.promiseName || (v.category === 'kiloan' ? 'Reguler' : 'Standar');
+                        const speedIcon = promiseLabel.toLowerCase().includes('kilat') 
+                          ? '⚡' 
+                          : promiseLabel.toLowerCase().includes('ekspress') || promiseLabel.toLowerCase().includes('express')
+                          ? '🚀' 
+                          : promiseLabel.toLowerCase().includes('cepat')
+                          ? '⏱️' 
+                          : '🗓️';
+
+                        return (
+                          <div
+                            key={v.id}
+                            className="p-3.5 bg-slate-50 hover:bg-sky-50/70 border border-slate-200 hover:border-sky-300 rounded-2xl transition flex flex-col sm:flex-row justify-between sm:items-center gap-3"
+                          >
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-base">{speedIcon}</span>
+                                <span className="font-extrabold text-slate-900 text-sm">
+                                  {promiseLabel}
+                                </span>
+                                {v.promiseTime && (
+                                  <span className="text-[10px] bg-slate-200 text-slate-700 px-2 py-0.5 rounded-full font-bold">
+                                    {v.promiseTime}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="text-[11px] text-slate-500 font-medium">
+                                Estimasi Selesai: <strong className="text-slate-800">
+                                  {v.estimateHours ? `${v.estimateHours} Jam` : v.promiseTime || (isKiloan ? '2 Hari' : '1 Hari')}
+                                </strong>
+                              </div>
+
+                              <div className="text-xs font-black text-emerald-700 font-mono">
+                                Rp {v.price.toLocaleString('id-ID')} / {v.unit || (isKiloan ? 'kg' : 'pcs')}
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!groupedServicePickerTarget) return;
+
+                                if (groupedServicePickerTarget.mode === 'change_cart_item' && groupedServicePickerTarget.cartItemId) {
+                                  const cId = groupedServicePickerTarget.cartItemId;
+                                  const formattedName = v.category === 'kiloan'
+                                    ? `${v.name}-${v.promiseName || 'Reguler'}`
+                                    : (v.category === 'antar_jemput' || v.category === 'antar jemput')
+                                    ? `${v.name}${v.promiseName ? ` (${v.promiseName})` : ''}`
+                                    : `${v.name}-${v.promiseName || 'Sedang'}`;
+                                  setCartItems(prev => prev.map(item => {
+                                    if (item.id === cId) {
+                                      const billingQty = v.category === 'kiloan' ? Math.max(item.quantity, 3.0) : item.quantity;
+                                      return {
+                                        ...item,
+                                        serviceId: v.id,
+                                        serviceName: formattedName,
+                                        price: v.price,
+                                        subtotal: Math.round(v.price * billingQty)
+                                      };
+                                    }
+                                    return item;
+                                  }));
+                                  showToast(`✅ Layanan keranjang diubah menjadi: ${formattedName}`);
+                                } else if (groupedServicePickerTarget.mode === 'add_to_edit_order') {
+                                  handleAddServiceToEditingOrder(v.id);
+                                } else if (groupedServicePickerTarget.mode === 'change_edit_order_item' && groupedServicePickerTarget.itemIndex !== undefined) {
+                                  handleEditOrderItemChangeService(groupedServicePickerTarget.itemIndex, v.id);
+                                }
+
+                                setGroupedServicePickerTarget(null);
+                                setPickerSelectedGroupName(null);
+                                setPickerCategoryFilter('all');
+                              }}
+                              className="px-4 py-2 bg-sky-500 hover:bg-sky-600 text-white font-black text-xs rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 shrink-0"
+                            >
+                              <span>Pilih Janji Ini</span>
+                              <span>✓</span>
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3 bg-slate-50 border-t border-slate-100 flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setGroupedServicePickerTarget(null);
+                  setPickerSelectedGroupName(null);
+                  setPickerCategoryFilter('all');
+                }}
+                className="px-4 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer"
+              >
+                Batal
+              </button>
+            </div>
+
           </div>
         </div>
       )}

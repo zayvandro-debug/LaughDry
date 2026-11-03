@@ -76,7 +76,10 @@ export interface Order {
   items: OrderItem[];
   totalAmount: number;
   paymentMethod: 'Cash' | 'QRIS' | 'Transfer' | 'Deposit';
-  paymentStatus: 'Lunas' | 'Belum Lunas';
+  paymentStatus: 'Lunas' | 'Belum Lunas' | 'Bayar DP';
+  paidAmount?: number;
+  remainingAmount?: number;
+  downPaymentAmount?: number;
   status: OrderStatus;
   notes: string;
   clothesCount?: number;
