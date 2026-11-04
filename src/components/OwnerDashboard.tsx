@@ -235,6 +235,21 @@ const getOrderLocalDate = (oDate: string | undefined): string => {
   return `${y}-${m}-${day}`;
 };
 
+const getTodayDateStr = (): string => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+const getCurrentMonthStartStr = (): string => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}-01`;
+};
+
 // Helper to check if a touch target is inside a horizontally scrollable element
 const isInsideHorizontalScrollable = (target: EventTarget | null): boolean => {
   if (!target) return false;
@@ -527,8 +542,8 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     setTouchStartY(null);
   };
 
-  const [reportStartDate, setReportStartDate] = useState<string>('2026-05-01');
-  const [reportEndDate, setReportEndDate] = useState<string>('2026-06-30');
+  const [reportStartDate, setReportStartDate] = useState<string>(() => getCurrentMonthStartStr());
+  const [reportEndDate, setReportEndDate] = useState<string>(() => getTodayDateStr());
   const [expandedServiceGroup, setExpandedServiceGroup] = useState<string | null>(null);
   const [viewingServiceGroupName, setViewingServiceGroupName] = useState<string | null>(null);
   const [activePopupField, setActivePopupField] = useState<'category' | 'unit' | 'promiseDurationUnit' | 'sizeOption' | null>(null);
@@ -539,14 +554,14 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
   const [selectedPaymentMethodPage, setSelectedPaymentMethodPage] = useState<number>(1);
   const [showAccumulatedOmzetModal, setShowAccumulatedOmzetModal] = useState(false);
   const [accumulatedOmzetPage, setAccumulatedOmzetPage] = useState<number>(1);
-  const [accumulatedStartDate, setAccumulatedStartDate] = useState('2026-05-01');
-  const [accumulatedEndDate, setAccumulatedEndDate] = useState('2026-06-30');
+  const [accumulatedStartDate, setAccumulatedStartDate] = useState(() => getCurrentMonthStartStr());
+  const [accumulatedEndDate, setAccumulatedEndDate] = useState(() => getTodayDateStr());
   const [showPiutangModal, setShowPiutangModal] = useState(false);
   const [piutangPage, setPiutangPage] = useState<number>(1);
   const [showOPEXModal, setShowOPEXModal] = useState(false);
   const [opexPage, setOpexPage] = useState<number>(1);
-  const [opexFilterStartDate, setOpexFilterStartDate] = useState('2026-05-01');
-  const [opexFilterEndDate, setOpexFilterEndDate] = useState('2026-06-30');
+  const [opexFilterStartDate, setOpexFilterStartDate] = useState(() => getCurrentMonthStartStr());
+  const [opexFilterEndDate, setOpexFilterEndDate] = useState(() => getTodayDateStr());
 
   React.useEffect(() => {
     setTodayTransactionsPage(1);
@@ -620,19 +635,33 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     branchId: 'br-1',
   });
 
-  const [expenseStartDate, setExpenseStartDate] = useState('2026-05-01');
-  const [expenseEndDate, setExpenseEndDate] = useState('2026-06-30');
-  const [selectedMonthlySummaryMonth, setSelectedMonthlySummaryMonth] = useState('2026-05');
-  const [monthlyReportStartDate, setMonthlyReportStartDate] = useState('2026-06-01');
-  const [monthlyReportEndDate, setMonthlyReportEndDate] = useState('2026-06-30');
+  const [expenseStartDate, setExpenseStartDate] = useState(() => getCurrentMonthStartStr());
+  const [expenseEndDate, setExpenseEndDate] = useState(() => getTodayDateStr());
+  const [selectedMonthlySummaryMonth, setSelectedMonthlySummaryMonth] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [monthlyReportStartDate, setMonthlyReportStartDate] = useState(() => getCurrentMonthStartStr());
+  const [monthlyReportEndDate, setMonthlyReportEndDate] = useState(() => getTodayDateStr());
   const [monthlyTransactionsPage, setMonthlyTransactionsPage] = useState<number>(1);
 
   React.useEffect(() => {
     setMonthlyTransactionsPage(1);
   }, [showMonthlyRevenueDetail, monthlyReportStartDate, monthlyReportEndDate]);
 
-  const [cashierDetailStartDate, setCashierDetailStartDate] = useState('2026-06-01');
-  const [cashierDetailEndDate, setCashierDetailEndDate] = useState('2026-06-30');
+  const [cashierDetailStartDate, setCashierDetailStartDate] = useState(() => getTodayDateStr());
+  const [cashierDetailEndDate, setCashierDetailEndDate] = useState(() => getTodayDateStr());
+
+  // Modal konfirmasi sebelum mencetak / mengunduh file pada Log Total Omzet
+  const [reportConfirmAction, setReportConfirmAction] = useState<{
+    type: 'laba_rugi' | 'ringkasan_omzet' | 'ekspor_excel';
+    title: string;
+    description: string;
+    badge: string;
+    confirmLabel: string;
+    icon: string;
+    action: () => void;
+  } | null>(null);
 
   useEffect(() => {
     loadDatabaseState();
@@ -3099,7 +3128,11 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
               </button>
               <button
                 type="button"
-                onClick={() => setAnalyticsInnerTab('monthly')}
+                onClick={() => {
+                  setMonthlyReportStartDate(getCurrentMonthStartStr());
+                  setMonthlyReportEndDate(getTodayDateStr());
+                  setAnalyticsInnerTab('monthly');
+                }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
                   analyticsInnerTab === 'monthly'
                     ? 'bg-[#0D1B2A] text-white shadow-xs'
@@ -3110,7 +3143,11 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
               </button>
               <button
                 type="button"
-                onClick={() => setAnalyticsInnerTab('productivity')}
+                onClick={() => {
+                  setCashierDetailStartDate(getTodayDateStr());
+                  setCashierDetailEndDate(getTodayDateStr());
+                  setAnalyticsInnerTab('productivity');
+                }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
                   analyticsInnerTab === 'productivity'
                     ? 'bg-[#0D1B2A] text-white shadow-xs'
@@ -3886,11 +3923,45 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                   </h3>
                   <p className="text-[11px] text-slate-500 mt-0.5">Mengetuk profil kasir akan menampilkan ringkasan aktivitas operasional terperinci (proses input, setrika, siap ambil).</p>
                 </div>
-                <div className="flex items-center gap-2 bg-slate-50 p-1.5 px-3 rounded-full border border-slate-150">
-                  <span className="text-[10px] font-bold text-slate-500 font-sans">Total Kasir Aktif:</span>
-                  <span className="text-[10.5px] font-black text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full font-sans">
-                    {cashierMetricsData.length} Staff
-                  </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-2 bg-slate-50 p-1.5 px-3 rounded-xl border border-slate-150">
+                    <span className="text-[10px] font-extrabold text-slate-500 uppercase font-sans">Jangka Waktu Analisa:</span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[9px] font-black text-slate-400">DARI:</span>
+                      <input
+                        type="date"
+                        value={cashierDetailStartDate}
+                        onChange={(e) => setCashierDetailStartDate(e.target.value)}
+                        className="bg-transparent text-[10.5px] font-bold text-indigo-950 outline-none cursor-pointer focus:ring-0"
+                      />
+                    </div>
+                    <div className="h-3 w-px bg-slate-200"></div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[9px] font-black text-slate-400">S/D:</span>
+                      <input
+                        type="date"
+                        value={cashierDetailEndDate}
+                        onChange={(e) => setCashierDetailEndDate(e.target.value)}
+                        className="bg-transparent text-[10.5px] font-bold text-indigo-950 outline-none cursor-pointer focus:ring-0"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCashierDetailStartDate(getTodayDateStr());
+                        setCashierDetailEndDate(getTodayDateStr());
+                      }}
+                      className="ml-1 px-2 py-0.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[9px] font-black rounded-lg transition cursor-pointer"
+                    >
+                      Hari Ini
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-1 bg-slate-50 p-1.5 px-2.5 rounded-xl border border-slate-150">
+                    <span className="text-[10px] font-bold text-slate-500 font-sans">Total Kasir:</span>
+                    <span className="text-[10.5px] font-black text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full font-sans">
+                      {cashierMetricsData.length} Staff
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -9415,28 +9486,68 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
               <div className="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
-                  onClick={() => handleDownloadLunasPDFReport(monthlyReportStartDate, monthlyReportEndDate)}
+                  onClick={() => {
+                    setReportConfirmAction({
+                      type: 'laba_rugi',
+                      title: 'Konfirmasi Cetak Laba Rugi (.pdf)',
+                      description: `Apakah Anda yakin ingin mencetak dan mengunduh dokumen Laporan Laba Rugi (PDF) resmi untuk periode ${monthlyReportStartDate} s.d ${monthlyReportEndDate}?`,
+                      badge: 'Dokumen PDF Resmi',
+                      confirmLabel: 'Ya, Unduh Dokumen PDF',
+                      icon: '📄',
+                      action: () => handleDownloadLunasPDFReport(monthlyReportStartDate, monthlyReportEndDate)
+                    });
+                  }}
                   className="px-2.5 py-1 bg-sky-600 hover:bg-sky-550 text-white rounded-lg text-[10px] font-black transition cursor-pointer flex items-center gap-1 shadow-sm"
                 >
                   📄 Cetak Laba Rugi (.pdf)
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleDownloadLunasSummaryReport(monthlyReportStartDate, monthlyReportEndDate)}
-                  className="px-2.5 py-1 bg-indigo-650 hover:bg-indigo-750 text-white rounded-lg text-[10px] font-black transition cursor-pointer flex items-center gap-1 shadow-sm"
+                  onClick={() => {
+                    setReportConfirmAction({
+                      type: 'ringkasan_omzet',
+                      title: 'Konfirmasi Unduh Ringkasan Omzet (.xlsx)',
+                      description: `Apakah Anda yakin ingin mengunduh spreadsheet Ringkasan Omzet Transaksi Lunas (.xlsx) untuk periode ${monthlyReportStartDate} s.d ${monthlyReportEndDate}?`,
+                      badge: 'Spreadsheet Excel (.xlsx)',
+                      confirmLabel: 'Ya, Unduh Ringkasan Omzet',
+                      icon: '📊',
+                      action: () => handleDownloadLunasSummaryReport(monthlyReportStartDate, monthlyReportEndDate)
+                    });
+                  }}
+                  className="px-2.5 py-1 bg-slate-900 hover:bg-black text-white border border-slate-700/80 rounded-lg text-[10px] font-black transition cursor-pointer flex items-center gap-1 shadow-md"
                 >
                   📊 Ringkasan Omzet (.xlsx)
                 </button>
                 <button
                   type="button"
-                  onClick={handleExportMonthlyExcel}
+                  onClick={() => {
+                    setReportConfirmAction({
+                      type: 'ekspor_excel',
+                      title: 'Konfirmasi Ekspor Data Transaksi (.xlsx)',
+                      description: `Apakah Anda yakin ingin mengekspor seluruh rincian transaksi (${monthlyTransactions.length} transaksi) periode ${monthlyReportStartDate} s.d ${monthlyReportEndDate} ke file Excel (.xlsx)?`,
+                      badge: 'Database Transaksi (.xlsx)',
+                      confirmLabel: 'Ya, Ekspor ke Excel',
+                      icon: '📥',
+                      action: () => handleExportMonthlyExcel()
+                    });
+                  }}
                   className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-black transition cursor-pointer"
                 >
                   📥 Ekspor Excel (.xlsx)
                 </button>
                 <button
                   type="button"
-                  onClick={handlePrintMonthlyReport}
+                  onClick={() => {
+                    setReportConfirmAction({
+                      type: 'laba_rugi',
+                      title: 'Konfirmasi Cetak Struk Fisik Transaksi',
+                      description: `Apakah Anda yakin ingin mencetak fisik seluruh daftar transaksi (${monthlyTransactions.length} transaksi) periode ${monthlyReportStartDate} s.d ${monthlyReportEndDate} ke printer?`,
+                      badge: 'Cetak Struk Fisik',
+                      confirmLabel: 'Ya, Cetak ke Printer',
+                      icon: '🖨️',
+                      action: () => handlePrintMonthlyReport()
+                    });
+                  }}
                   className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-[10px] font-black transition cursor-pointer"
                 >
                   🖨️ Cetak Struk Fisik
@@ -9562,6 +9673,67 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Pop-up Konfirmasi Cetak / Unduh Laporan Omzet */}
+      {reportConfirmAction && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-[70] animate-fadeIn font-sans">
+          <div className="bg-white rounded-3xl max-w-md w-full border border-slate-200 shadow-2xl p-6 text-slate-800 space-y-4 animate-scaleIn">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center text-2xl shrink-0 border border-slate-200">
+                {reportConfirmAction.icon}
+              </div>
+              <div className="min-w-0 flex-1">
+                <span className="text-[9.5px] font-black uppercase tracking-wider text-sky-700 bg-sky-50 px-2 py-0.5 rounded-full border border-sky-100">
+                  {reportConfirmAction.badge}
+                </span>
+                <h4 className="text-sm font-extrabold text-slate-900 mt-1 leading-snug">
+                  {reportConfirmAction.title}
+                </h4>
+              </div>
+            </div>
+
+            <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-150 space-y-2 text-xs">
+              <p className="text-slate-650 leading-relaxed font-medium">
+                {reportConfirmAction.description}
+              </p>
+              <div className="flex items-center justify-between pt-2 border-t border-slate-200/70 text-[10.5px]">
+                <span className="text-slate-500 font-bold">Periode Laporan:</span>
+                <span className="font-mono font-extrabold text-slate-800">
+                  {monthlyReportStartDate} s.d {monthlyReportEndDate}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-[10.5px]">
+                <span className="text-slate-500 font-bold">Total Transaksi:</span>
+                <span className="font-mono font-extrabold text-indigo-700">
+                  {monthlyTransactions.length} Order
+                </span>
+              </div>
+            </div>
+
+            <div className="flex gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setReportConfirmAction(null)}
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const act = reportConfirmAction.action;
+                  setReportConfirmAction(null);
+                  act();
+                }}
+                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-md transition cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <span>{reportConfirmAction.confirmLabel}</span>
+                <span>➔</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
