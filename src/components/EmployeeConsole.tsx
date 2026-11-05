@@ -37,7 +37,9 @@ import {
   Smartphone,
   Wifi,
   Usb,
-  Sliders
+  Sliders,
+  Copy,
+  Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { LaughDryDatabase } from '../data/mockDatabase';
@@ -1773,16 +1775,78 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     setShowTemplateChoiceModal(true);
   };
 
-  const redirectToWhatsApp = (order: Order) => {
-    const textContent = getSimulatedMessageBody(order.status === OrderStatus.SIAP_DIAMBIL ? 'siap_diambil' : 'nota_layanan', order);
+  // Load WhatsApp message body with compiled template values
+  const getSimulatedMessageBody = (category: 'nota_layanan' | 'siap_diambil', order: Order) => {
+    const defaultTemplate = LaughDryDatabase.getTemplates().find(t => t.category === category);
+    if (!defaultTemplate) return '';
+
+    const currentBranch = branches.find(b => b.id === order.branchId) || branches[0];
+
+    // Look up from customer database
+    const dbCustomer = customers.find(c => c.id === order.customerId);
+    const targetPhone = dbCustomer ? dbCustomer.phone : order.customerPhone;
+    const targetName = dbCustomer ? dbCustomer.name : order.customerName;
+
+    // [FIX] Gunakan LaughDryDatabase.getTrackingUrl() yang secara otomatis menyertakan ?owner=UID
+    const finalTrackingUrl = LaughDryDatabase.getTrackingUrl(targetPhone, order.invoiceNumber);
+
+    const isDP = order.paymentStatus === 'Bayar DP';
+    const remaining = order.remainingAmount ?? (order.totalAmount - (order.paidAmount || 0));
+    const paymentStatusText = isDP
+      ? `Bayar DP (Sisa Rp ${remaining.toLocaleString('id-ID')})`
+      : order.paymentStatus;
+    const paymentDueText = order.paymentStatus === 'Lunas'
+      ? 'Lunas / Rp 0'
+      : isDP
+      ? `Sisa Rp ${remaining.toLocaleString('id-ID')}`
+      : `Rp ${order.totalAmount.toLocaleString('id-ID')}`;
+
+    return defaultTemplate.body
+      .replace(/\{\{customer_name\}\}/g, targetName)
+      .replace(/\{\{invoice_number\}\}/g, order.invoiceNumber)
+      .replace(/\{\{services_list\}\}/g, order.items.map(i => i.serviceName).join(', '))
+      .replace(/\{\{total_quantity\}\}/g, order.items.map(i => `${i.quantity}`).join(' + '))
+      .replace(/\{\{total_amount\}\}/g, `Rp ${order.totalAmount.toLocaleString('id-ID')}`)
+      .replace(/\{\{payment_method\}\}/g, order.paymentMethod)
+      .replace(/\{\{payment_status\}\}/g, paymentStatusText)
+      .replace(/\{\{estimated_completion\}\}/g, new Date(order.estimatedCompletion).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }))
+      .replace(/\{\{branch_name\}\}/g, currentBranch ? currentBranch.name : 'LaughDry POS')
+      .replace(/\{\{branch_address\}\}/g, currentBranch ? currentBranch.address : '')
+      .replace(/\{\{payment_due\}\}/g, paymentDueText)
+      .replace(/\{\{tracking_url\}\}/g, finalTrackingUrl)
+      .replace(/\{\{perfume\}\}/g, order.perfume || 'Biasa / Tanpa Parfum');
+  };
+
+  // State for WhatsApp Preview Modal with Copy & Direct Send buttons
+  const [whatsAppPreviewModal, setWhatsAppPreviewModal] = useState<{
+    isOpen: boolean;
+    order: Order | null;
+    customerName: string;
+    customerPhone: string;
+    cleanPhone: string;
+    messageText: string;
+    isCopied: boolean;
+  }>({
+    isOpen: false,
+    order: null,
+    customerName: '',
+    customerPhone: '',
+    cleanPhone: '',
+    messageText: '',
+    isCopied: false,
+  });
+
+  const openWhatsAppPreviewModal = (order: Order, type?: 'siap_diambil' | 'nota_layanan') => {
+    const msgType = type || (order.status === OrderStatus.SIAP_DIAMBIL ? 'siap_diambil' : 'nota_layanan');
+    const textContent = getSimulatedMessageBody(msgType, order);
     
     // Normalize unicode characters to guarantee absolute preservation of emojis, formatting, and layout across all target platforms
     const normalizedText = textContent.normalize('NFC');
-    const encodedText = encodeURIComponent(normalizedText);
     
     // Look up from customer database
     const dbCustomer = customers.find(c => c.id === order.customerId);
     const targetPhone = dbCustomer ? dbCustomer.phone : order.customerPhone;
+    const targetName = dbCustomer ? dbCustomer.name : (order.customerName || 'Pelanggan');
     
     // Remove non-digit characters from customer phone
     let cleanPhone = targetPhone.replace(/\D/g, '');
@@ -1791,10 +1855,78 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     if (cleanPhone.startsWith('0')) {
       cleanPhone = '62' + cleanPhone.substring(1);
     }
+
+    setWhatsAppPreviewModal({
+      isOpen: true,
+      order,
+      customerName: targetName,
+      customerPhone: targetPhone,
+      cleanPhone,
+      messageText: normalizedText,
+      isCopied: false,
+    });
+  };
+
+  const redirectToWhatsApp = (order: Order, type?: 'siap_diambil' | 'nota_layanan') => {
+    openWhatsAppPreviewModal(order, type);
+  };
+
+  // Helper to determine operational staff who processed input, cuci, setrika/lipat, and packing
+  const getStaffWorkflowProcessors = (order: Order) => {
+    const inputStaff = order.inputCashierName || order.cashierName || 'Kasir';
     
-    // Modern official universal deep link protocol (wa.me) that reliably maintains full UTF-8 emojis and formatting
-    const waUrl = `https://wa.me/${cleanPhone}?text=${encodedText}`;
-    window.open(waUrl, '_blank', 'noopener,noreferrer');
+    // Check audit logs for historical transitions if available
+    const logs = LaughDryDatabase.getAuditLogs();
+    const orderShortId = order.id.startsWith('ord-') ? order.id.substring(4) : order.id;
+    
+    let cuciStaff = order.cuciCashierName;
+    let setrikaStaff = order.setrikaCashierName;
+    let packingStaff = order.packingCashierName;
+    
+    if (!cuciStaff || !setrikaStaff || !packingStaff) {
+      logs.forEach(log => {
+        if (log.details && (log.details.includes(order.id) || log.details.includes(order.invoiceNumber) || (orderShortId && log.details.includes(orderShortId)))) {
+          const text = log.details.toLowerCase();
+          if (text.includes('dicuci') || text.includes('cuci')) {
+            if (!cuciStaff) cuciStaff = log.userName;
+          }
+          if (text.includes('setrika') || text.includes('lipat')) {
+            if (!setrikaStaff) setrikaStaff = log.userName;
+          }
+          if (text.includes('kemas') || text.includes('packing') || text.includes('siap diambil') || text.includes('siap')) {
+            if (!packingStaff) packingStaff = log.userName;
+          }
+        }
+      });
+    }
+
+    const hasReachedCuci = [
+      OrderStatus.DICUCI,
+      OrderStatus.DISETRIKA_DILIPAT,
+      OrderStatus.DIKEMAS,
+      OrderStatus.SIAP_DIAMBIL,
+      OrderStatus.SELESAI
+    ].includes(order.status);
+
+    const hasReachedSetrika = [
+      OrderStatus.DISETRIKA_DILIPAT,
+      OrderStatus.DIKEMAS,
+      OrderStatus.SIAP_DIAMBIL,
+      OrderStatus.SELESAI
+    ].includes(order.status);
+
+    const hasReachedPacking = [
+      OrderStatus.DIKEMAS,
+      OrderStatus.SIAP_DIAMBIL,
+      OrderStatus.SELESAI
+    ].includes(order.status);
+
+    return {
+      input: inputStaff,
+      cuci: cuciStaff || (hasReachedCuci ? inputStaff : '-'),
+      setrika: setrikaStaff || (hasReachedSetrika ? inputStaff : '-'),
+      packing: packingStaff || (hasReachedPacking ? inputStaff : '-')
+    };
   };
 
   // Filter customers by input search
@@ -2150,7 +2282,11 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
         : (finalPaymentStatus === 'Bayar DP' ? entryDate.toISOString() : undefined),
       pointsEarned: earnedPoints,
       cashierId: currentUser.id,
-      cashierName: currentUser.name
+      cashierName: currentUser.name,
+      inputCashierName: isEditingExisting && existingOrder?.inputCashierName ? existingOrder.inputCashierName : currentUser.name,
+      cuciCashierName: isEditingExisting ? existingOrder?.cuciCashierName : undefined,
+      setrikaCashierName: isEditingExisting ? existingOrder?.setrikaCashierName : undefined,
+      packingCashierName: isEditingExisting ? existingOrder?.packingCashierName : undefined
     };
 
     // Save and Deduct Deposit balance if paid via Deposit
@@ -2317,7 +2453,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
             
             if (checkData.isPaid) {
               setMidtransStatus('settlement');
-              setPaymentMethod('Transfer');
+              setPaymentMethod('QRIS');
               setPaidStatus('Lunas');
               showToast("🟢 Pembayaran QRIS Berhasil Terverifikasi Otomatis!");
               
@@ -2429,6 +2565,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
           ...o,
           clothesCount: count,
           status: OrderStatus.DICUCI,
+          cuciCashierName: currentUser.name,
           updatedAt: new Date().toISOString()
         };
       }
@@ -2457,11 +2594,23 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   const updateOrderStatus = (orderId: string, nextStatus: OrderStatus, currentStatus: OrderStatus) => {
     const currentOrders = orders.map(o => {
       if (o.id === orderId) {
-        return {
-          ...o,
+        const updatedFields: Partial<Order> = {
           status: nextStatus,
           updatedAt: new Date().toISOString(),
-          completedAt: nextStatus === OrderStatus.SELESAI ? new Date().toISOString() : undefined
+          completedAt: nextStatus === OrderStatus.SELESAI ? new Date().toISOString() : o.completedAt
+        };
+        if (nextStatus === OrderStatus.DICUCI) {
+          updatedFields.cuciCashierName = currentUser.name;
+        } else if (nextStatus === OrderStatus.DISETRIKA_DILIPAT) {
+          updatedFields.setrikaCashierName = currentUser.name;
+        } else if (nextStatus === OrderStatus.DIKEMAS) {
+          updatedFields.packingCashierName = currentUser.name;
+        } else if (nextStatus === OrderStatus.SIAP_DIAMBIL && !o.packingCashierName) {
+          updatedFields.packingCashierName = currentUser.name;
+        }
+        return {
+          ...o,
+          ...updatedFields
         };
       }
       return o;
@@ -2765,38 +2914,6 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     .filter(o => o.branchId === currentUser.branchId) // Employee only sees their branch orders
     .filter(o => statusFilter === 'all' || o.status === statusFilter)
     .slice(0).reverse();
-
-  // Load WhatsApp mock content with compiled template values
-  const getSimulatedMessageBody = (category: 'nota_layanan' | 'siap_diambil', order: Order) => {
-    const defaultTemplate = LaughDryDatabase.getTemplates().find(t => t.category === category);
-    if (!defaultTemplate) return '';
-
-    const currentBranch = branches.find(b => b.id === order.branchId) || branches[0];
-
-    // Look up from customer database
-    const dbCustomer = customers.find(c => c.id === order.customerId);
-    const targetPhone = dbCustomer ? dbCustomer.phone : order.customerPhone;
-    const targetName = dbCustomer ? dbCustomer.name : order.customerName;
-
-    // [FIX] Gunakan LaughDryDatabase.getTrackingUrl() yang secara otomatis menyertakan
-    // ?owner=UID sehingga pelanggan dapat membaca database Firestore yang benar tanpa login.
-    const finalTrackingUrl = LaughDryDatabase.getTrackingUrl(targetPhone, order.invoiceNumber);
-
-    return defaultTemplate.body
-      .replace(/\{\{customer_name\}\}/g, targetName)
-      .replace(/\{\{invoice_number\}\}/g, order.invoiceNumber)
-      .replace(/\{\{services_list\}\}/g, order.items.map(i => i.serviceName).join(', '))
-      .replace(/\{\{total_quantity\}\}/g, order.items.map(i => `${i.quantity}`).join(' + '))
-      .replace(/\{\{total_amount\}\}/g, `Rp ${order.totalAmount.toLocaleString()}`)
-      .replace(/\{\{payment_method\}\}/g, order.paymentMethod)
-      .replace(/\{\{payment_status\}\}/g, order.paymentStatus)
-      .replace(/\{\{estimated_completion\}\}/g, new Date(order.estimatedCompletion).toLocaleString())
-      .replace(/\{\{branch_name\}\}/g, currentBranch.name)
-      .replace(/\{\{branch_address\}\}/g, currentBranch.address)
-      .replace(/\{\{payment_due\}\}/g, order.paymentStatus === 'Lunas' ? 'Lunas / Rp 0' : `Rp ${order.totalAmount.toLocaleString()}`)
-      .replace(/\{\{tracking_url\}\}/g, finalTrackingUrl)
-      .replace(/\{\{perfume\}\}/g, order.perfume || 'Biasa / Tanpa Parfum');
-  };
 
   return (
     <div className="space-y-3.5 pb-20 md:pb-6 -mt-3.5 md:-mt-5 font-sans" id="employee-console-root">
@@ -5636,8 +5753,9 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
 
                 <div className="space-y-2 pt-2">
                   {[
-                    { m: 'Cash', label: '💵 CASH / TUNAI', desc: 'Pembayaran fisik langsung ke kasir' },
-                    { m: 'Transfer', label: '📩 TRANSFER / QRIS DYNAMIC (MIDTRANS)', desc: 'Generate QRIS dinamis & verifikasi transaksi otomatis real-time' },
+                    { m: 'Cash', label: '💵 CASH / TUNAI', desc: 'Pembayaran fisik uang tunai langsung ke kasir' },
+                    { m: 'Transfer', label: '🏦 TRANSFER BANK', desc: 'Transfer rekening bank usaha laundry' },
+                    { m: 'QRIS', label: '📱 QRIS DINAMIS (MIDTRANS)', desc: 'Generate QRIS otomatis real-time & scan e-wallet / m-banking' },
                     { m: 'Deposit', label: '💳 SALDO DEPOSIT', desc: 'Potong dari saldo deposit member aktif' }
                   ].map(opt => {
                     const isDeposit = opt.m === 'Deposit';
@@ -5648,13 +5766,13 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                         type="button"
                         disabled={hasZeroDeposit}
                         onClick={() => {
-                          if (opt.m === 'Transfer') {
+                          if (opt.m === 'QRIS') {
                             generateMidtransQRIS();
                           } else {
                             setPaymentMethod(opt.m as any);
                             setPaidStatus('Lunas');
                             setShowPaymentChoiceModal(false);
-                            showToast(`🟢 Status diubah LUNAS via ${opt.m}`);
+                            showToast(`🟢 Status diubah LUNAS via ${opt.label.split(' ')[1] || opt.m}`);
                           }
                         }}
                         className={`w-full text-left p-3 rounded-xl border text-xs transition-all ${
@@ -5764,17 +5882,18 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                               midtransPollingRef.current = null;
                             }
                             setMidtransStatus('settlement');
-                            setPaymentMethod('Transfer');
+                            setPaymentMethod('QRIS');
                             setPaidStatus('Lunas');
-                            showToast("🟢 Pembayaran QRIS Berhasil Terverifikasi Instan!");
+                            showToast("🟢 Pembayaran QRIS Berhasil Dikonfirmasi Lunas!");
                             setTimeout(() => {
                               setShowPaymentChoiceModal(false);
-                            }, 2000);
+                              setMidtransStatus('idle');
+                            }, 1500);
                           }}
-                          className="w-full py-2 bg-gradient-to-r from-teal-500 to-sky-500 hover:from-teal-600 hover:to-sky-600 font-extrabold text-[10.5px] text-white rounded-xl shadow-md transition cursor-pointer flex items-center justify-center gap-1.5"
-                          title="Simulasikan pembayaran lunas instan sbg alternatif scan QRIS fisik"
+                          className="w-full py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 font-extrabold text-[11px] text-white rounded-xl shadow-md transition cursor-pointer flex items-center justify-center gap-1.5"
+                          title="Konfirmasi pembayaran QRIS berhasil diterima"
                         >
-                          ⚡ KONFIRMASI BAYAR INSTAN (CEPAT)
+                          ✅ KONFIRMASI PEMBAYARAN QRIS BERHASIL
                         </button>
                       </div>
                     ) : (
@@ -5942,9 +6061,8 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
               <button
                 type="button"
                 onClick={() => {
-                  redirectToWhatsApp(activeInvoice);
                   setShowInvoiceChoiceModal(false);
-                  setShowProcessSuccessModal(true);
+                  redirectToWhatsApp(activeInvoice);
                 }}
                 className="w-full flex items-center justify-between p-3.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-2xl transition shadow-xs text-left cursor-pointer"
                 id="btn-invoice-choice-wa"
@@ -6432,9 +6550,8 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                 <button
                   type="button"
                   onClick={() => {
-                    redirectToWhatsApp(activeInvoice);
                     setShowThermalReceiptModal(false);
-                    setShowProcessSuccessModal(true);
+                    redirectToWhatsApp(activeInvoice);
                   }}
                   className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-center text-[10px] transition flex items-center justify-center gap-1 cursor-pointer"
                 >
@@ -7204,6 +7321,65 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                   <p className="italic text-[10px]">{showOrderDetailModal.notes}</p>
                 </div>
               )}
+
+              {/* Petugas Operasional (Input, Cuci, Setrika/Lipat, Packing) */}
+              {(() => {
+                const processors = getStaffWorkflowProcessors(showOrderDetailModal);
+                return (
+                  <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-2.5 space-y-1.5 shadow-3xs" id="order-detail-processors">
+                    <div className="flex items-center justify-between px-0.5">
+                      <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1">
+                        <span>👥</span> Petugas Operasional (Alur Proses)
+                      </span>
+                      <span className="text-[8.5px] text-slate-400 font-semibold font-mono">
+                        {showOrderDetailModal.status}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                      {/* 1. Input */}
+                      <div className="bg-white p-2 rounded-xl border border-slate-150 flex flex-col justify-between">
+                        <span className="text-[8px] font-black uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                          <span>📝</span> Input Kasir
+                        </span>
+                        <span className="text-[10px] font-extrabold text-slate-800 truncate mt-0.5" title={processors.input}>
+                          {processors.input}
+                        </span>
+                      </div>
+
+                      {/* 2. Cuci */}
+                      <div className="bg-white p-2 rounded-xl border border-slate-150 flex flex-col justify-between">
+                        <span className="text-[8px] font-black uppercase tracking-wider text-sky-600 flex items-center gap-1">
+                          <span>🧼</span> Cuci
+                        </span>
+                        <span className={`text-[10px] font-extrabold truncate mt-0.5 ${processors.cuci === '-' ? 'text-slate-350 font-normal' : 'text-slate-800'}`} title={processors.cuci}>
+                          {processors.cuci}
+                        </span>
+                      </div>
+
+                      {/* 3. Setrika / Lipat */}
+                      <div className="bg-white p-2 rounded-xl border border-slate-150 flex flex-col justify-between">
+                        <span className="text-[8px] font-black uppercase tracking-wider text-amber-600 flex items-center gap-1">
+                          <span>👔</span> Setrika/Lipat
+                        </span>
+                        <span className={`text-[10px] font-extrabold truncate mt-0.5 ${processors.setrika === '-' ? 'text-slate-350 font-normal' : 'text-slate-800'}`} title={processors.setrika}>
+                          {processors.setrika}
+                        </span>
+                      </div>
+
+                      {/* 4. Packing */}
+                      <div className="bg-white p-2 rounded-xl border border-slate-150 flex flex-col justify-between">
+                        <span className="text-[8px] font-black uppercase tracking-wider text-indigo-600 flex items-center gap-1">
+                          <span>📦</span> Packing
+                        </span>
+                        <span className={`text-[10px] font-extrabold truncate mt-0.5 ${processors.packing === '-' ? 'text-slate-350 font-normal' : 'text-slate-800'}`} title={processors.packing}>
+                          {processors.packing}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Financial & Payment Details (More precise) */}
               <div className="bg-slate-950 text-white rounded-2xl p-4 space-y-3 border border-slate-950 shadow-md">
@@ -8224,9 +8400,9 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                   <div className="space-y-4">
                     <div className="text-center space-y-1">
                       <span className="text-[9.5px] bg-sky-50 text-sky-850 px-2.5 py-1 rounded-full font-black uppercase tracking-wider border border-sky-200 inline-block">
-                        Midtrans Payment Gateway
+                        Sistem Pembayaran QRIS
                       </span>
-                      <h4 className="font-extrabold text-slate-950 text-sm mt-2">📲 QRIS Dinamis Otomatis</h4>
+                      <h4 className="font-extrabold text-slate-950 text-sm mt-2">📱 Pembayaran QRIS Dinamis</h4>
                       <p className="text-[11px] text-slate-500 font-bold">
                         Invoice: <span className="font-mono text-sky-800">{transitionOrder.invoiceNumber}</span>
                       </p>
@@ -8244,27 +8420,25 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                       )}
                     </div>
 
-                    {/* QR Code Illustration */}
+                    {/* Real Dynamic QR Code Display */}
                     <div className="flex flex-col items-center justify-center p-4 bg-slate-50 rounded-2xl border border-slate-150 relative">
-                      <div className="w-36 h-36 bg-white p-2 rounded-xl border border-slate-200 flex items-center justify-center relative">
-                        <svg viewBox="0 0 100 100" className="w-full h-full text-slate-800">
-                          <path d="M5,5 h40 v40 h-40 z M15,15 h20 v20 h-20 z" fill="currentColor"/>
-                          <path d="M55,5 h40 v40 h-40 z M65,15 h20 v20 h-20 z" fill="currentColor"/>
-                          <path d="M5,55 h40 v40 h-40 z M15,65 h20 v20 h-20 z" fill="currentColor"/>
-                          <circle cx="50" cy="50" r="14" fill="#0EA5E9" />
-                          <path d="M12,48 h8 v4 h-8 z M22,48 h4 v4 h-4 z M48,12 h4 v8 h-4 z M48,22 h4 v4 h-4 z" fill="currentColor"/>
-                          <path d="M55,55 h10 v10 h-10 z M65,65 h10 v10 h-10 z M75,75 h20 v20 h-20 z M85,55 h10 v10 h-10 z" fill="currentColor"/>
-                          <path d="M55,85 h10 v10 h-10 z M85,75 h10 v10 h-10 z M65,85 h10 v10 h-10 z" fill="currentColor"/>
-                          <text x="50" y="53" fill="white" fontSize="9" fontWeight="black" textAnchor="middle" fontFamily="sans-serif">QRIS</text>
-                        </svg>
+                      <div className="w-40 h-40 bg-white p-2 rounded-xl border border-slate-200 flex items-center justify-center relative shadow-xs">
+                        <img
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(`qris://laughdry?order=${transitionOrder.invoiceNumber}&amount=${targetPayable}`)}`}
+                          alt="Barcode QRIS"
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-contain rounded"
+                        />
                       </div>
-                      <span className="text-[8.5px] text-slate-400 font-bold block uppercase mt-2 tracking-wider">Scan QRIS menggunakan mobile banking / e-wallet</span>
+                      <span className="text-[8.5px] text-slate-500 font-bold block uppercase mt-2.5 tracking-wider text-center">
+                        Scan QRIS via BCA, Mandiri, BRI, BNI, GoPay, OVO, Dana, ShopeePay
+                      </span>
                     </div>
 
-                    <div className="p-3 bg-orange-50 border border-orange-120 rounded-2xl text-center space-y-0.5">
-                      <div className="flex items-center justify-center gap-1.5 text-[10.5px] font-bold text-orange-800">
-                        <span className="w-1.5 h-1.5 rounded-full bg-orange-500 animate-ping"></span>
-                        <span>CALLBACK SECURE SANDBOX: MENUNGGU PEMBAYARAN...</span>
+                    <div className="p-2.5 bg-sky-50 border border-sky-150 rounded-2xl text-center space-y-0.5">
+                      <div className="flex items-center justify-center gap-1.5 text-[10.5px] font-bold text-sky-800">
+                        <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-ping"></span>
+                        <span>Menunggu Scan & Penyelesaian Pembayaran QRIS</span>
                       </div>
                     </div>
 
@@ -8272,12 +8446,12 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                       <button
                         type="button"
                         onClick={() => {
-                          showToast("🟢 Callback Midtrans Berhasil diterima! Pembayaran lunas via QRIS.");
+                          showToast("🟢 Pembayaran QRIS Berhasil Diterima!");
                           executeReadyToSelesai(paymentTransitionOrderId, 'QRIS');
                         }}
                         className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs rounded-xl shadow-xs transition cursor-pointer text-center"
                       >
-                        🟢 SIMULASI CALLBACK BAYAR SUKSES (SANDBOX)
+                        ✅ Konfirmasi Pembayaran QRIS Berhasil
                       </button>
 
                       <button
@@ -8765,6 +8939,129 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* 8. POPUP PRATINJAU PESAN WHATSAPP & SALIN / KIRIM LANGSUNG */}
+      {/* ========================================================= */}
+      {whatsAppPreviewModal.isOpen && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 z-50 animate-fadeIn font-sans" id="modal-whatsapp-preview">
+          <div className="bg-white rounded-3xl max-w-md w-full border border-slate-100 shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+            {/* Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-100 bg-gradient-to-r from-emerald-50 via-teal-50/40 to-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500 text-white flex items-center justify-center shadow-md shadow-emerald-500/20 shrink-0">
+                  <Phone className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[9.5px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                      Pratinjau Nota WhatsApp
+                    </span>
+                    {whatsAppPreviewModal.order && (
+                      <span className="text-[10px] font-mono font-bold text-slate-500 truncate">
+                        {whatsAppPreviewModal.order.invoiceNumber}
+                      </span>
+                    )}
+                  </div>
+                  <h4 className="font-extrabold text-slate-900 text-sm mt-0.5 truncate">
+                    {whatsAppPreviewModal.customerName} ({whatsAppPreviewModal.customerPhone})
+                  </h4>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWhatsAppPreviewModal(prev => ({ ...prev, isOpen: false }))}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center font-bold text-xs transition cursor-pointer shrink-0 ml-2"
+                title="Tutup"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Message Preview Body */}
+            <div className="p-4 sm:p-5 space-y-3 overflow-y-auto flex-1">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                  <span>💬</span> Isi Pesan Nota yang Akan Dikirim:
+                </label>
+                <span className="text-[10px] text-slate-400 font-mono">
+                  {whatsAppPreviewModal.messageText.length} Karakter
+                </span>
+              </div>
+
+              {/* Message Bubble Box */}
+              <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-3.5 text-xs text-slate-850 font-sans whitespace-pre-wrap leading-relaxed max-h-72 overflow-y-auto select-text shadow-inner">
+                {whatsAppPreviewModal.messageText}
+              </div>
+
+              <p className="text-[10px] text-slate-400 leading-normal">
+                Periksa draf pesan di atas. Anda dapat menyalin seluruh pesan menggunakan tombol <strong>Salin Pesan</strong> atau langsung mengirim ke WhatsApp di HP pelanggan.
+              </p>
+            </div>
+
+            {/* Modal Actions Footer */}
+            <div className="p-4 sm:p-5 border-t border-slate-100 bg-slate-50/80 space-y-2">
+              <div className="flex items-center gap-2">
+                {/* Copy Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(whatsAppPreviewModal.messageText);
+                    setWhatsAppPreviewModal(prev => ({ ...prev, isCopied: true }));
+                    showToast("📋 Seluruh isi pesan WhatsApp berhasil disalin!");
+                    setTimeout(() => {
+                      setWhatsAppPreviewModal(prev => ({ ...prev, isCopied: false }));
+                    }, 2500);
+                  }}
+                  className={`flex-1 py-2.5 px-3 rounded-xl font-black text-xs transition cursor-pointer flex items-center justify-center gap-1.5 shadow-xs border ${
+                    whatsAppPreviewModal.isCopied
+                      ? 'bg-emerald-600 border-emerald-600 text-white'
+                      : 'bg-white hover:bg-slate-100 border-slate-250 text-slate-800'
+                  }`}
+                  id="btn-copy-wa-message"
+                >
+                  {whatsAppPreviewModal.isCopied ? (
+                    <>
+                      <Check className="w-4 h-4 text-white" />
+                      <span>Tersalin!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4 text-slate-600" />
+                      <span>Salin Seluruh Pesan</span>
+                    </>
+                  )}
+                </button>
+
+                {/* Send Direct to WhatsApp Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const encodedText = encodeURIComponent(whatsAppPreviewModal.messageText);
+                    const waUrl = `https://wa.me/${whatsAppPreviewModal.cleanPhone}?text=${encodedText}`;
+                    window.open(waUrl, '_blank', 'noopener,noreferrer');
+                    setWhatsAppPreviewModal(prev => ({ ...prev, isOpen: false }));
+                    showToast("🚀 Mengarahkan langsung ke aplikasi WhatsApp...");
+                  }}
+                  className="flex-1 py-2.5 px-3 bg-emerald-500 hover:bg-emerald-600 active:scale-98 text-white rounded-xl font-black text-xs transition cursor-pointer flex items-center justify-center gap-1.5 shadow-md shadow-emerald-500/20"
+                  id="btn-send-direct-wa"
+                >
+                  <Phone className="w-4 h-4" />
+                  <span>Kirim ke WhatsApp</span>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setWhatsAppPreviewModal(prev => ({ ...prev, isOpen: false }))}
+                className="w-full py-1 text-center text-slate-400 hover:text-slate-600 text-[11px] font-bold cursor-pointer"
+              >
+                Batal / Tutup
+              </button>
+            </div>
           </div>
         </div>
       )}

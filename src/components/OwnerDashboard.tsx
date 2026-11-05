@@ -474,6 +474,8 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
   const [showPaymentMethodDetail, setShowPaymentMethodDetail] = useState<boolean>(false);
   const [selectedActiveCashier, setSelectedActiveCashier] = useState<any | null>(null);
   const [selectedActivityDetailLabel, setSelectedActivityDetailLabel] = useState<string | null>(null);
+  const [isStaffIconPickerOpen, setIsStaffIconPickerOpen] = useState<boolean>(false);
+  const [customStaffIconInput, setCustomStaffIconInput] = useState<string>('');
   
   // Date Picker ranges for popular payment methods (defaults to current month)
   const [paymentStartDate, setPaymentStartDate] = useState<string>(() => {
@@ -1010,6 +1012,34 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     setCashierForm({ name: '', username: '', password: '', branchId: 'br-1' });
     loadDatabaseState();
     triggerToast("✅ Akun kasir berhasil disimpan!");
+  };
+
+  const handleUpdateStaffIcon = (staffId: string, newAvatar: string) => {
+    const currentUsers = [...LaughDryDatabase.getUsers()];
+    const idx = currentUsers.findIndex(u => u.id === staffId);
+    if (idx !== -1) {
+      currentUsers[idx] = {
+        ...currentUsers[idx],
+        avatar: newAvatar,
+        icon: newAvatar
+      };
+      try {
+        LaundryService.saveFirestoreUser(currentUsers[idx]).catch(err => {
+          console.warn("Sinkronasi avatar kasir ke Firestore:", err);
+        });
+      } catch (e) {}
+      LaughDryDatabase.logActivity('usr-1', 'Andi Owner', 'owner', 'USER_UPDATE', `Mengubah ikon profil staff [${currentUsers[idx].name}]`);
+      LaughDryDatabase.saveUsers(currentUsers);
+      setUsers(currentUsers);
+      if (selectedActiveCashier && selectedActiveCashier.id === staffId) {
+        setSelectedActiveCashier((prev: any) => ({
+          ...prev,
+          avatar: newAvatar,
+          icon: newAvatar
+        }));
+      }
+      triggerToast(`✅ Ikon staff [${currentUsers[idx].name}] berhasil diperbarui!`);
+    }
   };
 
   const startEditCashier = (u: any) => {
@@ -2219,7 +2249,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
           username: u.username || u.name.split(' ')[0].toLowerCase(),
           totalRevenue: 0,
           transactionCount: 0,
-          avatar: `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(u.name)}`,
+          avatar: u.avatar || u.icon || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(u.name)}`,
         };
       }
     });
@@ -2229,6 +2259,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
       if (o.status !== OrderStatus.DIBATALKAN) {
         const cashierId = o.cashierId || 'usr-2'; // Default to Rian
         const cashierName = o.cashierName || 'Rian Karyawan';
+        const userObj = users.find(u => u.id === cashierId || u.name === cashierName);
 
         if (!cashierMap[cashierId]) {
           cashierMap[cashierId] = {
@@ -2237,7 +2268,7 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
             username: cashierName.split(' ')[0].toLowerCase(),
             totalRevenue: 0,
             transactionCount: 0,
-            avatar: `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(cashierName)}`,
+            avatar: userObj?.avatar || userObj?.icon || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(cashierName)}`,
           };
         }
 
@@ -3974,7 +4005,13 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                     className="p-4 bg-slate-50/50 border border-slate-150 hover:border-indigo-400 hover:bg-sky-50/15 rounded-2xl flex items-center gap-4 cursor-pointer transition-all duration-200 active:scale-98 select-none group"
                     title="Ketuk profil untuk melihat ringkasan aktivitas operasional detail"
                   >
-                    <img src={cashier.avatar} alt={cashier.name} className="w-12 h-12 rounded-full border-2 border-white shadow-sm bg-indigo-50 group-hover:scale-105 transition" referrerPolicy="no-referrer" />
+                    {cashier.avatar && (cashier.avatar.startsWith('http') || cashier.avatar.startsWith('data:')) ? (
+                      <img src={cashier.avatar} alt={cashier.name} className="w-12 h-12 rounded-full border-2 border-white shadow-sm bg-indigo-50 group-hover:scale-105 transition object-cover shrink-0" referrerPolicy="no-referrer" />
+                    ) : (
+                      <div className="w-12 h-12 rounded-full border-2 border-white shadow-sm bg-indigo-100 flex items-center justify-center text-2xl group-hover:scale-105 transition shrink-0 select-none">
+                        {cashier.avatar || '👤'}
+                      </div>
+                    )}
                     <div className="flex-1 min-w-0 space-y-1">
                       <div className="flex justify-between items-start">
                         <h4 className="text-xs font-extrabold text-[#0D1B2A] truncate group-hover:text-indigo-805 transition">{cashier.name}</h4>
@@ -9746,24 +9783,151 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
             {/* Header */}
             <div className="p-5 bg-gradient-to-r from-slate-900 to-indigo-950 text-white flex items-center justify-between border-b border-slate-800">
               <div className="flex items-center gap-3">
-                <img 
-                  src={selectedActiveCashier.avatar} 
-                  alt={selectedActiveCashier.name} 
-                  className="w-10 h-10 rounded-full border-2 border-indigo-400 bg-slate-800" 
-                  referrerPolicy="no-referrer"
-                />
+                {selectedActiveCashier.avatar && (selectedActiveCashier.avatar.startsWith('http') || selectedActiveCashier.avatar.startsWith('data:')) ? (
+                  <img 
+                    src={selectedActiveCashier.avatar} 
+                    alt={selectedActiveCashier.name} 
+                    className="w-11 h-11 rounded-full border-2 border-indigo-400 bg-slate-800 object-cover shrink-0 shadow-sm" 
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="w-11 h-11 rounded-full border-2 border-indigo-400 bg-slate-800 flex items-center justify-center text-2xl shrink-0 shadow-sm">
+                    {selectedActiveCashier.avatar || '👤'}
+                  </div>
+                )}
                 <div>
                   <h3 className="text-[10px] font-black uppercase tracking-wider text-indigo-300">Staff Performance</h3>
-                  <h2 className="text-sm font-extrabold text-white leading-normal">{selectedActiveCashier.name}</h2>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <h2 className="text-sm font-extrabold text-white leading-normal truncate">{selectedActiveCashier.name}</h2>
+                    <button
+                      type="button"
+                      onClick={() => setIsStaffIconPickerOpen(!isStaffIconPickerOpen)}
+                      className="px-2 py-0.5 bg-indigo-600/90 hover:bg-indigo-500 text-indigo-100 rounded-lg text-[9.5px] font-bold border border-indigo-400/50 transition cursor-pointer flex items-center gap-1 shadow-3xs shrink-0"
+                      title="Atur ikon atau avatar staff ini"
+                      id="btn-open-staff-icon-picker"
+                    >
+                      <span>🎨</span>
+                      <span>{isStaffIconPickerOpen ? 'Tutup Ikon' : 'Atur Ikon'}</span>
+                    </button>
+                  </div>
                 </div>
               </div>
               <button
-                onClick={() => setSelectedActiveCashier(null)}
+                onClick={() => {
+                  setSelectedActiveCashier(null);
+                  setIsStaffIconPickerOpen(false);
+                }}
                 className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-450 hover:text-white transition cursor-pointer text-xs font-bold"
               >
                 ✕ Tutup
               </button>
             </div>
+
+            {/* Interactive Staff Icon Picker Panel */}
+            {isStaffIconPickerOpen && (
+              <div className="p-4 bg-slate-900 border-b border-slate-800 text-white space-y-3 animate-fadeIn text-left">
+                <div className="flex items-center justify-between pb-1 border-b border-slate-800">
+                  <span className="text-[10.5px] font-black uppercase tracking-wider text-indigo-300 flex items-center gap-1.5">
+                    <span>🎨</span> Pengaturan Ikon &amp; Avatar Staf ({selectedActiveCashier.name})
+                  </span>
+                  <span className="text-[9px] text-slate-400">Pilih ikon atau avatar favorit</span>
+                </div>
+
+                {/* 1. Emoji Laundry & Profesi */}
+                <div className="space-y-1">
+                  <span className="text-[9.5px] font-bold text-slate-400 uppercase block">Pilihan Ikon Emoji:</span>
+                  <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-1 bg-slate-950/60 rounded-xl border border-slate-800">
+                    {[
+                      '👔', '👕', '🧺', '🧼', '📦', '🚚', '👨‍💼', '👩‍💼', '🧑‍💼', 
+                      '⚡', '⭐', '🥇', '🎯', '🚀', '💡', '💎', '🦊', '🦁', 
+                      '🐼', '🐱', '🐶', '🌸', '✨', '🏆', '🦸‍♂️', '🦸‍♀️', '🧙‍♂️'
+                    ].map((em) => (
+                      <button
+                        key={em}
+                        type="button"
+                        onClick={() => {
+                          handleUpdateStaffIcon(selectedActiveCashier.id, em);
+                        }}
+                        className={`w-8 h-8 rounded-xl flex items-center justify-center text-lg transition cursor-pointer active:scale-95 ${
+                          selectedActiveCashier.avatar === em
+                            ? 'bg-indigo-600 ring-2 ring-white scale-105'
+                            : 'bg-slate-800 hover:bg-slate-700'
+                        }`}
+                        title={`Pilih ikon ${em}`}
+                      >
+                        {em}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 2. Koleksi Avatar Visual Modern (DiceBear) */}
+                <div className="space-y-1">
+                  <span className="text-[9.5px] font-bold text-slate-400 uppercase block">Pilihan Avatar Ilustrasi Modern:</span>
+                  <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-1 bg-slate-950/60 rounded-xl border border-slate-800">
+                    {[
+                      { name: 'Rian', url: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Rian' },
+                      { name: 'Siti', url: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Siti' },
+                      { name: 'Andi', url: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Andi' },
+                      { name: 'Dewi', url: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Dewi' },
+                      { name: 'Alex', url: 'https://api.dicebear.com/7.x/adventurer/svg?seed=Alex' },
+                      { name: 'Maya', url: 'https://api.dicebear.com/7.x/lorelei/svg?seed=Maya' },
+                      { name: 'Budi', url: 'https://api.dicebear.com/7.x/lorelei/svg?seed=Budi' },
+                      { name: 'Spark', url: 'https://api.dicebear.com/7.x/bottts/svg?seed=Spark' },
+                      { name: 'Joy', url: 'https://api.dicebear.com/7.x/fun-emoji/svg?seed=Joy' }
+                    ].map((av) => (
+                      <button
+                        key={av.name}
+                        type="button"
+                        onClick={() => {
+                          handleUpdateStaffIcon(selectedActiveCashier.id, av.url);
+                        }}
+                        className={`p-1 px-1.5 rounded-xl transition cursor-pointer flex items-center gap-1.5 active:scale-95 ${
+                          selectedActiveCashier.avatar === av.url
+                            ? 'bg-indigo-600 ring-2 ring-white'
+                            : 'bg-slate-800 hover:bg-slate-700'
+                        }`}
+                        title={`Pilih avatar ${av.name}`}
+                      >
+                        <img src={av.url} alt={av.name} className="w-5 h-5 rounded-full bg-slate-900 object-cover" />
+                        <span className="text-[9.5px] font-bold pr-0.5">{av.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 3. Input Kustom */}
+                <div className="space-y-1 pt-0.5">
+                  <span className="text-[9.5px] font-bold text-slate-400 uppercase block">
+                    Ketik Ikon Emoji / URL Gambar Kustom:
+                  </span>
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={customStaffIconInput}
+                      onChange={(e) => setCustomStaffIconInput(e.target.value)}
+                      placeholder="Contoh: 🧺 atau https://... atau nama seed"
+                      className="flex-1 bg-slate-950 border border-slate-750 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-400"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!customStaffIconInput.trim()) return;
+                        const val = customStaffIconInput.trim();
+                        const finalVal = (val.startsWith('http') || val.length <= 4)
+                          ? val
+                          : `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(val)}`;
+                        handleUpdateStaffIcon(selectedActiveCashier.id, finalVal);
+                        setCustomStaffIconInput('');
+                      }}
+                      className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black transition cursor-pointer shrink-0"
+                    >
+                      Terapkan
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Date Pickers Filter Bar */}
             <div className="p-4 bg-indigo-50/70 border-b border-indigo-100/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">

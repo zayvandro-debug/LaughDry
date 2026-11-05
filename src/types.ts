@@ -12,6 +12,8 @@ export interface User {
   branchId: string;
   password?: string;
   permissions?: string[];
+  avatar?: string;
+  icon?: string;
 }
 
 export interface Branch {
@@ -95,6 +97,10 @@ export interface Order {
   perfume?: string;
   cashierId?: string;
   cashierName?: string;
+  inputCashierName?: string;
+  cuciCashierName?: string;
+  setrikaCashierName?: string;
+  packingCashierName?: string;
   isImported?: boolean;
 }
 
