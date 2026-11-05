@@ -31,6 +31,7 @@ import {
   Gift,
   Award,
   Shirt,
+  Package,
   MoreVertical,
   LogOut,
   BookOpen,
@@ -405,11 +406,12 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   // Interactive Payment Choice Popup (Cash, Transfer, Deposit)
   const [showPaymentChoiceModal, setShowPaymentChoiceModal] = useState(false);
 
-  // Pop-up input untuk jumlah pakaian saat transisi ke proses Cuci (Dicuci)
-  const [washTransitionOrderId, setWashTransitionOrderId] = useState<string | null>(null);
-  const [washTransitionCurrentStatus, setWashTransitionCurrentStatus] = useState<OrderStatus | null>(null);
-  const [showWashInputModal, setShowWashInputModal] = useState(false);
-  const [washClothesCountInput, setWashClothesCountInput] = useState<string>('');
+  // Pop-up konfirmasi & input jumlah pakaian pada setiap tahapan (Cuci, Setrika/Lipat, Packing)
+  const [stageTransitionOrderId, setStageTransitionOrderId] = useState<string | null>(null);
+  const [stageTransitionCurrentStatus, setStageTransitionCurrentStatus] = useState<OrderStatus | null>(null);
+  const [stageTransitionTargetStatus, setStageTransitionTargetStatus] = useState<OrderStatus | null>(null);
+  const [showStageInputModal, setShowStageInputModal] = useState(false);
+  const [stageClothesCountInput, setStageClothesCountInput] = useState<string>('');
 
   // Post-submit Choice Popup (print / send WA)
   const [showCheckoutConfirmModal, setShowCheckoutConfirmModal] = useState(false);
@@ -2527,12 +2529,17 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
 
     if (!nextStatus) return;
 
-    // INTERCEPT transition to Dicuci (proses cuci) to prompt for clothes count!
-    if (nextStatus === OrderStatus.DICUCI) {
-      setWashTransitionOrderId(orderId);
-      setWashTransitionCurrentStatus(currentStatus);
-      setWashClothesCountInput(orderObj?.clothesCount?.toString() || '');
-      setShowWashInputModal(true);
+    // INTERCEPT transition to Cuci, Setrika/Lipat, or Packing to prompt for clothes count confirmation!
+    if (
+      nextStatus === OrderStatus.DICUCI ||
+      nextStatus === OrderStatus.DISETRIKA_DILIPAT ||
+      nextStatus === OrderStatus.DIKEMAS
+    ) {
+      setStageTransitionOrderId(orderId);
+      setStageTransitionCurrentStatus(currentStatus);
+      setStageTransitionTargetStatus(nextStatus);
+      setStageClothesCountInput(orderObj?.clothesCount !== undefined && orderObj.clothesCount > 0 ? orderObj.clothesCount.toString() : '');
+      setShowStageInputModal(true);
       return;
     }
 
@@ -2549,25 +2556,84 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     updateOrderStatus(orderId, nextStatus, currentStatus);
   };
 
-  const submitWashTransitionWithClothes = (e: React.FormEvent) => {
+  const getStageModalInfo = () => {
+    switch (stageTransitionTargetStatus) {
+      case OrderStatus.DICUCI:
+        return {
+          title: '💦 Konfirmasi Proses Cuci',
+          subtitle: 'Anda akan memulai proses pencucian untuk cucian ini. Silakan masukkan atau verifikasi jumlah pakaian saat ini untuk memastikan keakuratan pelacakan item.',
+          btnText: 'Mulai Cuci ➔',
+          badgeBg: 'bg-sky-50 text-sky-600',
+          btnBg: 'bg-sky-600 hover:bg-sky-700',
+          focusRing: 'focus:border-sky-500',
+          stageLabel: 'Cuci',
+          icon: <Shirt className="w-6 h-6 animate-pulse" />
+        };
+      case OrderStatus.DISETRIKA_DILIPAT:
+        return {
+          title: '👔 Konfirmasi Proses Setrika / Lipat',
+          subtitle: 'Anda akan memulai proses setrika / lipat. Silakan hitung dan konfirmasi jumlah pakaian yang disetrika agar tidak ada pakaian yang tertinggal atau tercecer.',
+          btnText: 'Mulai Setrika/Lipat ➔',
+          badgeBg: 'bg-amber-50 text-amber-600',
+          btnBg: 'bg-amber-600 hover:bg-amber-700',
+          focusRing: 'focus:border-amber-500',
+          stageLabel: 'Setrika / Lipat',
+          icon: <Shirt className="w-6 h-6 text-amber-600" />
+        };
+      case OrderStatus.DIKEMAS:
+        return {
+          title: '📦 Konfirmasi Proses Packing',
+          subtitle: 'Anda akan melakukan packing/pengemasan order ini. Silakan hitung dan verifikasi kembali jumlah pakaian akhir sebelum dimasukkan ke dalam kantong laundry.',
+          btnText: 'Mulai Packing ➔',
+          badgeBg: 'bg-emerald-50 text-emerald-600',
+          btnBg: 'bg-emerald-600 hover:bg-emerald-700',
+          focusRing: 'focus:border-emerald-500',
+          stageLabel: 'Packing',
+          icon: <Package className="w-6 h-6 text-emerald-600" />
+        };
+      default:
+        return {
+          title: 'Konfirmasi Jumlah Pakaian',
+          subtitle: 'Silakan masukkan atau konfirmasi jumlah pakaian untuk tahapan pekerjaan ini.',
+          btnText: 'Lanjutkan ➔',
+          badgeBg: 'bg-slate-50 text-slate-700',
+          btnBg: 'bg-slate-900 hover:bg-slate-800',
+          focusRing: 'focus:border-slate-500',
+          stageLabel: 'Tahapan Order',
+          icon: <Shirt className="w-6 h-6" />
+        };
+    }
+  };
+
+  const submitStageTransitionWithClothes = (e: React.FormEvent) => {
     e.preventDefault();
-    const count = parseInt(washClothesCountInput, 10);
+    const count = parseInt(stageClothesCountInput, 10);
     if (isNaN(count) || count <= 0) {
       showToast("⚠️ Jumlah pakaian harus berupa angka dan lebih dari 0!");
       return;
     }
 
-    if (!washTransitionOrderId || !washTransitionCurrentStatus) return;
+    if (!stageTransitionOrderId || !stageTransitionCurrentStatus || !stageTransitionTargetStatus) return;
     
+    const targetStatus = stageTransitionTargetStatus;
+    const stageInfo = getStageModalInfo();
+
     const currentOrders = orders.map(o => {
-      if (o.id === washTransitionOrderId) {
-        return {
+      if (o.id === stageTransitionOrderId) {
+        const updatedObj: Order = {
           ...o,
           clothesCount: count,
-          status: OrderStatus.DICUCI,
-          cuciCashierName: currentUser.name,
+          status: targetStatus,
           updatedAt: new Date().toISOString()
         };
+        if (targetStatus === OrderStatus.DICUCI) {
+          updatedObj.cuciCashierName = currentUser.name;
+        } else if (targetStatus === OrderStatus.DISETRIKA_DILIPAT) {
+          updatedObj.setrikaCashierName = currentUser.name;
+        } else if (targetStatus === OrderStatus.DIKEMAS) {
+          updatedObj.packingCashierName = currentUser.name;
+        }
+        return updatedObj;
       }
       return o;
     });
@@ -2579,16 +2645,17 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       currentUser.name, 
       currentUser.role, 
       'STATUS_TRANSITION', 
-      `Mengubah status order ord-${washTransitionOrderId.substring(4)} dari [${washTransitionCurrentStatus}] ke [Dicuci] dengan pencatatan jumlah pakaian: ${count} pcs`
+      `Mengubah status order ord-${stageTransitionOrderId.substring(4)} dari [${stageTransitionCurrentStatus}] ke [${targetStatus}] (${stageInfo.stageLabel}) dengan konfirmasi jumlah pakaian: ${count} pcs`
     );
     loadDB();
-    showToast(`Status Order berhasil diubah ke [Dicuci] (Jumlah: ${count} pcs)`);
+    showToast(`Status Order berhasil diubah ke [${stageInfo.stageLabel}] (Jumlah pakaian: ${count} pcs)`);
 
     // Reset transition states
-    setShowWashInputModal(false);
-    setWashTransitionOrderId(null);
-    setWashTransitionCurrentStatus(null);
-    setWashClothesCountInput('');
+    setShowStageInputModal(false);
+    setStageTransitionOrderId(null);
+    setStageTransitionCurrentStatus(null);
+    setStageTransitionTargetStatus(null);
+    setStageClothesCountInput('');
   };
 
   const updateOrderStatus = (orderId: string, nextStatus: OrderStatus, currentStatus: OrderStatus) => {
@@ -5679,62 +5746,66 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       )}
 
       {/* ========================================================= */}
-      {/* POPUP INPUT JUMLAH PAKAIAN SEBELUM PROSES CUCI */}
+      {/* POPUP INPUT JUMLAH PAKAIAN SETIAP TAHAPAN (CUCI, SETRIKA/LIPAT, PACKING) */}
       {/* ========================================================= */}
-      {showWashInputModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn" id="modal-wash-input">
-          <div className="bg-white rounded-3xl p-6 max-w-sm w-full border border-slate-100 shadow-2xl space-y-4">
-            <div className="text-center space-y-2">
-              <div className="w-12 h-12 bg-sky-50 text-sky-600 rounded-2xl flex items-center justify-center mx-auto">
-                <Shirt className="w-6 h-6 animate-pulse" />
+      {showStageInputModal && (() => {
+        const stageInfo = getStageModalInfo();
+        return (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn" id="modal-stage-input">
+            <div className="bg-white rounded-3xl p-6 max-w-sm w-full border border-slate-100 shadow-2xl space-y-4">
+              <div className="text-center space-y-2">
+                <div className={`w-12 h-12 ${stageInfo.badgeBg} rounded-2xl flex items-center justify-center mx-auto`}>
+                  {stageInfo.icon}
+                </div>
+                <h4 className="font-extrabold text-slate-900 text-sm">{stageInfo.title}</h4>
+                <p className="text-slate-500 text-[11px] leading-relaxed">
+                  {stageInfo.subtitle}
+                </p>
               </div>
-              <h4 className="font-extrabold text-slate-900 text-sm">💦 Konfirmasi Proses Cuci</h4>
-              <p className="text-slate-500 text-[11px] leading-relaxed">
-                Anda akan memulai proses pencucian untuk cucian ini. Silakan masukkan <strong>jumlah pakaian</strong> saat ini untuk memastikan keakuratan pelacakan item.
-              </p>
+
+              <form onSubmit={submitStageTransitionWithClothes} className="space-y-4">
+                <div className="space-y-1.5 text-xs">
+                  <label className="text-slate-500 font-bold block">
+                    Jumlah Pakaian (Pcs) <span className="text-rose-500 font-black">*Wajib</span>:
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="1"
+                    value={stageClothesCountInput}
+                    onChange={(e) => setStageClothesCountInput(e.target.value)}
+                    placeholder="Contoh: 12"
+                    className={`w-full bg-slate-50 border border-slate-200 ${stageInfo.focusRing} focus:bg-white rounded-xl p-3 focus:outline-none font-bold text-slate-800 text-center text-lg`}
+                    autoFocus
+                  />
+                </div>
+
+                <div className="flex gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowStageInputModal(false);
+                      setStageTransitionOrderId(null);
+                      setStageTransitionCurrentStatus(null);
+                      setStageTransitionTargetStatus(null);
+                      setStageClothesCountInput('');
+                    }}
+                    className="flex-1 py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-600 font-extrabold rounded-xl text-xs transition active:scale-[0.98]"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className={`flex-1 py-2.5 px-4 ${stageInfo.btnBg} text-white font-extrabold rounded-xl text-xs transition active:scale-[0.98] shadow-md`}
+                  >
+                    {stageInfo.btnText}
+                  </button>
+                </div>
+              </form>
             </div>
-
-            <form onSubmit={submitWashTransitionWithClothes} className="space-y-4">
-              <div className="space-y-1.5 text-xs">
-                <label className="text-slate-500 font-bold block">
-                  Jumlah Pakaian (Pcs) <span className="text-rose-500 font-black">*Wajib</span>:
-                </label>
-                <input
-                  type="number"
-                  required
-                  min="1"
-                  value={washClothesCountInput}
-                  onChange={(e) => setWashClothesCountInput(e.target.value)}
-                  placeholder="Contoh: 12"
-                  className="w-full bg-slate-50 border border-slate-200 focus:border-sky-500 focus:bg-white rounded-xl p-3 focus:outline-none font-bold text-slate-800 text-center text-lg"
-                  autoFocus
-                />
-              </div>
-
-              <div className="flex gap-2.5 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowWashInputModal(false);
-                    setWashTransitionOrderId(null);
-                    setWashTransitionCurrentStatus(null);
-                    setWashClothesCountInput('');
-                  }}
-                  className="flex-1 py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-600 font-extrabold rounded-xl text-xs transition active:scale-[0.98]"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  className="flex-1 py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white font-extrabold rounded-xl text-xs transition active:scale-[0.98] shadow-md"
-                >
-                  Mulai Cuci ➔
-                </button>
-              </div>
-            </form>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ========================================================= */}
       {/* NEW: POPUP PILIHAN METODE PEMBAYARAN KETERANGAN "KLIK" */}

@@ -19,7 +19,12 @@ export interface BluetoothDevice {
 
 export class BluetoothManager {
   private static isAndroid(): boolean {
-    return typeof Capacitor !== 'undefined' && Capacitor.getPlatform() === 'android';
+    return (
+      typeof Capacitor !== 'undefined' &&
+      Capacitor.isNativePlatform() &&
+      Capacitor.getPlatform() === 'android' &&
+      Capacitor.isPluginAvailable('BluetoothClassicPlugin')
+    );
   }
 
   /**
