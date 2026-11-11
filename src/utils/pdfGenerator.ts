@@ -242,3 +242,106 @@ export const downloadDailyTransactionsPDF = (transactions: TransactionItem[], da
   // Save PDF output
   doc.save(`Ringkasan_Transaksi_Harian_LaughDry_${dateStr.replace(/\s+/g, '_')}.pdf`);
 };
+
+export interface ExpensePDFItem {
+  id: string;
+  date: string;
+  category: string;
+  description: string;
+  amount: number;
+  branchId: string;
+  recordedBy: string;
+  paymentMethod?: string;
+}
+
+export const downloadExpensesReportPDF = (
+  expenses: ExpensePDFItem[],
+  dateRangeStr: string,
+  ownerName: string,
+  branchName: string = 'Semua Cabang'
+) => {
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: 'a4'
+  });
+
+  // Slate Header Banner
+  doc.setFillColor(15, 23, 42); // slate-900
+  doc.rect(0, 0, 297, 36, 'F');
+
+  // Title
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(20);
+  doc.setFont('Helvetica', 'bold');
+  doc.text('LaughDry Cloud POS', 15, 15);
+
+  doc.setFontSize(9);
+  doc.setFont('Helvetica', 'normal');
+  doc.setTextColor(254, 205, 211); // rose-200
+  doc.text(`LAPORAN PENGELUARAN USAHA (OPEX) - PERIODE: ${dateRangeStr} | CABANG: ${branchName}`, 15, 22);
+  doc.text(`Dicetak oleh: Owner ${ownerName} | Tanggal Cetak: ${new Date().toLocaleString('id-ID')}`, 15, 27);
+
+  const headers = [['No', 'Tanggal', 'Kategori', 'Deskripsi Pengeluaran', 'Cabang', 'Kasir / Pencatat', 'Metode Kas', 'Jumlah Biaya']];
+  const bodyRows = expenses.map((e, idx) => {
+    const dStr = new Date(e.date).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+    return [
+      String(idx + 1),
+      dStr,
+      e.category,
+      e.description,
+      e.branchId,
+      e.recordedBy || 'Owner',
+      e.paymentMethod || 'Cash',
+      `Rp ${e.amount.toLocaleString('id-ID')}`
+    ];
+  });
+
+  const totalSum = expenses.reduce((sum, e) => sum + e.amount, 0);
+
+  autoTable(doc, {
+    startY: 45,
+    margin: { left: 15, right: 15 },
+    head: headers,
+    body: bodyRows,
+    theme: 'striped',
+    headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], fontStyle: 'bold' },
+    styles: { fontSize: 8.5, cellPadding: 3 },
+    columnStyles: {
+      0: { halign: 'center', cellWidth: 12 },
+      1: { cellWidth: 28 },
+      2: { cellWidth: 35, fontStyle: 'bold' },
+      3: { cellWidth: 85 },
+      4: { halign: 'center', cellWidth: 25 },
+      5: { cellWidth: 35 },
+      6: { halign: 'center', cellWidth: 25 },
+      7: { halign: 'right', fontStyle: 'bold', textColor: [225, 29, 72] }
+    }
+  });
+
+  const finalY = (doc as any).lastAutoTable.finalY + 10;
+
+  // Summary Card at bottom right
+  doc.setFillColor(255, 241, 242); // rose-50
+  doc.rect(197, finalY, 85, 18, 'F');
+  doc.setDrawColor(254, 205, 211);
+  doc.rect(197, finalY, 85, 18, 'S');
+
+  doc.setFontSize(9);
+  doc.setFont('Helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text(`TOTAL PENGELUARAN (OPEX):`, 202, finalY + 7);
+  doc.setFontSize(13);
+  doc.setTextColor(225, 29, 72); // rose-600
+  doc.text(`Rp ${totalSum.toLocaleString('id-ID')}`, 202, finalY + 14);
+
+  // Disclaimer / Notes
+  doc.setFontSize(8);
+  doc.setFont('Helvetica', 'italic');
+  doc.setTextColor(148, 163, 184);
+  doc.text(`* Total ${expenses.length} data pengeluaran operasional resmi sesuai pembukuan POS LaughDry.`, 15, finalY + 7);
+
+  // Save PDF output
+  doc.save(`Laporan_Pengeluaran_OPEX_${dateRangeStr.replace(/\s+/g, '_')}.pdf`);
+};
+

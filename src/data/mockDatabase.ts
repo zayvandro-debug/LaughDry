@@ -1005,11 +1005,21 @@ export class LaughDryDatabase {
   public static saveLoyalty(data: LoyaltyPointMutation[]) { this.saveKey('loyalty', data); }
 
   public static getAuditLogs(): AuditLog[] { return this.loadKey('audit_logs', INITIAL_AUDIT); }
-  public static saveAuditLogs(data: AuditLog[]) { this.saveKey('audit_logs', data); }
+  public static saveAuditLogs(data: AuditLog[]) { 
+    this.saveKey('audit_logs', data); 
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('laughdry_audit_updated', { detail: data }));
+      window.dispatchEvent(new CustomEvent('laughdry_data_changed'));
+    }
+  }
 
   public static getTemplates(): WhatsAppTemplate[] { return this.loadKey('templates', INITIAL_TEMPLATES); }
   public static saveTemplates(data: WhatsAppTemplate[]) { 
     this.saveKey('templates', data); 
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('laughdry_templates_updated', { detail: data }));
+      window.dispatchEvent(new CustomEvent('laughdry_data_changed'));
+    }
     // Direct write to Firestore for instant synchronisation across devices
     if (localStorage.getItem('laughdry_firebase_disabled') !== 'true') {
       const uid = localStorage.getItem('laughdry_firebase_uid') || auth.currentUser?.uid;
@@ -1028,6 +1038,10 @@ export class LaughDryDatabase {
   public static saveAttendance(data: AttendanceRecord[]) { 
     const previous = this.getAttendance();
     this.saveKey('attendance', data); 
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('laughdry_attendance_updated', { detail: data }));
+      window.dispatchEvent(new CustomEvent('laughdry_data_changed'));
+    }
     
     // Differential Sync using QueueSync for network recovery
     data.forEach(item => {
@@ -1059,13 +1073,22 @@ export class LaughDryDatabase {
     if (!settings.receiptElements || settings.receiptElements.length === 0 || !hasNewEl) {
       settings.receiptElements = INITIAL_SETTINGS.receiptElements;
       this.saveKey('settings', settings);
+    } else if (settings.receiptElements && !settings.receiptElements.some(el => el.id === 'whatsapp_template')) {
+      const waEl = INITIAL_SETTINGS.receiptElements?.find(el => el.id === 'whatsapp_template');
+      if (waEl) {
+        settings.receiptElements.push(waEl);
+        this.saveKey('settings', settings);
+      }
     }
     return settings; 
   }
   public static saveSettings(data: SystemSettings) { 
     this.saveKey('settings', data); 
     this.queueSync('settings', 'save', 'system', data);
-    window.dispatchEvent(new CustomEvent('laughdry_settings_updated', { detail: data }));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('laughdry_settings_updated', { detail: data }));
+      window.dispatchEvent(new CustomEvent('laughdry_data_changed'));
+    }
   }
 
   public static getSettingsHistory(): SettingsVersion[] {

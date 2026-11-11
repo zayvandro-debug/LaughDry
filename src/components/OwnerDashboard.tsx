@@ -7,7 +7,8 @@ import React, { useState, useEffect, useRef } from 'react';
 // @ts-ignore
 import XLSX from 'xlsx-js-style';
 import { motion, AnimatePresence } from 'motion/react';
-import { downloadFinancialReportPDF, downloadDailyTransactionsPDF } from '../utils/pdfGenerator';
+import { downloadFinancialReportPDF, downloadDailyTransactionsPDF, downloadExpensesReportPDF } from '../utils/pdfGenerator';
+import { DoubleVerificationModal } from './DoubleVerificationModal';
 import {
   TrendingUp,
   TrendingDown,
@@ -20,6 +21,7 @@ import {
   Trash2,
   CheckCircle,
   FileText,
+  FileSpreadsheet,
   Printer,
   Clock,
   Layers,
@@ -654,9 +656,9 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
   const [cashierDetailStartDate, setCashierDetailStartDate] = useState(() => getTodayDateStr());
   const [cashierDetailEndDate, setCashierDetailEndDate] = useState(() => getTodayDateStr());
 
-  // Modal konfirmasi sebelum mencetak / mengunduh file pada Log Total Omzet
+  // Modal konfirmasi sebelum mencetak / mengunduh file pada Log Total Omzet & Pengeluaran
   const [reportConfirmAction, setReportConfirmAction] = useState<{
-    type: 'laba_rugi' | 'ringkasan_omzet' | 'ekspor_excel';
+    type: 'laba_rugi' | 'ringkasan_omzet' | 'ekspor_excel' | 'ekspor_opex_excel' | 'ekspor_opex_pdf' | string;
     title: string;
     description: string;
     badge: string;
@@ -664,6 +666,34 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     icon: string;
     action: () => void;
   } | null>(null);
+
+  // Double verification modal state for restore & reset operations
+  const [doubleVerificationState, setDoubleVerificationState] = useState<{
+    isOpen: boolean;
+    title: string;
+    description: string;
+    actionButtonText?: string;
+    actionButtonVariant?: 'danger' | 'warning' | 'primary';
+    onSuccess: () => void | Promise<void>;
+  }>({
+    isOpen: false,
+    title: '',
+    description: '',
+    onSuccess: () => {}
+  });
+
+  const requestDoubleVerification = (params: {
+    title: string;
+    description: string;
+    actionButtonText?: string;
+    actionButtonVariant?: 'danger' | 'warning' | 'primary';
+    onSuccess: () => void | Promise<void>;
+  }) => {
+    setDoubleVerificationState({
+      isOpen: true,
+      ...params
+    });
+  };
 
   useEffect(() => {
     loadDatabaseState();
@@ -710,6 +740,11 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     };
     window.addEventListener('laughdry_db_synced', handleDbUpdate);
     window.addEventListener('laughdry_data_changed', handleDbUpdate);
+    window.addEventListener('laughdry_orders_updated', handleDbUpdate);
+    window.addEventListener('laughdry_audit_updated', handleDbUpdate);
+    window.addEventListener('laughdry_attendance_updated', handleDbUpdate);
+    window.addEventListener('laughdry_settings_updated', handleDbUpdate);
+    window.addEventListener('laughdry_templates_updated', handleDbUpdate);
     window.addEventListener('laughdry_perfumes_updated', handleDbUpdate);
     window.addEventListener('laughdry_archived_orders_updated', handleDbUpdate);
 
@@ -717,6 +752,11 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
       if (unsubscribe) unsubscribe();
       window.removeEventListener('laughdry_db_synced', handleDbUpdate);
       window.removeEventListener('laughdry_data_changed', handleDbUpdate);
+      window.removeEventListener('laughdry_orders_updated', handleDbUpdate);
+      window.removeEventListener('laughdry_audit_updated', handleDbUpdate);
+      window.removeEventListener('laughdry_attendance_updated', handleDbUpdate);
+      window.removeEventListener('laughdry_settings_updated', handleDbUpdate);
+      window.removeEventListener('laughdry_templates_updated', handleDbUpdate);
       window.removeEventListener('laughdry_perfumes_updated', handleDbUpdate);
       window.removeEventListener('laughdry_archived_orders_updated', handleDbUpdate);
     };
@@ -2100,6 +2140,66 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     }
   };
 
+  const handleExportExpensesExcel = () => {
+    if (filteredExpenses.length === 0) {
+      triggerToast("⚠️ Tidak ada data pengeluaran untuk diekspor ke Excel!");
+      return;
+    }
+
+    const headers = [
+      "Tanggal",
+      "Kategori",
+      "Deskripsi_Pengeluaran",
+      "Jumlah_Biaya",
+      "ID_Cabang",
+      "Disimpan_Oleh",
+      "Metode_Pembayaran"
+    ];
+
+    const dataRows = filteredExpenses.map(exp => [
+      new Date(exp.date).toISOString().split('T')[0],
+      exp.category,
+      exp.description,
+      exp.amount,
+      exp.branchId || "br-1",
+      exp.recordedBy || getOwnerName(),
+      exp.paymentMethod || "Cash"
+    ]);
+
+    const data = [headers, ...dataRows];
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    styleWorksheet(ws);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Pengeluaran OPEX");
+
+    const filename = `laughdry_pengeluaran_opex_${expenseStartDate}_sd_${expenseEndDate}.xlsx`;
+    XLSX.writeFile(wb, filename);
+
+    LaughDryDatabase.logActivity('usr-1', getOwnerName(), 'owner', 'EXPORT_EXPENSE_EXCEL', `Mengekspor ${filteredExpenses.length} data pengeluaran ke Excel sesuai template`);
+    triggerToast(`✅ Berhasil mengekspor ${filteredExpenses.length} data pengeluaran ke Excel (.xlsx)!`);
+  };
+
+  const handleExportExpensesPDF = () => {
+    if (filteredExpenses.length === 0) {
+      triggerToast("⚠️ Tidak ada data pengeluaran untuk diekspor ke PDF!");
+      return;
+    }
+
+    const branchName = selectedBranch === 'all' 
+      ? 'Semua Cabang' 
+      : (branches.find(b => b.id === selectedBranch)?.name || selectedBranch);
+
+    downloadExpensesReportPDF(
+      filteredExpenses,
+      `${expenseStartDate} s.d ${expenseEndDate}`,
+      getOwnerName(),
+      branchName
+    );
+
+    LaughDryDatabase.logActivity('usr-1', getOwnerName(), 'owner', 'EXPORT_EXPENSE_PDF', `Mengekspor ${filteredExpenses.length} data pengeluaran ke dokumen PDF`);
+    triggerToast(`✅ Berhasil mengunduh dokumen Laporan Pengeluaran PDF (${filteredExpenses.length} data)!`);
+  };
+
   const handleTemplateChange = (id: string, body: string) => {
     const updated = templates.map(t => t.id === id ? { ...t, body } : t);
     LaughDryDatabase.saveTemplates(updated);
@@ -2254,31 +2354,39 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
       }
     });
 
-    // 2. Aggregate from orders
+    const start = cashierDetailStartDate ? new Date(cashierDetailStartDate + 'T00:00:00') : null;
+    const end = cashierDetailEndDate ? new Date(cashierDetailEndDate + 'T23:59:59') : null;
+
+    // 2. Aggregate from orders within the selected analysis period
     orders.forEach(o => {
       if (o.status !== OrderStatus.DIBATALKAN) {
+        const orderDate = new Date(o.createdAt);
+        if (start && orderDate < start) return;
+        if (end && orderDate > end) return;
+
         const cashierId = o.cashierId || 'usr-2'; // Default to Rian
         const cashierName = o.cashierName || 'Rian Karyawan';
-        const userObj = users.find(u => u.id === cashierId || u.name === cashierName);
+        const userObj = users.find(u => u.id === cashierId || u.name.toLowerCase() === cashierName.toLowerCase());
+        const targetId = userObj ? userObj.id : cashierId;
 
-        if (!cashierMap[cashierId]) {
-          cashierMap[cashierId] = {
-            id: cashierId,
-            name: cashierName,
-            username: cashierName.split(' ')[0].toLowerCase(),
+        if (!cashierMap[targetId]) {
+          cashierMap[targetId] = {
+            id: targetId,
+            name: userObj ? userObj.name : cashierName,
+            username: userObj ? (userObj.username || userObj.name.split(' ')[0].toLowerCase()) : cashierName.split(' ')[0].toLowerCase(),
             totalRevenue: 0,
             transactionCount: 0,
             avatar: userObj?.avatar || userObj?.icon || `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(cashierName)}`,
           };
         }
 
-        cashierMap[cashierId].totalRevenue += o.totalAmount;
-        cashierMap[cashierId].transactionCount += 1;
+        cashierMap[targetId].totalRevenue += o.totalAmount;
+        cashierMap[targetId].transactionCount += 1;
       }
     });
 
     return Object.values(cashierMap);
-  }, [orders, users]);
+  }, [orders, users, cashierDetailStartDate, cashierDetailEndDate]);
 
   // Real-time Selected Month Transactions List for Detail Popup
   const monthlyTransactions = React.useMemo(() => {
@@ -2590,23 +2698,21 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
   // Real-time calculation of employee activity metrics based on customizable date range
   const getCashierActivityBreakdown = (cashierId: string, startDateStr: string, endDateStr: string) => {
     const logs = LaughDryDatabase.getAuditLogs();
+    const targetUser = users.find(u => u.id === cashierId || u.username === cashierId);
+    const targetName = (targetUser?.name || '').trim().toLowerCase();
     
-    // We parse the dates
+    // Parse the date boundaries
     const start = new Date(startDateStr + 'T00:00:00');
     const end = new Date(endDateStr + 'T23:59:59');
 
     // Filter logs for this cashier and within date range
     const cashierLogs = logs.filter(log => {
-      if (log.userId !== cashierId) return false;
+      const matchId = log.userId === cashierId;
+      const matchName = targetName && log.userName && log.userName.toLowerCase() === targetName;
+      if (!matchId && !matchName) return false;
       const logDate = new Date(log.timestamp);
       return logDate >= start && logDate <= end;
     });
-
-    let newTransactionsCount = 0;
-    let cuciCount = 0;
-    let setrikaCount = 0;
-    let packingCount = 0;
-    let selesaiCount = 0;
 
     const newTransactionsList: Order[] = [];
     const cuciList: Order[] = [];
@@ -2614,116 +2720,108 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
     const packingList: Order[] = [];
     const selesaiList: Order[] = [];
 
-    // Scan logs
+    const addUniqueOrder = (list: Order[], ord: Order) => {
+      if (!list.some(x => x.id === ord.id)) {
+        list.push(ord);
+      }
+    };
+
+    // Helper to find order by log details
+    const findOrderFromLog = (details: string): Order | undefined => {
+      // Try invoice matching (#LD-... or LD-...)
+      const invMatch = details.match(/#?(LD-[0-9a-zA-Z-]+)/i) || details.match(/#?(10[0-9a-zA-Z-]+)/i);
+      if (invMatch) {
+        const inv = invMatch[1].replace(/^#/, '');
+        const found = orders.find(o => o.invoiceNumber === inv || o.invoiceNumber === '#' + inv || o.invoiceNumber.toLowerCase().includes(inv.toLowerCase()));
+        if (found) return found;
+      }
+      // Try order id matching (ord-...)
+      const ordMatch = details.match(/(ord-[0-9a-zA-Z-]+)/i);
+      if (ordMatch) {
+        const ordId = ordMatch[1];
+        const found = orders.find(o => o.id === ordId || o.id.toLowerCase().includes(ordId.toLowerCase()));
+        if (found) return found;
+      }
+      return undefined;
+    };
+
+    // 1. Process from real-time audit logs
     cashierLogs.forEach(log => {
       const action = log.action || '';
       const details = log.details || '';
+      const foundOrder = findOrderFromLog(details);
 
-      // Try to find the order by matching invoice (e.g. #LD-100234)
-      let foundOrder: Order | undefined;
-      const invoiceMatch = details.match(/#(LD-[0-9a-zA-Z-]+)/i) || details.match(/#(10[0-9a-zA-Z-]+)/i);
-      if (invoiceMatch) {
-        const invNum = invoiceMatch[1];
-        foundOrder = orders.find(o => o.invoiceNumber === invNum || o.invoiceNumber === '#' + invNum || o.invoiceNumber.toLowerCase().includes(invNum.toLowerCase()));
-      }
-
-      if (action === 'ORDER_CREATE') {
-        newTransactionsCount++;
-        if (foundOrder) {
-          if (!newTransactionsList.some(o => o.id === foundOrder!.id)) {
-            newTransactionsList.push(foundOrder);
-          }
-        }
-      } else if (action === 'STATUS_TRANSITION') {
-        if (details.includes('ke [Dicuci]')) {
-          cuciCount++;
-          if (foundOrder) {
-            if (!cuciList.some(o => o.id === foundOrder!.id)) cuciList.push(foundOrder);
-          }
-        } else if (details.includes('ke [Disetrika/Dilipat]') || details.includes('ke [Disetrika]')) {
-          setrikaCount++;
-          if (foundOrder) {
-            if (!setrikaList.some(o => o.id === foundOrder!.id)) setrikaList.push(foundOrder);
-          }
-        } else if (details.includes('ke [Dikemas]') || details.includes('ke [Siap Diambil]')) {
-          packingCount++;
-          if (foundOrder) {
-            if (!packingList.some(o => o.id === foundOrder!.id)) packingList.push(foundOrder);
-          }
-        } else if (details.includes('ke [Selesai]')) {
-          selesaiCount++;
-          if (foundOrder) {
-            if (!selesaiList.some(o => o.id === foundOrder!.id)) selesaiList.push(foundOrder);
-          }
+      if (action === 'ORDER_CREATE' || action === 'ORDER_SAVE') {
+        if (foundOrder) addUniqueOrder(newTransactionsList, foundOrder);
+      } else if (action === 'STATUS_TRANSITION' || action === 'ORDER_EDIT') {
+        const dLower = details.toLowerCase();
+        if (dLower.includes('ke [dicuci]') || dLower.includes('dicuci') || dLower.includes('(cuci)')) {
+          if (foundOrder) addUniqueOrder(cuciList, foundOrder);
+        } else if (dLower.includes('ke [disetrika/dilipat]') || dLower.includes('ke [disetrika]') || dLower.includes('setrika')) {
+          if (foundOrder) addUniqueOrder(setrikaList, foundOrder);
+        } else if (dLower.includes('ke [dikemas]') || dLower.includes('ke [siap diambil]') || dLower.includes('packing') || dLower.includes('kemasan')) {
+          if (foundOrder) addUniqueOrder(packingList, foundOrder);
+        } else if (dLower.includes('ke [selesai]') || dLower.includes('pelunasan')) {
+          if (foundOrder) addUniqueOrder(selesaiList, foundOrder);
         }
       }
     });
 
-    // Support with actual database orders assigned to or updated by this employee within the active dates
-    // to provide comprehensive and authentic statistics
+    // 2. Cross-reference with database orders within date range for direct attribution
     orders.forEach(o => {
+      if (o.status === OrderStatus.DIBATALKAN) return;
       const oDate = new Date(o.createdAt);
-      if (oDate >= start && oDate <= end) {
-        if (o.cashierId === cashierId) {
-          // Every order assigned is a new transaction
-          const hasLog = cashierLogs.some(l => l.action === 'ORDER_CREATE' && l.details.includes(o.invoiceNumber));
-          if (!hasLog) {
-            newTransactionsCount++;
-            if (!newTransactionsList.some(x => x.id === o.id)) {
-              newTransactionsList.push(o);
-            }
-          }
+      const isDateInRange = oDate >= start && oDate <= end;
 
-          // Deduce status accomplishments that might not have a detailed persistent audit log
-          const hasStatusLog = (statusKeyword: string) =>
-            cashierLogs.some(l => l.action === 'STATUS_TRANSITION' && l.details.includes(o.invoiceNumber) && l.details.toLowerCase().includes(statusKeyword));
+      // Attribution for Creating / Input Order
+      if (isDateInRange && (o.cashierId === cashierId || (targetName && o.cashierName && o.cashierName.toLowerCase() === targetName))) {
+        addUniqueOrder(newTransactionsList, o);
+      }
 
-          if (o.status === OrderStatus.DICUCI && !hasStatusLog('dicuci')) {
-            cuciCount++;
-            if (!cuciList.some(x => x.id === o.id)) cuciList.push(o);
-          } else if (o.status === OrderStatus.DISETRIKA_DILIPAT) {
-            if (!hasStatusLog('dicuci')) {
-              cuciCount++;
-              if (!cuciList.some(x => x.id === o.id)) cuciList.push(o);
-            }
-            if (!hasStatusLog('setrika')) {
-              setrikaCount++;
-              if (!setrikaList.some(x => x.id === o.id)) setrikaList.push(o);
-            }
-          } else if (o.status === OrderStatus.DIKEMAS || o.status === OrderStatus.SIAP_DIAMBIL) {
-            if (!hasStatusLog('dicuci')) {
-              cuciCount++;
-              if (!cuciList.some(x => x.id === o.id)) cuciList.push(o);
-            }
-            if (!hasStatusLog('setrika')) {
-              setrikaCount++;
-              if (!setrikaList.some(x => x.id === o.id)) setrikaList.push(o);
-            }
-            if (!hasStatusLog('dikemas') && !hasStatusLog('siap')) {
-              packingCount++;
-              if (!packingList.some(x => x.id === o.id)) packingList.push(o);
-            }
-          } else if (o.status === OrderStatus.SELESAI) {
-            if (!hasStatusLog('dicuci')) {
-              cuciCount++;
-              if (!cuciList.some(x => x.id === o.id)) cuciList.push(o);
-            }
-            if (!hasStatusLog('setrika')) {
-              setrikaCount++;
-              if (!setrikaList.some(x => x.id === o.id)) setrikaList.push(o);
-            }
-            if (!hasStatusLog('dikemas') && !hasStatusLog('siap')) {
-              packingCount++;
-              if (!packingList.some(x => x.id === o.id)) packingList.push(o);
-            }
-            if (!hasStatusLog('selesai')) {
-              selesaiCount++;
-              if (!selesaiList.some(x => x.id === o.id)) selesaiList.push(o);
-            }
+      // Attribution for Washing (Cuci)
+      if (targetName && o.cuciCashierName && o.cuciCashierName.toLowerCase() === targetName) {
+        const updateDate = o.updatedAt ? new Date(o.updatedAt) : oDate;
+        if (updateDate >= start && updateDate <= end) {
+          addUniqueOrder(cuciList, o);
+        }
+      }
+
+      // Attribution for Ironing / Folding (Setrika / Lipat)
+      if (targetName && o.setrikaCashierName && o.setrikaCashierName.toLowerCase() === targetName) {
+        const updateDate = o.updatedAt ? new Date(o.updatedAt) : oDate;
+        if (updateDate >= start && updateDate <= end) {
+          addUniqueOrder(setrikaList, o);
+        }
+      }
+
+      // Attribution for Packing / Packaging (Dikemas)
+      if (targetName && o.packingCashierName && o.packingCashierName.toLowerCase() === targetName) {
+        const updateDate = o.updatedAt ? new Date(o.updatedAt) : oDate;
+        if (updateDate >= start && updateDate <= end) {
+          addUniqueOrder(packingList, o);
+        }
+      }
+
+      // Attribution for Finishing / Pickup (Selesai)
+      if (o.status === OrderStatus.SELESAI) {
+        const finishDate = o.completedAt ? new Date(o.completedAt) : (o.updatedAt ? new Date(o.updatedAt) : oDate);
+        if (finishDate >= start && finishDate <= end) {
+          // Check if user was recorded as completion cashier or was handling this order
+          if (
+            (targetName && o.cashierName && o.cashierName.toLowerCase() === targetName) ||
+            (targetName && o.packingCashierName && o.packingCashierName.toLowerCase() === targetName)
+          ) {
+            addUniqueOrder(selesaiList, o);
           }
         }
       }
     });
+
+    const newTransactionsCount = newTransactionsList.length;
+    const cuciCount = cuciList.length;
+    const setrikaCount = setrikaList.length;
+    const packingCount = packingList.length;
+    const selesaiCount = selesaiList.length;
 
     return {
       newTransactionsCount,
@@ -3109,7 +3207,16 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
 
             {/* Restore Button next to import block */}
             <button
-              onClick={handleRestoreOrdersBackup}
+              onClick={() => {
+                if (!canRestoreOrders) return;
+                requestDoubleVerification({
+                  title: 'Verifikasi Keamanan Restore Transaksi',
+                  description: 'Anda akan mengembalikan database transaksi laundry ke kondisi sebelum impor Excel terakhir. Masukkan email dan password untuk verifikasi.',
+                  actionButtonText: 'Verifikasi & Restore Transaksi',
+                  actionButtonVariant: 'danger',
+                  onSuccess: () => handleRestoreOrdersBackup()
+                });
+              }}
               disabled={!canRestoreOrders}
               className={`flex items-center justify-center w-7 h-7 md:w-8 md:h-8 border rounded-lg transition shrink-0 cursor-pointer ${
                 canRestoreOrders 
@@ -4858,18 +4965,21 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
             </div>
           </div>
           <div className="p-4 space-y-6 animate-fadeIn" id="expense-accounting-panel">
-          {/* Excel Import & Restore OPEX Bar - PLACED AT THE VERY TOP */}
+          {/* Excel Import, Export & Restore OPEX Bar - PLACED AT THE VERY TOP */}
           <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-2xl flex flex-wrap items-center justify-between gap-2.5 text-xs font-sans">
-            <div className="flex items-center gap-1 text-[11px] font-black text-slate-800">
-              <span className="shrink-0">📥 Impor OPEX (Excel)</span>
+            <div className="flex items-center gap-1.5 text-[11px] font-black text-slate-800">
+              <span className="shrink-0">📥 Impor & Ekspor OPEX</span>
+              <span className="text-[9px] bg-slate-200 text-slate-700 px-1.5 py-0.2 rounded font-mono font-bold">
+                {filteredExpenses.length} data
+              </span>
             </div>
             
-            {/* Extremely compact action buttons (perfectly bound for mobile) */}
-            <div className="flex items-center gap-1 flex-wrap">
+            {/* Action buttons (compact & responsive for mobile/desktop) */}
+            <div className="flex items-center gap-1.5 flex-wrap">
               <button
                 type="button"
                 onClick={handleDownloadExpenseTemplate}
-                className="flex items-center gap-1 px-2 py-1.5 bg-white border border-amber-300 text-amber-800 font-extrabold rounded-lg hover:bg-amber-50 active:scale-95 transition cursor-pointer text-[10px] sm:text-[10.5px] h-7 shadow-xs"
+                className="flex items-center gap-1 px-2.5 py-1.5 bg-white border border-amber-300 text-amber-800 font-extrabold rounded-lg hover:bg-amber-50 active:scale-95 transition cursor-pointer text-[10px] sm:text-[10.5px] h-7 shadow-xs"
                 title="Unduh Contoh/Template Excel Pengeluaran"
               >
                 <Download className="w-3 h-3 text-amber-600 animate-bounce" />
@@ -4878,8 +4988,8 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
 
               <label
                 htmlFor="excel-opex-import-file-main"
-                className="flex items-center gap-1 px-2 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold rounded-lg active:scale-95 transition cursor-pointer text-[10px] sm:text-[10.5px] h-7 shadow-xs shrink-0"
-                title="Impor Excel Pengeluaran"
+                className="flex items-center gap-1 px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold rounded-lg active:scale-95 transition cursor-pointer text-[10px] sm:text-[10.5px] h-7 shadow-xs shrink-0"
+                title="Impor Excel Pengeluaran Sesuai Template"
               >
                 <Upload className="w-3 h-3" />
                 <span>Import</span>
@@ -4892,11 +5002,64 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                 />
               </label>
 
-              {/* Restore Button for OPEX next to import block */}
+              {/* Ekspor Excel Pengeluaran */}
               <button
-                onClick={handleRestoreExpensesBackup}
+                type="button"
+                onClick={() => {
+                  setReportConfirmAction({
+                    type: 'ekspor_opex_excel',
+                    title: 'Konfirmasi Ekspor Data Pengeluaran (.xlsx)',
+                    description: `Apakah Anda yakin ingin mengekspor ${filteredExpenses.length} catatan pengeluaran operasional periode ${expenseStartDate} s.d ${expenseEndDate} ke spreadsheet Excel (.xlsx) sesuai template?`,
+                    badge: 'Spreadsheet Excel (.xlsx)',
+                    confirmLabel: 'Ya, Ekspor ke Excel',
+                    icon: '📥',
+                    action: () => handleExportExpensesExcel()
+                  });
+                }}
+                className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-lg active:scale-95 transition cursor-pointer text-[10px] sm:text-[10.5px] h-7 shadow-xs"
+                title="Ekspor Data Pengeluaran ke Excel (.xlsx) Sesuai Template"
+                id="btn-export-expenses-excel"
+              >
+                <FileSpreadsheet className="w-3 h-3" />
+                <span>Ekspor Excel</span>
+              </button>
+
+              {/* Ekspor PDF Pengeluaran */}
+              <button
+                type="button"
+                onClick={() => {
+                  setReportConfirmAction({
+                    type: 'ekspor_opex_pdf',
+                    title: 'Konfirmasi Ekspor Dokumen Pengeluaran (.pdf)',
+                    description: `Apakah Anda yakin ingin mengekspor ${filteredExpenses.length} catatan pengeluaran operasional periode ${expenseStartDate} s.d ${expenseEndDate} ke dokumen PDF resmi?`,
+                    badge: 'Dokumen PDF Resmi',
+                    confirmLabel: 'Ya, Unduh Dokumen PDF',
+                    icon: '📄',
+                    action: () => handleExportExpensesPDF()
+                  });
+                }}
+                className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold rounded-lg active:scale-95 transition cursor-pointer text-[10px] sm:text-[10.5px] h-7 shadow-xs"
+                title="Ekspor Data Pengeluaran ke Dokumen Cetak PDF (.pdf)"
+                id="btn-export-expenses-pdf"
+              >
+                <FileText className="w-3 h-3" />
+                <span>Ekspor PDF</span>
+              </button>
+
+              {/* Restore Button for OPEX with Double Verification */}
+              <button
+                onClick={() => {
+                  if (!canRestoreExpenses) return;
+                  requestDoubleVerification({
+                    title: 'Verifikasi Keamanan Restore Pengeluaran',
+                    description: 'Anda akan mengembalikan database pengeluaran operasional (OPEX) ke kondisi sebelum impor Excel terakhir. Masukkan email dan password untuk verifikasi.',
+                    actionButtonText: 'Verifikasi & Restore OPEX',
+                    actionButtonVariant: 'danger',
+                    onSuccess: () => handleRestoreExpensesBackup()
+                  });
+                }}
                 disabled={!canRestoreExpenses}
-                className={`flex items-center gap-1 px-2 py-1.5 border rounded-lg transition cursor-pointer text-[10px] sm:text-[10.5px] h-7 shadow-xs active:scale-95 ${
+                className={`flex items-center gap-1 px-2.5 py-1.5 border rounded-lg transition cursor-pointer text-[10px] sm:text-[10.5px] h-7 shadow-xs active:scale-95 ${
                   canRestoreExpenses 
                   ? 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100' 
                   : 'border-slate-200 bg-slate-50 text-slate-300 cursor-not-allowed'
@@ -5106,9 +5269,53 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
 
           {/* List Expenses Table */}
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-            <div className="p-4 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
-              <span className="font-bold text-slate-800 text-xs uppercase">Jurnal Pengeluaran</span>
-              <span className="text-[11px] text-red-600 font-bold bg-red-50 px-2 py-0.5 rounded-full">Total: Rp {totalOPEX.toLocaleString()}</span>
+            <div className="p-3.5 bg-slate-50 border-b border-slate-100 flex flex-wrap justify-between items-center gap-2">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-slate-800 text-xs uppercase">Jurnal Pengeluaran</span>
+                <span className="text-[10px] text-red-650 font-bold bg-red-50 border border-red-150 px-2 py-0.5 rounded-full">
+                  Total Terfilter: Rp {filteredExpenses.reduce((s, e) => s + e.amount, 0).toLocaleString()}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReportConfirmAction({
+                      type: 'ekspor_opex_excel',
+                      title: 'Konfirmasi Ekspor Data Pengeluaran (.xlsx)',
+                      description: `Apakah Anda yakin ingin mengekspor ${filteredExpenses.length} catatan pengeluaran operasional periode ${expenseStartDate} s.d ${expenseEndDate} ke spreadsheet Excel (.xlsx) sesuai template?`,
+                      badge: 'Spreadsheet Excel (.xlsx)',
+                      confirmLabel: 'Ya, Ekspor ke Excel',
+                      icon: '📥',
+                      action: () => handleExportExpensesExcel()
+                    });
+                  }}
+                  className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer shadow-3xs"
+                  title="Ekspor ke Excel (.xlsx) Sesuai Template"
+                >
+                  <FileSpreadsheet className="w-3 h-3" />
+                  <span>Excel</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReportConfirmAction({
+                      type: 'ekspor_opex_pdf',
+                      title: 'Konfirmasi Ekspor Dokumen Pengeluaran (.pdf)',
+                      description: `Apakah Anda yakin ingin mengekspor ${filteredExpenses.length} catatan pengeluaran operasional periode ${expenseStartDate} s.d ${expenseEndDate} ke dokumen PDF resmi?`,
+                      badge: 'Dokumen PDF Resmi',
+                      confirmLabel: 'Ya, Unduh Dokumen PDF',
+                      icon: '📄',
+                      action: () => handleExportExpensesPDF()
+                    });
+                  }}
+                  className="px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer shadow-3xs"
+                  title="Ekspor ke Dokumen PDF (.pdf)"
+                >
+                  <FileText className="w-3 h-3" />
+                  <span>PDF</span>
+                </button>
+              </div>
             </div>
             
             <div className="overflow-x-auto">
@@ -7098,6 +7305,31 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
 1. Serahkan nota asli saat ambil pakaian.
 2. Kerusakan/hilang diganti 5x lipat.
 3. Komplain maksimal 1x24 jam pasca ambil.`}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+
+                            case 'whatsapp_template':
+                              return (
+                                <div key={elementConfig.id} style={{ ...s.style, ...spacingStyle }} className="w-full">
+                                  <div className="border-t border-dashed border-slate-400 my-1.5"></div>
+                                  <div 
+                                    onClick={() => setExpandedElementId('whatsapp_template')}
+                                    className={`cursor-pointer transition-all duration-150 rounded p-1.5 ${s.className} ${activeClass} bg-emerald-50/50 border border-dashed border-emerald-300`}
+                                    title="Klik untuk atur tampilan Pesan WA Template pada struk"
+                                  >
+                                    {s.showPrefix && (
+                                      <div className="text-[8px] font-black uppercase text-emerald-800 mb-0.5 tracking-wider">
+                                        [PESAN WA CRM / NOTA]:
+                                      </div>
+                                    )}
+                                    <div className="text-slate-800 leading-tight whitespace-pre-line text-[8.5px]">
+                                      {(templates && templates.length > 0 ? templates[0].body : 'Halo {{customer_name}}, terima kasih telah mempercayakan cucian Anda di LaughDry! Cek status cucian: {{tracking_url}}')
+                                        .replace(/\{\{customer_name\}\}/g, 'Budi Hartono')
+                                        .replace(/\{\{invoice_number\}\}/g, 'LD-20260604-0012')
+                                        .replace(/\{\{total_amount\}\}/g, 'Rp 59.000')
+                                        .replace(/\{\{tracking_url\}\}/g, 'https://laughdry.web.app/track')}
                                     </div>
                                   </div>
                                 </div>
@@ -9737,15 +9969,21 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                 {reportConfirmAction.description}
               </p>
               <div className="flex items-center justify-between pt-2 border-t border-slate-200/70 text-[10.5px]">
-                <span className="text-slate-500 font-bold">Periode Laporan:</span>
+                <span className="text-slate-500 font-bold">Periode:</span>
                 <span className="font-mono font-extrabold text-slate-800">
-                  {monthlyReportStartDate} s.d {monthlyReportEndDate}
+                  {reportConfirmAction.type.startsWith('ekspor_opex') 
+                    ? `${expenseStartDate} s.d ${expenseEndDate}` 
+                    : `${monthlyReportStartDate} s.d ${monthlyReportEndDate}`}
                 </span>
               </div>
               <div className="flex items-center justify-between text-[10.5px]">
-                <span className="text-slate-500 font-bold">Total Transaksi:</span>
+                <span className="text-slate-500 font-bold">
+                  {reportConfirmAction.type.startsWith('ekspor_opex') ? 'Total Pengeluaran:' : 'Total Transaksi:'}
+                </span>
                 <span className="font-mono font-extrabold text-indigo-700">
-                  {monthlyTransactions.length} Order
+                  {reportConfirmAction.type.startsWith('ekspor_opex')
+                    ? `${filteredExpenses.length} Catatan (Rp ${filteredExpenses.reduce((s, e) => s + e.amount, 0).toLocaleString('id-ID')})`
+                    : `${monthlyTransactions.length} Order`}
                 </span>
               </div>
             </div>
@@ -10864,7 +11102,17 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                 Batal, Amankan DB
               </button>
               <button
-                onClick={executeResetDatabase}
+                onClick={() => {
+                  requestDoubleVerification({
+                    title: 'Verifikasi Keamanan Reset Database',
+                    description: 'Anda akan mengosongkan dan me-reset seluruh database transaksi pesanan laundry. Masukkan email dan kata sandi untuk verifikasi ganda.',
+                    actionButtonText: 'Verifikasi & Kosongkan DB',
+                    actionButtonVariant: 'danger',
+                    onSuccess: async () => {
+                      await executeResetDatabase();
+                    }
+                  });
+                }}
                 disabled={isResetting}
                 className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-xs transition shadow-sm font-mono disabled:opacity-50"
               >
@@ -11229,13 +11477,21 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
                     <button
                       type="button"
                       onClick={() => {
-                        const success = LaughDryDatabase.restoreArchivedOrder(o.id);
-                        if (success) {
-                          loadDatabaseState();
-                          setArchivedOrdersList(LaughDryDatabase.getArchivedOrders());
-                          setStorageStats(LaughDryDatabase.getStorageMetrics());
-                          triggerToast(`✅ Pesanan [${o.invoiceNumber}] dipulihkan ke daftar aktif!`);
-                        }
+                        requestDoubleVerification({
+                          title: 'Verifikasi Restore / Pulihkan Pesanan',
+                          description: `Anda akan memulihkan pesanan [${o.invoiceNumber}] milik pelanggan ${o.customerName} dari arsip kembali ke daftar antrean aktif. Masukkan email dan password untuk verifikasi.`,
+                          actionButtonText: 'Verifikasi & Pulihkan',
+                          actionButtonVariant: 'primary',
+                          onSuccess: () => {
+                            const success = LaughDryDatabase.restoreArchivedOrder(o.id);
+                            if (success) {
+                              loadDatabaseState();
+                              setArchivedOrdersList(LaughDryDatabase.getArchivedOrders());
+                              setStorageStats(LaughDryDatabase.getStorageMetrics());
+                              triggerToast(`✅ Pesanan [${o.invoiceNumber}] dipulihkan ke daftar aktif!`);
+                            }
+                          }
+                        });
                       }}
                       className="px-3 py-1.5 bg-sky-500 hover:bg-sky-600 text-white font-bold text-[10.5px] rounded-lg transition shrink-0 cursor-pointer shadow-3xs"
                     >
@@ -11430,18 +11686,26 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
               <button
                 type="button"
                 disabled={!resetRiskAgreed || resetConfirmInput.trim() !== 'RESET PABRIK' || isFactoryResetting}
-                onClick={async () => {
-                  try {
-                    setIsFactoryResetting(true);
-                    await LaughDryDatabase.executeFactoryReset();
-                    await loadDatabaseState();
-                    setShowFactoryResetStep2(false);
-                    triggerToast("🎉 APLIKASI BERHASIL DIRESET PABRIK KE SETELAN AWAL BERSIH!");
-                  } catch (e) {
-                    triggerToast("❌ Gagal melakukan reset pabrik.");
-                  } finally {
-                    setIsFactoryResetting(false);
-                  }
+                onClick={() => {
+                  requestDoubleVerification({
+                    title: 'Verifikasi Keamanan Reset Pabrik Total',
+                    description: 'Anda akan melakukan RESET PABRIK total. Seluruh database transaksi, pelanggan, pengeluaran, dan pengaturan akan dihapus bersih ke kondisi pabrik. Masukkan email dan kata sandi untuk verifikasi akhir.',
+                    actionButtonText: 'Verifikasi & Reset Pabrik',
+                    actionButtonVariant: 'danger',
+                    onSuccess: async () => {
+                      try {
+                        setIsFactoryResetting(true);
+                        await LaughDryDatabase.executeFactoryReset();
+                        await loadDatabaseState();
+                        setShowFactoryResetStep2(false);
+                        triggerToast("🎉 APLIKASI BERHASIL DIRESET PABRIK KE SETELAN AWAL BERSIH!");
+                      } catch (e) {
+                        triggerToast("❌ Gagal melakukan reset pabrik.");
+                      } finally {
+                        setIsFactoryResetting(false);
+                      }
+                    }
+                  });
                 }}
                 className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:bg-slate-300 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-black rounded-xl transition cursor-pointer shadow-md text-center active:scale-95"
               >
@@ -11451,6 +11715,18 @@ export default function OwnerDashboard({ onLogout, onSwitchConsole }: OwnerDashb
           </div>
         </div>
       )}
+
+      {/* MODAL VERIFIKASI GANDA KEAMANAN OWNER (RESET & RESTORE) */}
+      <DoubleVerificationModal
+        isOpen={doubleVerificationState.isOpen}
+        onClose={() => setDoubleVerificationState(prev => ({ ...prev, isOpen: false }))}
+        onSuccess={doubleVerificationState.onSuccess}
+        title={doubleVerificationState.title}
+        description={doubleVerificationState.description}
+        actionButtonText={doubleVerificationState.actionButtonText}
+        actionButtonVariant={doubleVerificationState.actionButtonVariant}
+        defaultEmail={auth.currentUser?.email || 'owner@laughdry.co.id'}
+      />
 
     </div>
   );

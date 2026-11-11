@@ -12,6 +12,7 @@
  */
 
 import { GlobalBluetoothManager, ConnectionType, PaperSize } from '../lib/bluetoothManager';
+import { LaughDryDatabase } from '../data/mockDatabase';
 
 export interface PrinterDevice {
   name: string;
@@ -516,9 +517,9 @@ export class PrinterManager {
 
         // ── STATUS ORDER & PEMBAYARAN ──────────────────────────────────────
         // [FIX] Dicetak 3 baris terpisah agar konsisten dengan preview owner:
-        //   Stat : <status laundry>
-        //   Bayar: <metode pembayaran>
-        //   Paid : <status bayar>
+        // ── STATUS LAUNDRY & PEMBAYARAN ────────────────────────────────────
+        // Aturan: Jika status pembayaran "Belum Lunas", TIDAK menambahkan metode pembayaran
+        // (hanya menampilkan status pembayaran). Jika "Lunas" atau "Bayar DP", baru menampilkan metode pembayaran.
         case 'order_status': {
           applyEl(el);
           const showPfx = el.showPrefix !== false;
@@ -528,12 +529,14 @@ export class PrinterManager {
             add(gen.stringToBytes((showPfx ? 'Stat : ' : '') + order.status + '\n'));
           }
 
-          // Metode pembayaran
-          if (order.paymentMethod) {
+          const isLunasOrDP = order.paymentStatus === 'Lunas' || order.paymentStatus === 'Bayar DP';
+
+          // Metode pembayaran: HANYA jika status Lunas atau Bayar DP
+          if (isLunasOrDP && order.paymentMethod) {
             add(gen.stringToBytes((showPfx ? 'Bayar: ' : '') + order.paymentMethod + '\n'));
           }
 
-          // Status bayar (Lunas / Belum Lunas)
+          // Status bayar: selalu ditampilkan (Lunas / Belum Lunas / Bayar DP)
           if (order.paymentStatus) {
             add(gen.stringToBytes((showPfx ? 'Paid : ' : '') + order.paymentStatus + '\n'));
           }
@@ -641,6 +644,33 @@ export class PrinterManager {
           });
           resetEl(el);
           add(gen.line());
+          break;
+        }
+
+        // ── PESAN WA TEMPLATE / CRM ─────────────────────────────────────────
+        case 'whatsapp_template': {
+          const templates = LaughDryDatabase.getTemplates();
+          const tmpl = templates.find(t => t.category === 'nota_layanan') || templates[0];
+          if (tmpl && tmpl.body) {
+            const dbCustomer = order.customerName || 'Pelanggan';
+            const waText = tmpl.body
+              .replace(/\{\{customer_name\}\}/g, dbCustomer)
+              .replace(/\{\{invoice_number\}\}/g, order.invoiceNumber)
+              .replace(/\{\{total_amount\}\}/g, `Rp ${(order.totalAmount || 0).toLocaleString('id-ID')}`)
+              .replace(/\{\{services_list\}\}/g, (order.items || []).map((i: any) => i.serviceName).join(', '))
+              .replace(/\{\{payment_method\}\}/g, order.paymentMethod || 'Cash')
+              .replace(/\{\{payment_status\}\}/g, order.paymentStatus || 'Lunas');
+
+            applyEl(el);
+            if (el.showPrefix !== false) {
+              add(gen.stringToBytes('PESAN WA / CRM:\n'));
+            }
+            waText.split('\n').forEach((line: string) => {
+              if (line.trim()) add(gen.stringToBytes(line.trim() + '\n'));
+            });
+            resetEl(el);
+            add(gen.line());
+          }
           break;
         }
 

@@ -145,7 +145,12 @@ export function convertJsonToEscPos(data: ReceiptData): Uint8Array {
   if (data.cashierName) {
     writeLine(`Kasir: ${data.cashierName}`);
   }
-  writeLine(`Bayar: ${data.paymentMethod} (${data.paymentStatus})`);
+  const isLunasOrDP = data.paymentStatus === 'Lunas' || data.paymentStatus === 'Bayar DP';
+  if (isLunasOrDP && data.paymentMethod) {
+    writeLine(`Bayar: ${data.paymentMethod} (${data.paymentStatus})`);
+  } else {
+    writeLine(`Status: ${data.paymentStatus}`);
+  }
 
   // Divider
   writeLine("-".repeat(32));

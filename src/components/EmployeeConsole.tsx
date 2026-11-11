@@ -333,6 +333,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
   const [orders, setOrders] = useState<Order[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [perfumes, setPerfumes] = useState<any[]>([]);
+  const [templates, setTemplates] = useState<WhatsAppTemplate[]>(() => LaughDryDatabase.getTemplates());
   const {
     isPrinterConnected,
     connectedPrinterName,
@@ -463,131 +464,179 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     let t = "";
     const sep = "--------------------------------\n";
     
-    // Get element config helper
-    const getEl = (id: string) => {
-      if (!currentSettings.receiptElements) return { isVisible: true, isVisibleInti: true };
-      const el = currentSettings.receiptElements.find((e: any) => e.id === id);
-      return el || { isVisible: true, isVisibleInti: true };
-    };
+    const elements: any[] = (currentSettings.receiptElements?.length > 0)
+      ? currentSettings.receiptElements
+      : [
+          { id: 'outlet_name', isVisible: true, isVisibleInti: true, showPrefix: true },
+          { id: 'invoice_number', isVisible: true, isVisibleInti: true, showPrefix: true },
+          { id: 'customer_name', isVisible: true, isVisibleInti: true, showPrefix: true },
+          { id: 'customer_phone', isVisible: true, isVisibleInti: false, showPrefix: true },
+          { id: 'order_date', isVisible: true, isVisibleInti: true, showPrefix: true },
+          { id: 'cashier_info', isVisible: true, isVisibleInti: false, showPrefix: true },
+          { id: 'order_status', isVisible: true, isVisibleInti: false, showPrefix: true },
+          { id: 'estimated_time', isVisible: true, isVisibleInti: false, showPrefix: true },
+          { id: 'perfume_fragrance', isVisible: true, isVisibleInti: false, showPrefix: true },
+          { id: 'item_list', isVisible: true, isVisibleInti: true, showPrefix: true },
+          { id: 'total_charge', isVisible: true, isVisibleInti: true, showPrefix: true },
+          { id: 'member_points', isVisible: true, isVisibleInti: false, showPrefix: true },
+          { id: 'footer_terms', isVisible: true, isVisibleInti: false, showPrefix: true },
+          { id: 'whatsapp_template', isVisible: true, isVisibleInti: false, showPrefix: true }
+        ];
 
-    const isVisible = (id: string) => {
-      const el = getEl(id);
+    const isVisible = (el: any) => {
       if (printMode === 'inti') {
-        // Must be visible in owner settings AND visible in inti
         return el.isVisible !== false && el.isVisibleInti !== false;
       }
       return el.isVisible !== false;
     };
 
-    // Header / Outlet Name
-    if (isVisible('outlet_name')) {
-      const header = (currentSettings.customReceiptHeader || 'LAUGHDRY EXPRESS').toUpperCase();
-      header.split('\n').forEach((line: string) => {
-        if (line.trim()) {
-          t += centerAlignPrefix(line.trim(), 32) + "\n";
+    for (const el of elements) {
+      if (!isVisible(el)) continue;
+      const showPfx = el.showPrefix !== false;
+
+      switch (el.id) {
+        case 'outlet_name': {
+          const header = (currentSettings.customReceiptHeader || 'LAUGHDRY EXPRESS').toUpperCase();
+          header.split('\n').forEach((line: string) => {
+            if (line.trim()) t += centerAlignPrefix(line.trim(), 32) + "\n";
+          });
+          if (currentSettings.showBranchPhone) {
+            const phone = currentSettings.branchPhone || "0812-3456-7890";
+            t += centerAlignPrefix(`TELP BRANCH: ${phone}`, 32) + "\n";
+          }
+          t += sep;
+          break;
         }
-      });
-      if (currentSettings.showBranchPhone) {
-        const phone = currentSettings.branchPhone || "0812-3456-7890";
-        t += centerAlignPrefix(`TELP BRANCH: ${phone}`, 32) + "\n";
-      }
-      t += sep;
-    }
 
-    // Invoice Number
-    if (isVisible('invoice_number')) {
-      t += `Nota : ${invoice.invoiceNumber}\n`;
-    }
-
-    // Customer Name
-    if (isVisible('customer_name')) {
-      t += `Cust : ${invoice.customerName}\n`;
-    }
-
-    // Customer Phone
-    if (isVisible('customer_phone') && invoice.customerPhone) {
-      t += `Telp : ${invoice.customerPhone}\n`;
-    }
-
-    // Order Date
-    if (isVisible('order_date')) {
-      t += `Tgl  : ${new Date(invoice.createdAt).toLocaleDateString('id-ID')}\n`;
-    }
-
-    // Cashier Info
-    if (isVisible('cashier_info') && cUser) {
-      t += `Kasir: ${cUser.name}\n`;
-    }
-
-    // Order Status
-    if (isVisible('order_status')) {
-      t += `Stat : ${invoice.status || 'Diterima'}\n`;
-    }
-
-    // Estimated Time
-    if (isVisible('estimated_time') && invoice.estimatedCompletion) {
-      t += `Est  : ${new Date(invoice.estimatedCompletion).toLocaleDateString('id-ID')}\n`;
-    }
-
-    // Perfume Fragrance
-    if (isVisible('perfume_fragrance') && invoice.perfume) {
-      t += `Parfm: ${invoice.perfume}\n`;
-    }
-
-    // Add separator only if details are being listed
-    if (isVisible('invoice_number') || isVisible('customer_name') || isVisible('order_date')) {
-      t += sep;
-    }
-
-    // Line items
-    if (isVisible('item_list')) {
-      if (invoice.items && invoice.items.length > 0) {
-        invoice.items.forEach((item: any) => {
-          t += `${item.serviceName}\n`;
-          const qtyStr = `${item.qty} ${item.unit || 'Kg/Pcs'}`;
-          const priceStr = `Rp ${(item.price || 0).toLocaleString('id-ID')}`;
-          const subStr = `Rp ${(item.amount || 0).toLocaleString('id-ID')}`;
-          t += justifyRowPrefix(`${qtyStr} x ${priceStr}`, subStr, 32) + "\n";
-        });
-      } else {
-        t += justifyRowPrefix(`Layanan Laundry`, `Rp ${(invoice.totalAmount || 0).toLocaleString('id-ID')}`, 32) + "\n";
-      }
-      t += sep;
-    }
-
-    // Total Charge
-    if (isVisible('total_charge')) {
-      t += justifyRowPrefix("TOTAL CHARGE", `Rp ${(invoice.totalAmount || 0).toLocaleString('id-ID')}`, 32) + "\n";
-      t += justifyRowPrefix("Metode Bayar", invoice.paymentMethod || 'Cash', 32) + "\n";
-      t += justifyRowPrefix("Status Bayar", invoice.paymentStatus || 'Belum Lunas', 32) + "\n";
-      if (invoice.paymentStatus === 'Bayar DP') {
-        const dpVal = invoice.paidAmount || invoice.downPaymentAmount || 0;
-        const remaining = invoice.remainingAmount ?? (invoice.totalAmount - dpVal);
-        t += justifyRowPrefix("Bayar DP", `Rp ${dpVal.toLocaleString('id-ID')}`, 32) + "\n";
-        t += justifyRowPrefix("SISA TAGIHAN", `Rp ${remaining.toLocaleString('id-ID')}`, 32) + "\n";
-      }
-      t += sep;
-    }
-
-    // Member Points
-    if (isVisible('member_points')) {
-      const pointsEarned = Math.floor((invoice.totalAmount || 0) / 10000);
-      t += justifyRowPrefix("Poin Tambah", `+${pointsEarned} Poin`, 32) + "\n";
-      t += sep;
-    }
-
-    // Footer Terms
-    if (isVisible('footer_terms')) {
-      const footerText = currentSettings.customReceiptFooter || 'TERIMA KASIH ATAS KUNJUNGAN ANDA!\nSIMPAN STRUK STRUK INI SEBAGAI PENJAMIN.';
-      footerText.split('\n').forEach((line: string) => {
-        if (line.trim()) {
-          t += centerAlignPrefix(line.trim().toUpperCase(), 32) + "\n";
+        case 'invoice_number': {
+          t += showPfx ? `Nota : ${invoice.invoiceNumber}\n` : `${invoice.invoiceNumber}\n`;
+          break;
         }
-      });
-      t += sep;
+
+        case 'customer_name': {
+          t += showPfx ? `Cust : ${invoice.customerName}\n` : `${invoice.customerName}\n`;
+          break;
+        }
+
+        case 'customer_phone': {
+          if (invoice.customerPhone && currentSettings.showCustomerPhoneInReceipt !== false) {
+            t += showPfx ? `Telp : ${invoice.customerPhone}\n` : `${invoice.customerPhone}\n`;
+          }
+          break;
+        }
+
+        case 'order_date': {
+          const dStr = new Date(invoice.createdAt).toLocaleDateString('id-ID');
+          t += showPfx ? `Tgl  : ${dStr}\n` : `${dStr}\n`;
+          break;
+        }
+
+        case 'cashier_info': {
+          if (currentSettings.showCashierNameInReceipt !== false) {
+            const kasirName = cUser ? cUser.name : (invoice.cashierName || 'Kasir');
+            t += showPfx ? `Kasir: ${kasirName}\n` : `${kasirName}\n`;
+          }
+          break;
+        }
+
+        case 'order_status': {
+          const isLunasOrDP = invoice.paymentStatus === 'Lunas' || invoice.paymentStatus === 'Bayar DP';
+          const stStr = isLunasOrDP && invoice.paymentMethod
+            ? `${(invoice.paymentStatus || 'LUNAS').toUpperCase()} via ${invoice.paymentMethod}`
+            : (invoice.paymentStatus || 'BELUM LUNAS').toUpperCase();
+          t += showPfx ? `Status: ${stStr}\n` : `${stStr}\n`;
+          break;
+        }
+
+        case 'estimated_time': {
+          if (currentSettings.showEstimatedCompletion !== false && invoice.estimatedCompletion) {
+            const estStr = new Date(invoice.estimatedCompletion).toLocaleDateString('id-ID');
+            t += showPfx ? `Estim : ${estStr}\n` : `${estStr}\n`;
+          }
+          break;
+        }
+
+        case 'perfume_fragrance': {
+          if (invoice.perfume) {
+            t += showPfx ? `Parfm: ${invoice.perfume}\n` : `${invoice.perfume}\n`;
+          }
+          break;
+        }
+
+        case 'item_list': {
+          t += sep;
+          if (invoice.items && invoice.items.length > 0) {
+            invoice.items.forEach((item: any) => {
+              t += `${item.serviceName}\n`;
+              const qtyStr = `${item.quantity || item.qty} ${item.unit || 'Kg/Pcs'}`;
+              const priceStr = `Rp ${(item.price || 0).toLocaleString('id-ID')}`;
+              const subStr = `Rp ${(item.subtotal || item.amount || 0).toLocaleString('id-ID')}`;
+              t += justifyRowPrefix(`${qtyStr} x ${priceStr}`, subStr, 32) + "\n";
+            });
+          } else {
+            t += justifyRowPrefix(`Layanan Laundry`, `Rp ${(invoice.totalAmount || 0).toLocaleString('id-ID')}`, 32) + "\n";
+          }
+          t += sep;
+          break;
+        }
+
+        case 'total_charge': {
+          t += justifyRowPrefix(showPfx ? "TOTAL BIAYA" : "TOTAL", `Rp ${(invoice.totalAmount || 0).toLocaleString('id-ID')}`, 32) + "\n";
+          t += justifyRowPrefix("Metode Bayar", invoice.paymentMethod || 'Cash', 32) + "\n";
+          t += justifyRowPrefix("Status Bayar", invoice.paymentStatus || 'Belum Lunas', 32) + "\n";
+          if (invoice.paymentStatus === 'Bayar DP') {
+            const dpVal = invoice.paidAmount || invoice.downPaymentAmount || 0;
+            const remaining = invoice.remainingAmount ?? (invoice.totalAmount - dpVal);
+            t += justifyRowPrefix("Bayar DP", `Rp ${dpVal.toLocaleString('id-ID')}`, 32) + "\n";
+            t += justifyRowPrefix("SISA TAGIHAN", `Rp ${remaining.toLocaleString('id-ID')}`, 32) + "\n";
+          }
+          if (currentSettings.showNotesInReceipt !== false && invoice.notes) {
+            t += `Catatan: "${invoice.notes}"\n`;
+          }
+          t += sep;
+          break;
+        }
+
+        case 'member_points': {
+          if (currentSettings.showPointsInReceipt !== false) {
+            const pointsEarned = invoice.pointsEarned ?? Math.floor((invoice.totalAmount || 0) / 10000);
+            t += justifyRowPrefix(showPfx ? "Poin Member" : "", `+${pointsEarned} Poin`, 32) + "\n";
+            t += sep;
+          }
+          break;
+        }
+
+        case 'footer_terms': {
+          if (currentSettings.showTermsInReceipt !== false) {
+            const footerText = currentSettings.customReceiptFooter || 'TERIMA KASIH ATAS KUNJUNGAN ANDA!\nSIMPAN STRUK INI SEBAGAI PENJAMIN';
+            footerText.split('\n').forEach((line: string) => {
+              if (line.trim()) t += centerAlignPrefix(line.trim().toUpperCase(), 32) + "\n";
+            });
+            t += sep;
+          }
+          break;
+        }
+
+        case 'whatsapp_template': {
+          const tmpls = LaughDryDatabase.getTemplates();
+          const defaultTmpl = tmpls.find((tm: any) => tm.category === 'nota_layanan') || tmpls[0];
+          if (defaultTmpl && defaultTmpl.body) {
+            const waBody = defaultTmpl.body
+              .replace(/\{\{customer_name\}\}/g, invoice.customerName)
+              .replace(/\{\{invoice_number\}\}/g, invoice.invoiceNumber)
+              .replace(/\{\{total_amount\}\}/g, `Rp ${(invoice.totalAmount || 0).toLocaleString('id-ID')}`);
+            if (showPfx) t += centerAlignPrefix("PESAN WA / CRM", 32) + "\n";
+            waBody.split('\n').forEach((line: string) => {
+              if (line.trim()) t += line.trim() + "\n";
+            });
+            t += sep;
+          }
+          break;
+        }
+
+        default: break;
+      }
     }
-
-
 
     t += "\n\n\n\n";
     return t;
@@ -1441,10 +1490,20 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     window.addEventListener('laughdry_orders_updated', handleOrderUpdate);
     window.addEventListener('laughdry_sync_queue_updated', handleOrderUpdate);
     window.addEventListener('laughdry_db_synced', handleOrderUpdate);
+    window.addEventListener('laughdry_settings_updated', handleOrderUpdate);
+    window.addEventListener('laughdry_templates_updated', handleOrderUpdate);
+    window.addEventListener('laughdry_audit_updated', handleOrderUpdate);
+    window.addEventListener('laughdry_attendance_updated', handleOrderUpdate);
+    window.addEventListener('laughdry_data_changed', handleOrderUpdate);
     return () => {
       window.removeEventListener('laughdry_orders_updated', handleOrderUpdate);
       window.removeEventListener('laughdry_sync_queue_updated', handleOrderUpdate);
       window.removeEventListener('laughdry_db_synced', handleOrderUpdate);
+      window.removeEventListener('laughdry_settings_updated', handleOrderUpdate);
+      window.removeEventListener('laughdry_templates_updated', handleOrderUpdate);
+      window.removeEventListener('laughdry_audit_updated', handleOrderUpdate);
+      window.removeEventListener('laughdry_attendance_updated', handleOrderUpdate);
+      window.removeEventListener('laughdry_data_changed', handleOrderUpdate);
     };
   }, []);
 
@@ -1455,6 +1514,7 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     setBranches(LaughDryDatabase.getBranches());
     setExpenses(LaughDryDatabase.getExpenses());
     setSettings(LaughDryDatabase.getSettings());
+    setTemplates(LaughDryDatabase.getTemplates());
     setAttendanceRecords(LaughDryDatabase.getAttendance());
     
     const activePerfumes = LaughDryDatabase.getPerfumes().filter(p => p.isActive !== false);
@@ -2543,6 +2603,16 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       return;
     }
 
+    // INTERCEPT transition from Packing to Siap Ambil (Ready):
+    // Do NOT update status immediately! Show confirmation modal first.
+    // Clicking "Nanti Saja" will NOT change status to Ready!
+    if (nextStatus === OrderStatus.SIAP_DIAMBIL && currentStatus === OrderStatus.DIKEMAS) {
+      if (orderObj) {
+        setReadyOrderToNotify(orderObj);
+      }
+      return;
+    }
+
     if (nextStatus === OrderStatus.SELESAI) {
       if (orderObj && orderObj.paymentStatus === 'Lunas') {
         updateOrderStatus(orderId, nextStatus, currentStatus);
@@ -2688,14 +2758,6 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
     LaughDryDatabase.logActivity(currentUser.id, currentUser.name, currentUser.role, 'STATUS_TRANSITION', `Mengubah status order ord-${orderId.substring(4)} dari [${currentStatus}] ke [${nextStatus}]`);
     loadDB();
     showToast(`Status Order berhasil diubah ke [${nextStatus}]`);
-
-    // WhatsApp notification confirm pop-up if passing packing (moving to Ready / Siap)
-    if (nextStatus === OrderStatus.SIAP_DIAMBIL) {
-      const orderObj = currentOrders.find(o => o.id === orderId);
-      if (orderObj) {
-        setReadyOrderToNotify(orderObj);
-      }
-    }
   };
 
   const executeReadyToSelesai = (orderId: string, chosenMethod: 'Cash' | 'QRIS' | 'Transfer' | 'Deposit') => {
@@ -3580,10 +3642,10 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                         key={perf.id}
                         type="button"
                         onClick={() => setPerfumeSelection(perf.name)}
-                        className={`py-2 px-1 text-center rounded-xl font-extrabold uppercase text-[8px] sm:text-[9px] border transition ${
+                        className={`py-2 px-1 text-center rounded-xl font-black uppercase text-[8.5px] sm:text-[9.5px] border transition cursor-pointer flex items-center justify-center gap-1 ${
                           perfumeSelection === perf.name
-                            ? 'bg-sky-500 text-slate-950 border-sky-400 font-black shadow-sm'
-                            : 'bg-white text-slate-50 border-slate-200 hover:bg-slate-100'
+                            ? 'bg-sky-500 text-slate-950 border-sky-400 shadow-md ring-2 ring-sky-300'
+                            : 'bg-slate-800 hover:bg-slate-700 text-white border-slate-700 shadow-2xs'
                         }`}
                       >
                         {perf.icon || getPerfumeEmoji(perf.name)} {perf.name}
@@ -3986,26 +4048,28 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                   <button
                     type="button"
                     onClick={() => {
-                      if (confirm("Kosongkan keranjang belanja dan bersihkan semua masukan untuk transaksi baru?")) {
-                        setCartItems([]);
-                        setNotes('');
-                        setManualDiscountVal(0);
-                        setManualDiscountType('nominal');
-                        setCarrierBagDiscountChecked(false);
-                        setIsLoyaltyRedeemed(false);
-                        setActiveInvoice(null);
-                        setSelectedCustomer(null);
-                        setSelectedCustomerId('');
-                        setPerfumeSelection(perfumes[0]?.name || 'Floral');
-                        setCustomEntryDate('');
-                        setCustomCompletionDate('');
-                        setPaidStatus('Belum Lunas');
-                        setDpAmountInput('');
-                        setDpPaymentMethod('Cash');
-                        showToast("Formulir transaksi berhasil di-reset untuk pelanggan baru.");
+                      if (cartItems.length > 0 && !confirm("Kosongkan keranjang belanja dan bersihkan semua masukan untuk transaksi baru?")) {
+                        return;
                       }
+                      setCartItems([]);
+                      setNotes('');
+                      setManualDiscountVal(0);
+                      setManualDiscountType('nominal');
+                      setCarrierBagDiscountChecked(false);
+                      setIsLoyaltyRedeemed(false);
+                      setActiveInvoice(null);
+                      setSelectedCustomer(null);
+                      setSelectedCustomerId('');
+                      setPerfumeSelection(perfumes[0]?.name || 'Floral');
+                      setCustomEntryDate('');
+                      setCustomCompletionDate('');
+                      setPaidStatus('Belum Lunas');
+                      setDpAmountInput('');
+                      setDpPaymentMethod('Cash');
+                      showToast("Formulir transaksi berhasil di-reset untuk pelanggan baru.");
                     }}
                     className="w-full py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-extrabold text-[11px] rounded-xl transition flex items-center justify-center gap-1 cursor-pointer shadow-2xs active:scale-[0.98]"
+                    id="btn-reset-cart"
                   >
                     🔄 Transaksi Baru (Reset Keranjang)
                   </button>
@@ -6247,25 +6311,26 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
               </div>
             </div>
 
-            {/* Realistic 58mm POS physical viewport simulation */}
+            {/* Realistic 58mm/80mm POS physical viewport simulation */}
             {(() => {
-              const getElementStyle = (elementId: string) => {
-                const defaultStyles: {[key: string]: { fontSize: number, alignment: 'left' | 'center' | 'right', isBold: boolean, isVisible: boolean, showPrefix?: boolean, isItalic?: boolean }} = {
-                  outlet_name: { fontSize: 13, alignment: 'center', isBold: true, isVisible: true, showPrefix: true, isItalic: false },
-                  invoice_number: { fontSize: 11, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false },
-                  customer_name: { fontSize: 13, alignment: 'left', isBold: true, isVisible: true, showPrefix: true, isItalic: false },
-                  customer_phone: { fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false },
-                  order_date: { fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false },
-                  cashier_info: { fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false },
-                  order_status: { fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false },
-                  estimated_time: { fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false },
-                  perfume_fragrance: { fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false },
-                  item_list: { fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false },
-                  total_charge: { fontSize: 12, alignment: 'right', isBold: true, isVisible: true, showPrefix: true, isItalic: false },
-                  member_points: { fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false },
-                  footer_terms: { fontSize: 9, alignment: 'center', isBold: false, isVisible: true, showPrefix: true, isItalic: false }
-                };
+              const defaultStyles: {[key: string]: { fontSize: number, alignment: 'left' | 'center' | 'right', isBold: boolean, isVisible: boolean, showPrefix?: boolean, isItalic?: boolean, spacing?: number }} = {
+                outlet_name: { fontSize: 13, alignment: 'center', isBold: true, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                invoice_number: { fontSize: 11, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                customer_name: { fontSize: 13, alignment: 'left', isBold: true, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                customer_phone: { fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                order_date: { fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                cashier_info: { fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                order_status: { fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                estimated_time: { fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                perfume_fragrance: { fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                item_list: { fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                total_charge: { fontSize: 12, alignment: 'right', isBold: true, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                member_points: { fontSize: 10, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                footer_terms: { fontSize: 9, alignment: 'center', isBold: false, isVisible: true, showPrefix: true, isItalic: false, spacing: 4 },
+                whatsapp_template: { fontSize: 9, alignment: 'left', isBold: false, isVisible: true, showPrefix: true, isItalic: true, spacing: 4 }
+              };
 
+              const getElementStyle = (elementId: string) => {
                 const config = (settings.receiptElements || []).find((el: any) => el.id === elementId) || defaultStyles[elementId] || defaultStyles.invoice_number;
                 const alignClass = config.alignment === 'center' ? 'text-center' : config.alignment === 'right' ? 'text-right' : 'text-left';
                 const weightClass = config.isBold ? 'font-black' : 'font-semibold';
@@ -6279,14 +6344,21 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                   isVisible: receiptTemplateMode === 'inti'
                     ? (config.isVisible !== false && config.isVisibleInti !== false)
                     : (config.isVisible !== false),
-                  showPrefix: config.showPrefix !== false
+                  showPrefix: config.showPrefix !== false,
+                  spacing: config.spacing !== undefined ? config.spacing : tempSpacing
                 };
               };
+
+              const activeElements = settings.receiptElements && settings.receiptElements.length > 0
+                ? settings.receiptElements
+                : Object.keys(defaultStyles).map(id => ({ id, ...defaultStyles[id] }));
+
+              const paperWidthClass = settings.paperSize === 80 ? 'max-w-[320px]' : 'max-w-[245px]';
 
               return (
                 <div 
                   id="thermal-receipt-paper" 
-                  className="bg-white text-black font-mono p-5 mx-auto max-w-[245px] border-l border-r border-slate-300 relative select-all flex flex-col shadow-inner"
+                  className={`bg-white text-black font-mono p-5 mx-auto ${paperWidthClass} border-l border-r border-slate-300 relative select-all flex flex-col shadow-inner`}
                   style={{
                     filter: 'contrast(1.4) grayscale(1)',
                     boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1)',
@@ -6306,267 +6378,343 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                     </div>
                   )}
 
-                  {/* Outlet & Header Name - Directly Editable */}
-                  {(() => {
-                    const s = getElementStyle('outlet_name');
+                  {/* Render Elements in EXACT Owner-Configured Sequence */}
+                  {activeElements.map((elementConfig: any, elementIdx: number) => {
+                    const s = getElementStyle(elementConfig.id);
                     if (!s.isVisible) return null;
-                    return (
-                      <div 
-                        style={s.style} 
-                        className={`uppercase tracking-tight whitespace-pre-line border border-transparent hover:border-black hover:bg-slate-100 p-0.5 rounded cursor-text ${s.className}`}
-                        contentEditable={true}
-                        suppressContentEditableWarning={true}
-                      >
-                        {settings.customReceiptHeader || 'LAUGHDRY EXPRESS'}
-                      </div>
-                    );
-                  })()}
+                    const spacingStyle = elementIdx > 0 ? { marginTop: `${s.spacing}px` } : {};
 
-                  {settings.showBranchPhone && (
-                    <div 
-                      className="font-bold text-black text-center text-[8.5px] border border-transparent hover:border-black hover:bg-slate-100 p-0.5 rounded cursor-text"
-                      style={{ marginTop: `${tempSpacing / 2}px` }}
-                      contentEditable={true}
-                      suppressContentEditableWarning={true}
-                    >
-                      TELP BRANCH: {settings.branchPhone || '0812-3456-7890'}
-                    </div>
-                  )}
-                  
-                  <div className="border-t border-dashed border-black" style={{ marginTop: `${tempSpacing}px`, marginBottom: `${tempSpacing}px` }}></div>
-                  
-                  {/* Transaction info block - Fully Editable */}
-                  <div 
-                    className="space-y-0.5 text-black border border-transparent hover:border-black hover:bg-slate-100 p-0.5 rounded cursor-text"
-                    contentEditable={true}
-                    suppressContentEditableWarning={true}
-                  >
-                    {(() => {
-                      const s = getElementStyle('invoice_number');
-                      if (!s.isVisible) return null;
-                      return (
-                        <div style={s.style} className={s.className}>
-                          {s.showPrefix ? `Nota  : ${activeInvoice.invoiceNumber}` : activeInvoice.invoiceNumber}
-                        </div>
-                      );
-                    })()}
-
-                    {(() => {
-                      const s = getElementStyle('order_date');
-                      if (!s.isVisible) return null;
-                      return (
-                        <div style={s.style} className={s.className}>
-                          {s.showPrefix ? `Tgl   : ${new Date(activeInvoice.createdAt).toLocaleDateString()}` : new Date(activeInvoice.createdAt).toLocaleDateString()}
-                        </div>
-                      );
-                    })()}
-
-                    {(() => {
-                      const s = getElementStyle('customer_name');
-                      if (!s.isVisible) return null;
-                      return (
-                        <div style={s.style} className={s.className}>
-                          {s.showPrefix ? `Cust  : ${activeInvoice.customerName}` : activeInvoice.customerName}
-                        </div>
-                      );
-                    })()}
-
-                    {(() => {
-                      const s = getElementStyle('customer_phone');
-                      if (!s.isVisible || !settings.showCustomerPhoneInReceipt) return null;
-                      return (
-                        <div style={s.style} className={s.className}>
-                          {s.showPrefix ? `Telp  : ${activeInvoice.customerPhone || 'N/A'}` : (activeInvoice.customerPhone || 'N/A')}
-                        </div>
-                      );
-                    })()}
-
-                    {(() => {
-                      const s = getElementStyle('cashier_info');
-                      if (!s.isVisible || !settings.showCashierNameInReceipt) return null;
-                      return (
-                        <div style={s.style} className={s.className}>
-                          {s.showPrefix ? `Kasir : ${currentUser.name}` : currentUser.name}
-                        </div>
-                      );
-                    })()}
-
-                    {(() => {
-                      const s = getElementStyle('order_status');
-                      if (!s.isVisible) return null;
-                      return (
-                        <div style={s.style} className={s.className}>
-                          {s.showPrefix ? `Status: ${activeInvoice.paymentStatus.toUpperCase()} via ${activeInvoice.paymentMethod}` : `${activeInvoice.paymentStatus.toUpperCase()} via ${activeInvoice.paymentMethod}`}
-                        </div>
-                      );
-                    })()}
-
-                    {(() => {
-                      const s = getElementStyle('estimated_time');
-                      if (!s.isVisible || !settings.showEstimatedCompletion || !activeInvoice.estimatedCompletion) return null;
-                      return (
-                        <div style={s.style} className={s.className}>
-                          {s.showPrefix ? `Estim : ${new Date(activeInvoice.estimatedCompletion).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}` : new Date(activeInvoice.estimatedCompletion).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}
-                        </div>
-                      );
-                    })()}
-
-                    {(() => {
-                      const s = getElementStyle('perfume_fragrance');
-                      if (!s.isVisible || !activeInvoice.perfume) return null;
-                      return (
-                        <div style={s.style} className={s.className}>
-                          {s.showPrefix ? `Aroma : ${getPerfumeEmoji(activeInvoice.perfume)} ${activeInvoice.perfume.toUpperCase()}` : `${getPerfumeEmoji(activeInvoice.perfume)} ${activeInvoice.perfume.toUpperCase()}`}
-                        </div>
-                      );
-                    })()}
-                  </div>
-
-                  {/* Compact items list for 58mm printer constraints - Fully Editable */}
-                  {(() => {
-                    const s = getElementStyle('item_list');
-                    if (!s.isVisible) return null;
-                    return (
-                      <>
-                        <div className="border-t border-dashed border-black" style={{ marginTop: `${tempSpacing}px`, marginBottom: `${tempSpacing}px` }}></div>
-                        <div 
-                          style={s.style} 
-                          className={`space-y-2 border border-transparent hover:border-black hover:bg-slate-100 p-0.5 rounded cursor-text ${s.className}`}
-                          contentEditable={true}
-                          suppressContentEditableWarning={true}
-                        >
-                          {activeInvoice.items.map(it => (
-                            <div key={it.id} className="space-y-0.5 text-left">
-                              <div className="font-extrabold text-black leading-tight">{it.serviceName}</div>
-                              <div className="flex justify-between text-black/85">
-                                <span>{it.quantity} {it.unit || 'X'} x @Rp {it.price.toLocaleString()}</span>
-                                <span className="font-black text-black">Rp {it.subtotal.toLocaleString()}</span>
-                              </div>
+                    switch (elementConfig.id) {
+                      case 'outlet_name':
+                        return (
+                          <div key={elementConfig.id} style={{ ...spacingStyle }} className="space-y-0.5">
+                            <div 
+                              style={s.style} 
+                              className={`uppercase tracking-tight whitespace-pre-line border border-transparent hover:border-black hover:bg-slate-100 p-0.5 rounded cursor-text ${s.className}`}
+                              contentEditable={true}
+                              suppressContentEditableWarning={true}
+                            >
+                              {settings.customReceiptHeader || 'LAUGHDRY EXPRESS'}
                             </div>
-                          ))}
-                        </div>
-                      </>
-                    );
-                  })()}
+                            {settings.showBranchPhone && (
+                              <div 
+                                className="font-bold text-black text-center text-[8.5px] border border-transparent hover:border-black hover:bg-slate-100 p-0.5 rounded cursor-text"
+                                style={{ marginTop: `${tempSpacing / 2}px` }}
+                                contentEditable={true}
+                                suppressContentEditableWarning={true}
+                              >
+                                TELP BRANCH: {settings.branchPhone || '0812-3456-7890'}
+                              </div>
+                            )}
+                            <div className="border-t border-dashed border-black my-1"></div>
+                          </div>
+                        );
 
-                  {/* Total Tagihan Biaya - Fully Editable */}
-                  {(() => {
-                    const s = getElementStyle('total_charge');
-                    if (!s.isVisible) return null;
-                    return (
-                      <>
-                        <div className="border-t border-dashed border-black" style={{ marginTop: `${tempSpacing}px`, marginBottom: `${tempSpacing}px` }}></div>
-                        <div 
-                          style={s.style} 
-                          className={`space-y-1 text-black border border-transparent hover:border-black hover:bg-slate-100 p-0.5 rounded cursor-text ${s.className}`}
-                          contentEditable={true}
-                          suppressContentEditableWarning={true}
-                        >
-                          <div className="flex justify-between font-black">
-                            <span>TOTAL BIAYA:</span>
-                            <span>Rp {activeInvoice.totalAmount.toLocaleString()}</span>
+                      case 'invoice_number':
+                        return (
+                          <div 
+                            key={elementConfig.id}
+                            style={{ ...s.style, ...spacingStyle }} 
+                            className={`p-0.5 border border-transparent hover:border-black hover:bg-slate-100 rounded cursor-text ${s.className}`}
+                            contentEditable={true}
+                            suppressContentEditableWarning={true}
+                          >
+                            {s.showPrefix ? `Nota  : ${activeInvoice.invoiceNumber}` : activeInvoice.invoiceNumber}
                           </div>
-                          <div className="flex justify-between text-[8px] text-black">
-                            <span>PAID STATE:</span>
-                            <span>{activeInvoice.paymentStatus === 'Lunas' ? 'LUNAS (Rp 0)' : `BILL (Rp ${activeInvoice.totalAmount.toLocaleString()})`}</span>
+                        );
+
+                      case 'order_date':
+                        return (
+                          <div 
+                            key={elementConfig.id}
+                            style={{ ...s.style, ...spacingStyle }} 
+                            className={`p-0.5 border border-transparent hover:border-black hover:bg-slate-100 rounded cursor-text ${s.className}`}
+                            contentEditable={true}
+                            suppressContentEditableWarning={true}
+                          >
+                            {s.showPrefix ? `Tgl   : ${new Date(activeInvoice.createdAt).toLocaleDateString('id-ID')}` : new Date(activeInvoice.createdAt).toLocaleDateString('id-ID')}
                           </div>
-                          {settings.showPointsInReceipt && (() => {
-                            const pm = getElementStyle('member_points');
-                            if (!pm.isVisible) return null;
-                            return (
-                              <div style={pm.style} className={`flex justify-between font-bold ${pm.className}`}>
-                                {pm.showPrefix ? (
+                        );
+
+                      case 'customer_name':
+                        return (
+                          <div 
+                            key={elementConfig.id}
+                            style={{ ...s.style, ...spacingStyle }} 
+                            className={`p-0.5 border border-transparent hover:border-black hover:bg-slate-100 rounded cursor-text ${s.className}`}
+                            contentEditable={true}
+                            suppressContentEditableWarning={true}
+                          >
+                            {s.showPrefix ? `Cust  : ${activeInvoice.customerName}` : activeInvoice.customerName}
+                          </div>
+                        );
+
+                      case 'customer_phone':
+                        if (!settings.showCustomerPhoneInReceipt && settings.showCustomerPhoneInReceipt !== undefined) return null;
+                        return (
+                          <div 
+                            key={elementConfig.id}
+                            style={{ ...s.style, ...spacingStyle }} 
+                            className={`p-0.5 border border-transparent hover:border-black hover:bg-slate-100 rounded cursor-text ${s.className}`}
+                            contentEditable={true}
+                            suppressContentEditableWarning={true}
+                          >
+                            {s.showPrefix ? `Telp  : ${activeInvoice.customerPhone || 'N/A'}` : (activeInvoice.customerPhone || 'N/A')}
+                          </div>
+                        );
+
+                      case 'cashier_info':
+                        if (!settings.showCashierNameInReceipt && settings.showCashierNameInReceipt !== undefined) return null;
+                        return (
+                          <div 
+                            key={elementConfig.id}
+                            style={{ ...s.style, ...spacingStyle }} 
+                            className={`p-0.5 border border-transparent hover:border-black hover:bg-slate-100 rounded cursor-text ${s.className}`}
+                            contentEditable={true}
+                            suppressContentEditableWarning={true}
+                          >
+                            {s.showPrefix ? `Kasir : ${currentUser.name}` : currentUser.name}
+                          </div>
+                        );
+
+                      case 'order_status': {
+                        const isLunasOrDP = activeInvoice.paymentStatus === 'Lunas' || activeInvoice.paymentStatus === 'Bayar DP';
+                        const statusText = isLunasOrDP && activeInvoice.paymentMethod
+                          ? `${activeInvoice.paymentStatus.toUpperCase()} via ${activeInvoice.paymentMethod}`
+                          : activeInvoice.paymentStatus.toUpperCase();
+                        return (
+                          <div 
+                            key={elementConfig.id}
+                            style={{ ...s.style, ...spacingStyle }} 
+                            className={`p-0.5 border border-transparent hover:border-black hover:bg-slate-100 rounded cursor-text ${s.className}`}
+                            contentEditable={true}
+                            suppressContentEditableWarning={true}
+                          >
+                            {s.showPrefix ? `Status: ${statusText}` : statusText}
+                          </div>
+                        );
+                      }
+
+                      case 'estimated_time':
+                        if (!settings.showEstimatedCompletion || !activeInvoice.estimatedCompletion) return null;
+                        return (
+                          <div 
+                            key={elementConfig.id}
+                            style={{ ...s.style, ...spacingStyle }} 
+                            className={`p-0.5 border border-transparent hover:border-black hover:bg-slate-100 rounded cursor-text ${s.className}`}
+                            contentEditable={true}
+                            suppressContentEditableWarning={true}
+                          >
+                            {s.showPrefix ? `Estim : ${new Date(activeInvoice.estimatedCompletion).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}` : new Date(activeInvoice.estimatedCompletion).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}
+                          </div>
+                        );
+
+                      case 'perfume_fragrance':
+                        if (!activeInvoice.perfume) return null;
+                        return (
+                          <div 
+                            key={elementConfig.id}
+                            style={{ ...s.style, ...spacingStyle }} 
+                            className={`p-0.5 border border-transparent hover:border-black hover:bg-slate-100 rounded cursor-text ${s.className}`}
+                            contentEditable={true}
+                            suppressContentEditableWarning={true}
+                          >
+                            {s.showPrefix ? `Aroma : ${getPerfumeEmoji(activeInvoice.perfume)} ${activeInvoice.perfume.toUpperCase()}` : `${getPerfumeEmoji(activeInvoice.perfume)} ${activeInvoice.perfume.toUpperCase()}`}
+                          </div>
+                        );
+
+                      case 'item_list':
+                        return (
+                          <div key={elementConfig.id} style={{ ...spacingStyle }} className="w-full">
+                            <div className="border-t border-dashed border-black my-1"></div>
+                            <div 
+                              style={s.style} 
+                              className={`space-y-2 border border-transparent hover:border-black hover:bg-slate-100 p-0.5 rounded cursor-text ${s.className}`}
+                              contentEditable={true}
+                              suppressContentEditableWarning={true}
+                            >
+                              {activeInvoice.items.map(it => (
+                                <div key={it.id} className="space-y-0.5 text-left">
+                                  <div className="font-extrabold text-black leading-tight">{it.serviceName}</div>
+                                  <div className="flex justify-between text-black/85 text-[8.5px]">
+                                    <span>{s.showPrefix ? 'Qty: ' : ''}{it.quantity} {it.unit || 'X'} x @Rp {it.price.toLocaleString()}</span>
+                                    <span className="font-black text-black">Rp {it.subtotal.toLocaleString()}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+
+                      case 'total_charge':
+                        return (
+                          <div key={elementConfig.id} style={{ ...spacingStyle }} className="w-full">
+                            <div className="border-t border-dashed border-black my-1"></div>
+                            <div 
+                              style={s.style} 
+                              className={`space-y-1 text-black border border-transparent hover:border-black hover:bg-slate-100 p-0.5 rounded cursor-text ${s.className}`}
+                              contentEditable={true}
+                              suppressContentEditableWarning={true}
+                            >
+                              <div className="flex justify-between font-black">
+                                {s.showPrefix ? (
                                   <>
-                                    <span>POIN MEMBER:</span>
-                                    <span>+{activeInvoice.pointsEarned} Poin</span>
+                                    <span>TOTAL BIAYA:</span>
+                                    <span>Rp {activeInvoice.totalAmount.toLocaleString()}</span>
                                   </>
                                 ) : (
-                                  <span className="w-full text-center block font-black">+{activeInvoice.pointsEarned} Poin</span>
+                                  <span className="w-full text-center block">Rp {activeInvoice.totalAmount.toLocaleString()}</span>
                                 )}
                               </div>
-                            );
-                          })()}
-                          {settings.showNotesInReceipt && activeInvoice.notes && (
-                            <div className="text-black italic text-[8.2px] mt-1 border-t border-black pt-1 text-left">
-                              Notes: "{activeInvoice.notes}"
+                              <div className="flex justify-between text-[8px] text-black">
+                                {s.showPrefix ? (
+                                  <>
+                                    <span>PAID STATE:</span>
+                                    <span>{activeInvoice.paymentStatus === 'Lunas' ? 'LUNAS (Rp 0)' : `BILL (Rp ${activeInvoice.totalAmount.toLocaleString()})`}</span>
+                                  </>
+                                ) : (
+                                  <span className="w-full text-center block">{activeInvoice.paymentStatus === 'Lunas' ? 'LUNAS (Rp 0)' : `BILL (Rp ${activeInvoice.totalAmount.toLocaleString()})`}</span>
+                                )}
+                              </div>
+                              {activeInvoice.paymentStatus === 'Bayar DP' && (
+                                <div className="flex justify-between text-[8px] text-black font-bold">
+                                  <span>BAYAR DP:</span>
+                                  <span>Rp {(activeInvoice.paidAmount || 0).toLocaleString()} (SISA: Rp {(activeInvoice.remainingAmount || 0).toLocaleString()})</span>
+                                </div>
+                              )}
+                              {settings.showNotesInReceipt && activeInvoice.notes && (
+                                <div className="text-black italic text-[8.2px] mt-1 border-t border-black pt-1 text-left">
+                                  Notes: "{activeInvoice.notes}"
+                                </div>
+                              )}
                             </div>
-                          )}
-                        </div>
-                      </>
-                    );
-                  })()}
+                          </div>
+                        );
 
-                  {/* Catatan S&K Foot - Fully Editable */}
-                  {(() => {
-                    const s = getElementStyle('footer_terms');
-                    if (!s.isVisible || !settings.showTermsInReceipt) return null;
-                    return (
-                      <>
-                        <div className="border-t border-dashed border-slate-450" style={{ marginTop: `${tempSpacing}px`, marginBottom: `${tempSpacing}px` }}></div>
-                        <div 
-                          style={s.style} 
-                          className={`whitespace-pre-line leading-tight text-slate-750 border border-transparent hover:border-slate-300 hover:bg-slate-50 p-0.5 rounded cursor-text ${s.className}`}
-                          contentEditable={true}
-                          suppressContentEditableWarning={true}
-                        >
-                          {settings.customReceiptFooter || `* KETENTUAN OPERASIONAL *
+                      case 'member_points':
+                        if (!settings.showPointsInReceipt) return null;
+                        return (
+                          <div 
+                            key={elementConfig.id}
+                            style={{ ...s.style, ...spacingStyle }} 
+                            className={`flex justify-between font-bold border border-transparent hover:border-black hover:bg-slate-100 p-0.5 rounded cursor-text ${s.className}`}
+                            contentEditable={true}
+                            suppressContentEditableWarning={true}
+                          >
+                            {s.showPrefix ? (
+                              <>
+                                <span>POIN MEMBER:</span>
+                                <span>+{activeInvoice.pointsEarned} Poin</span>
+                              </>
+                            ) : (
+                              <span className="w-full text-center block font-black">+{activeInvoice.pointsEarned} Poin</span>
+                            )}
+                          </div>
+                        );
+
+                      case 'footer_terms':
+                        if (!settings.showTermsInReceipt) return null;
+                        return (
+                          <div key={elementConfig.id} style={{ ...spacingStyle }} className="w-full">
+                            <div className="border-t border-dashed border-black my-1"></div>
+                            <div 
+                              style={s.style} 
+                              className={`whitespace-pre-line leading-tight text-black border border-transparent hover:border-black hover:bg-slate-100 p-0.5 rounded cursor-text ${s.className}`}
+                              contentEditable={true}
+                              suppressContentEditableWarning={true}
+                            >
+                              {settings.customReceiptFooter || `* KETENTUAN OPERASIONAL *
 1. Serahkan nota asli saat ambil pakaian.
 2. Kerusakan/hilang diganti 5x lipat.
 3. Komplain maksimal 1x24 jam pasca ambil.`}
-                        </div>
-                      </>
-                    );
-                  })()}
+                            </div>
+                          </div>
+                        );
+
+                      case 'whatsapp_template': {
+                        const defaultTmpl = (templates && templates.length > 0)
+                          ? (templates.find(t => t.category === 'nota_layanan') || templates[0])
+                          : null;
+                        const trackingUrl = LaughDryDatabase.getTrackingUrl(activeInvoice.customerPhone || '', activeInvoice.invoiceNumber);
+                        const waText = defaultTmpl
+                          ? defaultTmpl.body
+                              .replace(/\{\{customer_name\}\}/g, activeInvoice.customerName)
+                              .replace(/\{\{invoice_number\}\}/g, activeInvoice.invoiceNumber)
+                              .replace(/\{\{total_amount\}\}/g, `Rp ${activeInvoice.totalAmount.toLocaleString('id-ID')}`)
+                              .replace(/\{\{tracking_url\}\}/g, trackingUrl)
+                          : `Halo ${activeInvoice.customerName}, terima kasih atas kunjungan Anda di LaughDry! Cek status cucian: ${trackingUrl}`;
+
+                        return (
+                          <div key={elementConfig.id} style={{ ...spacingStyle }} className="w-full">
+                            <div className="border-t border-dashed border-black my-1"></div>
+                            <div 
+                              style={s.style} 
+                              className={`p-1.5 border border-dashed border-black/50 rounded cursor-text ${s.className}`}
+                              contentEditable={true}
+                              suppressContentEditableWarning={true}
+                            >
+                              {s.showPrefix && (
+                                <div className="text-[7.5px] font-black uppercase text-black mb-0.5 tracking-wider">
+                                  [PESAN WA CRM / NOTA]:
+                                </div>
+                              )}
+                              <div className="text-black leading-tight whitespace-pre-line text-[8.5px]">
+                                {waText}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      default:
+                        return null;
+                    }
+                  })}
 
                   {/* CUSTOM RECEIPT PROMOTIONAL FOOTER BLOCK */}
                   {settings.customReceiptPromo && (
-                    <>
-                      <div className="border-t border-dashed border-slate-400" style={{ marginTop: `${tempSpacing}px`, paddingTop: '6px' }}>
-                        <div 
-                          className="text-center font-black text-[9px] text-rose-600 uppercase tracking-wide leading-tight bg-rose-50 p-1.5 rounded-lg border border-dashed border-rose-200 cursor-text hover:bg-rose-100 transition"
-                          contentEditable={true}
-                          suppressContentEditableWarning={true}
-                        >
-                          📣 PROMO: {settings.customReceiptPromo}
-                        </div>
+                    <div className="border-t border-dashed border-black mt-2 pt-1.5">
+                      <div 
+                        className="text-center font-black text-[9px] text-black uppercase tracking-wide leading-tight bg-slate-100 p-1.5 rounded border border-dashed border-black cursor-text"
+                        contentEditable={true}
+                        suppressContentEditableWarning={true}
+                      >
+                        📣 PROMO: {settings.customReceiptPromo}
                       </div>
-                    </>
+                    </div>
                   )}
 
                   {/* QRIS PAYMENT AUTOPRINT ON RECEIPT */}
                   {settings.qrisType && settings.qrisType !== 'none' && (
-                    <div className="border-t border-dashed border-slate-400 pt-2 flex flex-col items-center" style={{ marginTop: `${tempSpacing}px` }}>
-                      <span className="text-[7.5px] font-black text-slate-850 tracking-wider">
+                    <div className="border-t border-dashed border-black pt-2 flex flex-col items-center mt-2">
+                      <span className="text-[7.5px] font-black text-black tracking-wider">
                         {settings.qrisType === 'static' ? 'SCAN QRIS STATIS' : 'SCAN QRIS DINAMIS'}
                       </span>
                       {settings.qrisMerchantId && (
-                        <span className="text-[6px] text-slate-500 font-mono tracking-wider mb-1">
+                        <span className="text-[6px] text-black font-mono tracking-wider mb-1">
                           NMID: {settings.qrisMerchantId}
                         </span>
                       )}
                       
-                      <div className="p-1 bg-white border border-slate-350 rounded flex flex-col items-center shadow-xs">
+                      <div className="p-1 bg-white border border-black rounded flex flex-col items-center shadow-xs">
                         {settings.qrisType === 'static' && settings.qrisStaticQrUrl ? (
                           <img 
                             src={settings.qrisStaticQrUrl} 
                             alt="QRIS Static QR"
-                            className="w-16 h-16 object-contain"
+                            className="w-16 h-16 object-contain filter grayscale contrast-200"
                             referrerPolicy="no-referrer"
                           />
                         ) : (
-                          <svg viewBox="0 0 100 100" className="w-16 h-16 text-slate-900 bg-white p-0.5">
+                          <svg viewBox="0 0 100 100" className="w-16 h-16 text-black bg-white p-0.5">
                             <rect x="0" y="0" width="10" height="10" fill="currentColor" />
                             <rect x="2" y="2" width="6" height="6" fill="white" />
                             <rect x="3" y="3" width="4" height="4" fill="currentColor" />
-                            
                             <rect x="90" y="0" width="10" height="10" fill="currentColor" />
                             <rect x="92" y="2" width="6" height="6" fill="white" />
                             <rect x="93" y="3" width="4" height="4" fill="currentColor" />
-                            
                             <rect x="0" y="90" width="10" height="10" fill="currentColor" />
                             <rect x="2" y="92" width="6" height="6" fill="white" />
                             <rect x="3" y="93" width="4" height="4" fill="currentColor" />
-                            
                             <rect x="20" y="5" width="15" height="4" fill="currentColor" />
                             <text x="50" y="25" fill="currentColor" fontSize="8" fontWeight="bold" textAnchor="middle">QRIS</text>
                             <rect x="15" y="15" width="4" height="20" fill="currentColor" />
@@ -6579,20 +6727,27 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
                             <rect x="80" y="60" width="12" height="12" fill="currentColor" />
                             <rect x="15" y="80" width="15" height="5" fill="currentColor" />
                             <rect x="90" y="45" width="6" height="20" fill="currentColor" />
-                            
                             <rect x="42" y="42" width="16" height="16" fill="white" rx="1" />
-                            <text x="50" y="53" fill="#0c4a6e" fontSize="7" fontWeight="black" textAnchor="middle">Q</text>
+                            <text x="50" y="53" fill="currentColor" fontSize="7" fontWeight="black" textAnchor="middle">Q</text>
                           </svg>
                         )}
                       </div>
                       
-                      <span className="text-[5.5px] font-extrabold tracking-wider mt-1 text-[#0284c7] uppercase leading-none text-center">
+                      <span className="text-[5.5px] font-extrabold tracking-wider mt-1 text-black uppercase leading-none text-center">
                         {settings.qrisType === 'static' ? 'Merchant: LAUGHDRY EXPRESS' : 'API DYNAMIC VERIFIED'}
                       </span>
                     </div>
                   )}
 
-
+                  {/* QR Code tracking */}
+                  <div className="border-t border-dashed border-black pt-2 flex flex-col items-center mt-2">
+                    <span className="text-[6.5px] font-extrabold tracking-wider text-black uppercase">
+                      SCAN NOTA LACAK PESANAN
+                    </span>
+                    <span className="text-[5.5px] text-black font-mono">
+                      {activeInvoice.invoiceNumber}
+                    </span>
+                  </div>
                 </div>
               );
             })()}
@@ -8582,38 +8737,55 @@ export default function EmployeeConsole({ loggedInUser, onLogout }: EmployeeCons
       {/* 6. POPUP KONFIRMASI WA NOTIFICATION SIAP / READY */}
       {/* ========================================================= */}
       {readyOrderToNotify && (
-        <div className="fixed inset-0 bg-slate-951/65 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full border border-slate-100 shadow-2xl space-y-4 text-center select-none animate-fadeIn">
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn font-sans">
+          <div className="bg-white rounded-3xl p-6 max-w-md w-full border border-slate-100 shadow-2xl space-y-4 text-center select-none animate-scaleIn">
             <div className="space-y-2">
-              <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center mx-auto text-emerald-600">
+              <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center mx-auto text-emerald-600 border border-emerald-150 shadow-3xs">
                 <CheckCircle className="w-6 h-6" />
               </div>
-              <h4 className="font-extrabold text-slate-900 text-sm">Cucian Siap Diambil! ✅</h4>
-              <p className="text-slate-500 font-semibold text-xs leading-relaxed">
-                Pakaian pada nota <strong>{readyOrderToNotify.invoiceNumber}</strong> milik pelanggan {readyOrderToNotify.customerName} sudah berada di rak Siap Ambil / Ready.
+              <h4 className="font-extrabold text-slate-900 text-sm">Konfirmasi Cucian Siap Ambil (Ready)</h4>
+              <p className="text-slate-600 font-semibold text-xs leading-relaxed">
+                Pakaian pada nota <strong>{readyOrderToNotify.invoiceNumber}</strong> milik pelanggan <strong className="text-slate-900">{readyOrderToNotify.customerName}</strong> akan dipindahkan dari antrean Packing ke rak <strong>Siap Ambil / Ready</strong>.
               </p>
-              <p className="text-emerald-700 text-[10.5px] font-bold bg-emerald-50 p-3 rounded-xl border border-emerald-105 leading-normal">
-                Kirim chat WA bahwa cucian sudah siap untuk diambil?
+              <p className="text-emerald-700 text-[11px] font-bold bg-emerald-50 p-2.5 rounded-xl border border-emerald-200 leading-normal">
+                Pilih aksi di bawah ini. Menekan <strong>"Nanti Saja"</strong> akan <u>membatalkan perpindahan</u> dan pesanan <strong>tetap berada di antrean Packing</strong>.
               </p>
             </div>
 
-            <div className="flex gap-2 text-xs pt-2">
+            <div className="flex flex-col sm:flex-row gap-2 text-xs pt-2">
               <button
                 type="button"
-                onClick={() => setReadyOrderToNotify(null)}
-                className="flex-1 py-2 bg-slate-200 hover:bg-slate-255 text-slate-750 font-bold rounded-xl transition cursor-pointer"
+                onClick={() => {
+                  setReadyOrderToNotify(null);
+                  showToast("Perpindahan ke Siap Ambil ditunda. Pesanan tetap berada di antrean Packing.");
+                }}
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-750 font-bold rounded-xl transition cursor-pointer"
+                id="btn-ready-nanti-saja"
               >
                 Nanti Saja
               </button>
               <button
                 type="button"
                 onClick={() => {
+                  updateOrderStatus(readyOrderToNotify.id, OrderStatus.SIAP_DIAMBIL, OrderStatus.DIKEMAS);
+                  setReadyOrderToNotify(null);
+                }}
+                className="flex-1 py-2.5 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-xl transition cursor-pointer shadow-xs"
+                id="btn-ready-confirm-only"
+              >
+                ✅ Siap Ambil
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  updateOrderStatus(readyOrderToNotify.id, OrderStatus.SIAP_DIAMBIL, OrderStatus.DIKEMAS);
                   redirectToWhatsApp(readyOrderToNotify);
                   setReadyOrderToNotify(null);
                 }}
-                className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl transition shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl transition shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+                id="btn-ready-confirm-wa"
               >
-                💬 Kirim Notif (WA)
+                💬 Siap &amp; Kirim WA
               </button>
             </div>
           </div>
